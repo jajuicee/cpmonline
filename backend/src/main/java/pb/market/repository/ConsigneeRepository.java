@@ -1,7 +1,12 @@
 package pb.market.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import pb.market.entity.Consignee;
+import java.util.List;
 
 public interface ConsigneeRepository extends JpaRepository<Consignee, Long> {
+    @Query("SELECT c FROM Consignee c WHERE (:branchId IS NULL OR c.branch.id = :branchId) ORDER BY c.name ASC")
+    List<Consignee> findAllByBranch(@Param("branchId") Long branchId);
 }

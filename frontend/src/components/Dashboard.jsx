@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import axios from 'axios';
 import { Routes, Route, Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { useStockSync } from '../useStockSync';
+import { useAuth } from '../context/AuthContext';
 import {
     LayoutDashboard,
     PackagePlus,
@@ -17,12 +18,19 @@ import {
     BarChart2,
     Tablet,
     Users,
-    Activity
+    Activity,
+    Store,
+    ShieldCheck,
+    LogOut,
+    ChevronDown,
+    MapPin,
+    User
 } from 'lucide-react';
 
 // Main Page Components
 const Inventory = lazy(() => import('./Inventory'));
 const AddProduct = lazy(() => import('./AddProduct'));
+const AddBranchStock = lazy(() => import('./AddBranchStock'));
 const OrderPage = lazy(() => import('./OrderPage'));
 const OrderHistory = lazy(() => import('./OrderHistory'));
 const Analytics = lazy(() => import('./Analytics'));
@@ -31,21 +39,26 @@ const ManageInventory = lazy(() => import('./ManageInventory'));
 const Supplies = lazy(() => import('./Supplies'));
 const Suppliers = lazy(() => import('./Suppliers'));
 const ProductSales = lazy(() => import('./ProductSales'));
+const BranchSales = lazy(() => import('./BranchSales'));
 const ConsigneesPage = lazy(() => import('./ConsigneesPage'));
 const Reporting = lazy(() => import('./Reporting'));
-const PasswordModal = lazy(() => import('./PasswordModal'));
+const BranchesAdmin = lazy(() => import('./BranchesAdmin'));
+const AccountsAdmin = lazy(() => import('./AccountsAdmin'));
 
 const Dashboard = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const [unlockedPath, setUnlockedPath] = useState(null);
+    const { user, logout, isAdmin, isBranch, selectedBranchId, setSelectedBranchId, currentBranchId } = useAuth();
 
-    // Reset unlocked status when navigating away
+    // Branch list for Admin dropdown
+    const [branchList, setBranchList] = useState([]);
     useEffect(() => {
-        if (unlockedPath && location.pathname !== unlockedPath) {
-            setUnlockedPath(null);
+        if (isAdmin) {
+            axios.get('/api/admin/branches')
+                .then(res => setBranchList(Array.isArray(res.data) ? res.data : []))
+                .catch(err => console.error('Failed to load branches for selector:', err));
         }
-    }, [location.pathname, unlockedPath]);
+    }, [isAdmin]);
 
     // ─── SINGLE SHARED DATA FETCH ────────────────────────────────────────────
     const [products, setProducts] = useState([]);
@@ -53,153 +66,314 @@ const Dashboard = () => {
 
     const fetchProducts = useCallback(() => {
         setLoadingProducts(true);
-        axios.get(`/api/products`)
+        const url = currentBranchId ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
+        axios.get(url)
             .then(res => setProducts(Array.isArray(res.data) ? res.data : []))
             .catch(err => {
                 console.error('Failed to load products:', err);
                 setProducts([]);
             })
             .finally(() => setLoadingProducts(false));
-    }, []);
+    }, [currentBranchId]);
 
     useEffect(() => {
         fetchProducts();
     }, [fetchProducts]);
 
     // ─── WEBSOCKET REAL-TIME SYNC ─────────────────────────────────────────────
-    // Connects to ws://<host>:8080/ws/stock and auto-fetches whenever any device
-    // makes a stock-changing action (sale, restock, cancel, etc.)
     const { wsConnected } = useStockSync(fetchProducts);
-    // ─────────────────────────────────────────────────────────────────────────
 
-    const navItems = [
-        { name: 'POS System',      path: '/orders',           icon: ShoppingCart },
-        { name: 'Add Products',    path: '/add-product',      icon: PackagePlus },
-        { name: 'View Inventory',  path: '/inventory',        icon: Boxes },
-        { name: 'Manage Inventory',path: '/manage-inventory', icon: ClipboardList },
-        { name: 'Supplies',        path: '/supplies',         icon: Truck },
-        { name: 'Suppliers',       path: '/suppliers',        icon: Building2 },
-        { name: 'Product Sales',   path: '/product-sales',    icon: BarChart2 },
-        { name: 'Order History',   path: '/history',          icon: History },
-        { name: 'Consignees',      path: '/consignees',       icon: Users },
-        { name: 'Reporting',       path: '/reporting',        icon: Activity },
-        { name: 'Analytics',       path: '/analytics',        icon: TrendingUp },
-        { name: 'Expenses',        path: '/expenses',         icon: Receipt },
-    ];
+    // Navigation Sections with Category Headers
+    const navSections = isBranch
+        ? [
+            {
+                title: 'Store Operations',
+                items: [
+                    { name: 'POS System',        path: '/orders',       icon: ShoppingCart },
+                    { name: 'Sales Overview',    path: '/branch-sales', icon: TrendingUp },
+                ]
+            },
+            {
+                title: 'Inventory & Stocks',
+                items: [
+                    { name: 'Add Inventory',     path: '/add-stock',    icon: PackagePlus },
+                    { name: 'Current Inventory', path: '/inventory',    icon: Boxes },
+                    { name: 'Consignees',        path: '/consignees',   icon: Users },
+                ]
+            },
+            {
+                title: 'Audit & Records',
+                items: [
+                    { name: 'Order History',     path: '/history',      icon: History },
+                ]
+            }
+        ]
+        : [
+            {
+                title: 'Store Operations',
+                items: [
+                    { name: 'POS System',       path: '/orders',           icon: ShoppingCart },
+                    { name: 'Branch Sales',     path: '/branch-sales',     icon: TrendingUp },
+                    { name: 'Product Sales',    path: '/product-sales',    icon: BarChart2 },
+                ]
+            },
+            {
+                title: 'Inventory & Supplies',
+                items: [
+                    { name: 'Add Products',     path: '/add-product',      icon: PackagePlus },
+                    { name: 'View Inventory',   path: '/inventory',        icon: Boxes },
+                    { name: 'Manage Inventory', path: '/manage-inventory', icon: ClipboardList },
+                    { name: 'Supplies',         path: '/supplies',         icon: Truck },
+                    { name: 'Suppliers',        path: '/suppliers',        icon: Building2 },
+                ]
+            },
+            {
+                title: 'Financials & Reports',
+                items: [
+                    { name: 'Order History',    path: '/history',          icon: History },
+                    { name: 'Reporting',        path: '/reporting',        icon: Activity },
+                    { name: 'Analytics',        path: '/analytics',        icon: TrendingUp },
+                    { name: 'Expenses',         path: '/expenses',         icon: Receipt },
+                ]
+            },
+            {
+                title: 'System & Users',
+                items: [
+                    { name: 'Consignees',       path: '/consignees',       icon: Users },
+                    { name: 'Branches',         path: '/branches',         icon: Store },
+                    { name: 'User Accounts',    path: '/accounts',         icon: ShieldCheck },
+                ]
+            }
+        ];
 
+    const navItems = navSections.flatMap(s => s.items);
     const currentTab = navItems.find(item => location.pathname.startsWith(item.path))?.name || 'Dashboard';
 
     return (
-        <div className="flex h-screen bg-brand-cream font-sans text-brand-black overflow-hidden">
+        <div className="flex h-screen bg-[#F8F7F4] font-sans text-brand-black overflow-hidden">
 
-            {/* --- LEFT SIDEBAR --- */}
-            <aside className="w-64 bg-brand-cream text-brand-black flex flex-col shadow-[4px_0_24px_rgba(0,0,0,0.05)] z-20 border-r border-stone-200">
-                <div className="p-6 text-center border-b border-black/5 flex flex-col items-center">
-                    <img src="/logo.png" alt="Cebu Pickleball Market Logo"
-                        onError={(e) => { e.target.style.display = 'none'; }}
-                        className="w-[100px] h-[100px] rounded-full brightness-105 mb-4 shadow-xl border-4 border-white object-cover"
-                    />
-                    <h1 className="text-2xl tracking-wider text-black uppercase leading-tight">
+            {/* --- LEFT SIDEBAR (LUXURY OBSIDIAN & ANIMATED) --- */}
+            <aside className="w-68 bg-[#0d0e12] text-stone-300 flex flex-col shadow-[4px_0_30px_rgba(0,0,0,0.25)] z-20 border-r border-stone-800/80 shrink-0 select-none">
+                {/* Brand Header */}
+                <div className="p-6 text-center border-b border-stone-800/60 flex flex-col items-center relative overflow-hidden">
+                    <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+                    
+                    <div className="relative group cursor-pointer mb-3">
+                        <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-emerald-500/30 to-amber-500/30 blur-sm group-hover:blur-md transition-all duration-300 opacity-70 group-hover:opacity-100" />
+                        <img
+                            src="/logo.png"
+                            alt="Cebu Pickleball Market Logo"
+                            onError={(e) => { e.target.style.display = 'none'; }}
+                            className="relative w-20 h-20 rounded-full brightness-105 shadow-xl border-2 border-stone-700/60 object-cover transform transition-transform duration-300 group-hover:scale-105"
+                        />
+                    </div>
+
+                    <h1 className="text-lg tracking-wider text-white uppercase leading-tight font-black">
                         Cebu PICKLEBALL
-                        <span className="block text-sm text-black/80 mt-1 tracking-widest">Market</span>
+                        <span className="block text-[11px] text-emerald-400 mt-0.5 tracking-widest font-black uppercase">
+                            Market Online
+                        </span>
                     </h1>
+
+                    {/* Role / Branch Tag with Live Glow Indicator */}
+                    <div className="mt-3 inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-stone-900/90 text-stone-200 border border-stone-800 shadow-inner">
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        <span className="truncate max-w-[140px]">
+                            {isBranch ? (user?.branchName || 'Assigned Branch') : 'Central Admin'}
+                        </span>
+                    </div>
                 </div>
 
-                <nav className="flex-1 px-4 py-8 space-y-2">
-                    {navItems.map((item) => {
-                        const Icon = item.icon;
-                        const isActive = location.pathname.startsWith(item.path);
-                        return (
-                            <Link
-                                key={item.name}
-                                to={item.path}
-                                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 ${isActive
-                                    ? 'bg-white shadow-md font-black tracking-wide text-black border border-stone-200'
-                                    : 'hover:shadow-md text-black/70 hover:text-black font-medium border border-transparent'
-                                    }`}
-                            >
-                                <Icon size={20} className={isActive ? 'text-black' : 'text-black/60'} />
-                                {item.name}
-                            </Link>
-                        );
-                    })}
+                {/* Navigation Sections */}
+                <nav className="flex-1 px-3.5 py-4 space-y-5 overflow-y-auto custom-scrollbar">
+                    {navSections.map((sec, sIdx) => (
+                        <div key={sec.title} className="space-y-1">
+                            <div className="px-3 text-[10px] font-black uppercase tracking-widest text-stone-300 flex items-center justify-between">
+                                <span>{sec.title}</span>
+                                <span className="h-px bg-stone-800/80 flex-1 ml-2.5" />
+                            </div>
+
+                            <div className="space-y-1 pt-1">
+                                {sec.items.map((item) => {
+                                    const Icon = item.icon;
+                                    const isActive = location.pathname.startsWith(item.path);
+                                    return (
+                                        <Link
+                                            key={item.name}
+                                            to={item.path}
+                                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all duration-200 group relative ${
+                                                isActive
+                                                    ? 'bg-gradient-to-r from-emerald-500/20 via-emerald-500/10 to-transparent text-white font-black border-l-4 border-emerald-400 shadow-sm'
+                                                    : 'text-stone-400 hover:text-white hover:bg-white/[0.06] font-bold hover:translate-x-1'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-3 min-w-0">
+                                                <div className={`p-1 rounded-lg transition-all duration-200 ${
+                                                    isActive ? 'text-emerald-400' : 'text-stone-500 group-hover:text-stone-200 group-hover:scale-110'
+                                                }`}>
+                                                    <Icon size={17} />
+                                                </div>
+                                                <span className="text-xs truncate tracking-wide">{item.name}</span>
+                                            </div>
+
+                                            {isActive && (
+                                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
+                                            )}
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
                 </nav>
 
-                <div className="p-4 border-t border-black/5 text-xs text-black/40 text-center uppercase tracking-widest font-bold">
-                    System Hub v2.0
+                {/* Footer User Info & Logout Card */}
+                <div className="p-3.5 border-t border-stone-800/80 bg-[#0a0b0e]">
+                    <div className="p-2.5 bg-stone-900/90 border border-stone-800/90 rounded-2xl flex items-center justify-between shadow-lg">
+                        <div className="flex items-center gap-2.5 overflow-hidden">
+                            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-400 text-white flex items-center justify-center font-black text-xs shadow-md shrink-0">
+                                {user?.username ? user.username.charAt(0).toUpperCase() : 'U'}
+                            </div>
+                            <div className="overflow-hidden">
+                                <div className="text-xs font-black text-white truncate leading-tight">
+                                    {user?.username}
+                                </div>
+                                <div className="text-[10px] text-stone-400 truncate font-semibold mt-0.5">
+                                    {isBranch ? user?.branchName : 'Master Admin'}
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={logout}
+                            title="Sign Out"
+                            className="p-2 text-stone-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-all duration-200 cursor-pointer hover:scale-110"
+                        >
+                            <LogOut size={16} />
+                        </button>
+                    </div>
                 </div>
             </aside>
 
             {/* --- MAIN CONTENT AREA --- */}
-            <main className="flex-1 flex flex-col relative w-full h-full overflow-hidden">
-                <header className="bg-brand-cream border-b border-brand-black/10 px-8 py-5 flex justify-between items-center z-10 shadow-sm relative">
-                    <div className="flex items-center gap-3 text-brand-black/40">
-                        <LayoutDashboard size={20} />
-                        <h2 className="text-2xl font-black text-brand-black tracking-tight">{currentTab}</h2>
+            <main className="flex-1 flex flex-col relative w-full h-full overflow-hidden bg-[#F8F7F4]">
+                <header className="bg-white/80 backdrop-blur-md border-b border-stone-200/80 px-8 py-3.5 flex flex-wrap justify-between items-center z-10 shadow-sm relative gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-stone-900 text-white rounded-xl shadow-sm">
+                            <LayoutDashboard size={18} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-black text-stone-900 tracking-tight leading-none">{currentTab}</h2>
+                            <p className="text-[11px] text-stone-400 font-bold mt-1 uppercase tracking-wider">
+                                {isBranch ? (user?.branchName || 'Branch Terminal') : 'Central Hub Management'}
+                            </p>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-4">
+
+                    <div className="flex items-center gap-3.5 flex-wrap">
+                        {/* Admin Branch Selector */}
+                        {isAdmin && (
+                            <div className="flex items-center gap-2 bg-white border border-stone-200 px-3 py-1.5 rounded-xl shadow-sm hover:border-stone-300 transition-colors">
+                                <MapPin size={14} className="text-emerald-600" />
+                                <span className="text-xs font-black text-stone-400 uppercase tracking-wider text-[10px]">Filter Branch:</span>
+                                <select
+                                    value={selectedBranchId || ''}
+                                    onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
+                                    className="bg-transparent text-xs font-black text-stone-900 focus:outline-none cursor-pointer"
+                                >
+                                    <option value="">All Branches (Consolidated)</option>
+                                    {branchList.map((b) => (
+                                        <option key={b.id} value={b.id}>
+                                            {b.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        {/* Branch User Store Indicator */}
+                        {isBranch && (
+                            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/80 px-3.5 py-1.5 rounded-xl text-xs font-black text-emerald-800 shadow-sm">
+                                <Store size={14} className="text-emerald-600" />
+                                <span>{user?.branchName || 'Assigned Branch'}</span>
+                            </div>
+                        )}
+
+                        {/* Sync Status Badges */}
                         {loadingProducts && (
-                            <div className="flex items-center gap-2 px-3 py-1 bg-amber-100 border border-amber-300 rounded-full">
-                                <Loader2 size={12} className="animate-spin text-amber-700" />
-                                <span className="text-xs font-bold uppercase tracking-wider text-amber-800">Syncing Data</span>
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-200 rounded-full shadow-sm">
+                                <Loader2 size={12} className="animate-spin text-amber-600" />
+                                <span className="text-[11px] font-black uppercase tracking-wider text-amber-700">Syncing</span>
                             </div>
                         )}
                         {!loadingProducts && wsConnected && (
-                            <div className="flex items-center gap-2 px-3 py-1 bg-green-100 border border-green-300 rounded-full">
-                                <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse shadow-[0_0_8px_rgba(22,163,74,0.8)]"></span>
-                                <span className="text-xs font-bold uppercase tracking-wider text-green-800">Live Sync Active</span>
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full shadow-sm">
+                                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+                                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700">Live Sync</span>
                             </div>
                         )}
                         {!loadingProducts && !wsConnected && (
-                            <div className="flex items-center gap-2 px-3 py-1 bg-red-100 border border-red-300 rounded-full">
-                                <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-                                <span className="text-xs font-bold uppercase tracking-wider text-red-700">Reconnecting…</span>
+                            <div className="flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 rounded-full shadow-sm">
+                                <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
+                                <span className="text-[11px] font-black uppercase tracking-wider text-rose-700">Offline</span>
                             </div>
                         )}
+
                         <button
                             onClick={() => navigate('/tablet')}
-                            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-zinc-800 transition-all shadow-lg shadow-zinc-900/10 active:scale-95 border border-white/10"
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-sm active:scale-95 cursor-pointer"
                         >
-                            <Tablet size={14} />
-                            Tablet View
+                            <Tablet size={13} />
+                            Tablet Mode
                         </button>
                     </div>
                 </header>
 
-                {/* ── ROUTED VIEWS — key on pathname so div remounts and animates on every tab switch ── */}
+                {/* ── ROUTED VIEWS ── */}
                 <div className="flex-1 overflow-hidden bg-[#F7F6F0]">
                     <div
-                        key={location.pathname}
-                        className="h-full flex flex-col p-8 pb-12 w-full mx-auto min-h-0"
-                        style={{ animation: 'pageSlideIn 380ms cubic-bezier(0.16, 1, 0.3, 1) both' }}
+                        key={location.pathname + (currentBranchId || 'all')}
+                        className="h-full flex flex-col p-8 pb-12 w-full mx-auto min-h-0 overflow-y-auto custom-scrollbar"
+                        style={{ animation: 'pageSlideIn 280ms cubic-bezier(0.16, 1, 0.3, 1) both' }}
                     >
                         <Suspense fallback={<div className="h-full w-full flex justify-center items-center p-12"><Loader2 className="w-8 h-8 animate-spin text-zinc-400" /></div>}>
                             <Routes>
                                 <Route path="/" element={<Navigate to="/orders" replace />} />
                                 <Route path="/orders" element={<OrderPage products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                                <Route path="/add-product" element={<AddProduct onProductAdded={fetchProducts} />} />
-                                <Route path="/inventory" element={
-                                    unlockedPath === '/inventory' ? <Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} /> 
-                                    : <PasswordModal title="Inventory Access" onConfirm={() => setUnlockedPath('/inventory')} onCancel={() => navigate('/orders')} />
-                                } />
-                                <Route path="/manage-inventory" element={
-                                    unlockedPath === '/manage-inventory' ? <ManageInventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />
-                                    : <PasswordModal title="Manage Inventory Access" onConfirm={() => setUnlockedPath('/manage-inventory')} onCancel={() => navigate('/orders')} />
-                                } />
-                                <Route path="/supplies" element={<Supplies />} />
-                                <Route path="/suppliers" element={<Suppliers />} />
-                                <Route path="/product-sales" element={<ProductSales products={products} />} />
-                                <Route path="/history" element={<OrderHistory />} />
-                                <Route path="/consignees" element={<ConsigneesPage />} />
-                                <Route path="/reporting" element={
-                                    unlockedPath === '/reporting' ? <Reporting />
-                                    : <PasswordModal title="Reporting Access" onConfirm={() => setUnlockedPath('/reporting')} onCancel={() => navigate('/orders')} />
-                                } />
-                                <Route path="/analytics" element={
-                                    unlockedPath === '/analytics' ? <Analytics />
-                                    : <PasswordModal title="Analytics Access" onConfirm={() => setUnlockedPath('/analytics')} onCancel={() => navigate('/orders')} />
-                                } />
-                                <Route path="/expenses" element={<Expenses />} />
+                                
+                                {/* Branch Stock Adding vs Master Product Catalog CRUD */}
+                                <Route path="/add-stock" element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
+                                
+                                {isAdmin ? (
+                                    <>
+                                        <Route path="/add-product" element={<AddProduct onProductAdded={fetchProducts} />} />
+                                        <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                        <Route path="/manage-inventory" element={<ManageInventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                        <Route path="/supplies" element={<Supplies />} />
+                                        <Route path="/suppliers" element={<Suppliers />} />
+                                        <Route path="/branch-sales" element={<BranchSales />} />
+                                        <Route path="/product-sales" element={<ProductSales products={products} />} />
+                                        <Route path="/history" element={<OrderHistory />} />
+                                        <Route path="/consignees" element={<ConsigneesPage />} />
+                                        <Route path="/reporting" element={<Reporting />} />
+                                        <Route path="/analytics" element={<Analytics />} />
+                                        <Route path="/expenses" element={<Expenses />} />
+                                        <Route path="/branches" element={<BranchesAdmin />} />
+                                        <Route path="/accounts" element={<AccountsAdmin />} />
+                                    </>
+                                ) : (
+                                    <>
+                                        <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                        <Route path="/branch-sales" element={<BranchSales />} />
+                                        <Route path="/history" element={<OrderHistory />} />
+                                        <Route path="/consignees" element={<ConsigneesPage />} />
+                                        {/* Fallback for unauthorized branch routes */}
+                                        <Route path="*" element={<Navigate to="/orders" replace />} />
+                                    </>
+                                )}
                             </Routes>
                         </Suspense>
                     </div>
@@ -208,9 +382,8 @@ const Dashboard = () => {
 
             <style>{`
                 @keyframes pageSlideIn {
-                    0%   { opacity: 0; transform: translateY(-12px) scale(0.98); filter: blur(4px); }
-                    60%  { opacity: 1; filter: blur(0px); }
-                    100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0px); }
+                    0%   { opacity: 0; transform: translateY(-8px) scale(0.99); }
+                    100% { opacity: 1; transform: translateY(0) scale(1); }
                 }
             `}</style>
         </div>

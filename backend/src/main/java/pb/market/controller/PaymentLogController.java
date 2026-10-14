@@ -11,19 +11,27 @@ import java.util.List;
 @CrossOrigin(origins = "*")
 @RestController
 @RequestMapping("/api/payment-logs")
-@RequiredArgsConstructor
 public class PaymentLogController {
     private final PaymentLogRepository paymentLogRepository;
+
+    public PaymentLogController(PaymentLogRepository paymentLogRepository) {
+        this.paymentLogRepository = paymentLogRepository;
+    }
 
     @GetMapping
     public List<PaymentLog> getAll(
             @RequestParam(value = "from", required = false) String fromStr,
-            @RequestParam(value = "to", required = false) String toStr) {
+            @RequestParam(value = "to", required = false) String toStr,
+            @RequestParam(value = "branchId", required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
         if (fromStr != null && toStr != null) {
             LocalDateTime from = LocalDateTime.parse(fromStr);
             LocalDateTime to = LocalDateTime.parse(toStr);
-            return paymentLogRepository.findByPaymentDateBetween(from, to);
+            return paymentLogRepository.findByPaymentDateBetweenAndBranch(from, to, branchId);
         }
-        return paymentLogRepository.findAllOrdered();
+        return paymentLogRepository.findAllOrderedByBranch(branchId);
     }
 }

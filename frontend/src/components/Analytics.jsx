@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-    Legend, LabelList
+    Legend, LabelList, PieChart, Pie, Cell
 } from 'recharts';
-import { BarChart3, TrendingUp, DollarSign, Package, AlertCircle, RefreshCw, Trophy, Calendar, X, ChevronLeft, ChevronRight, CreditCard, ChevronDown } from 'lucide-react';
+import {
+    BarChart3, TrendingUp, DollarSign, Package, AlertCircle, RefreshCw, Trophy, Calendar,
+    X, ChevronLeft, ChevronRight, CreditCard, ChevronDown, Store, PieChart as PieIcon, Layers
+} from 'lucide-react';
 
 const formatCurrency = (val) =>
     `₱${Number(val).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -15,6 +19,17 @@ const CurrencyDisplay = ({ value }) => (
         {Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
     </span>
 );
+
+const CATEGORY_COLORS = {
+    Paddles: '#4f46e5',
+    Accessories: '#059669',
+    Balls: '#d97706',
+    Shoes: '#9333ea',
+    Bags: '#e11d48',
+    Apparel: '#0891b2',
+    Default: '#52525b'
+};
+const PIE_COLORS = ['#4f46e5', '#059669', '#d97706', '#9333ea', '#e11d48', '#0891b2', '#52525b', '#84cc16'];
 
 const getStartOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const getStartOfWeek = (d) => {
@@ -190,9 +205,8 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
     );
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 const Analytics = () => {
+    const { currentBranchId, selectedBranchId, user } = useAuth();
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -221,6 +235,7 @@ const Analytics = () => {
 
     const handlePresetSelect = (range) => { setTimeRange(range); setCustomRange(null); };
 
+    const [categoryData, setCategoryData] = useState(null);
     const [paymentLogs, setPaymentLogs] = useState([]);
 
     // Helper: format date as LocalDateTime string for the API
@@ -247,25 +262,32 @@ const Analytics = () => {
         setLoading(true);
         setError('');
         const bounds = getDateBounds();
+        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
         const txUrl = bounds
-            ? `/api/transactions?from=${bounds.from}&to=${bounds.to}&limit=10000`
-            : `/api/transactions?limit=10000`;
+            ? `/api/transactions?from=${bounds.from}&to=${bounds.to}&limit=10000${branchParam}`
+            : `/api/transactions?limit=10000${branchParam}`;
         const plUrl = bounds
             ? `/api/payment-logs?from=${bounds.from}&to=${bounds.to}`
             : `/api/payment-logs`;
+        const catUrl = bounds
+            ? `/api/transactions/category-sales?from=${bounds.from}&to=${bounds.to}${branchParam}`
+            : `/api/transactions/category-sales${branchParam ? `?${branchParam.substring(1)}` : ''}`;
+
         Promise.all([
             axios.get(txUrl),
-            axios.get(plUrl)
+            axios.get(plUrl),
+            axios.get(catUrl)
         ])
-            .then(([txRes, plRes]) => {
+            .then(([txRes, plRes, catRes]) => {
                 setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
                 setPaymentLogs(Array.isArray(plRes.data) ? plRes.data : []);
+                setCategoryData(catRes.data || null);
             })
             .catch(() => setError('Could not load analytics data.'))
             .finally(() => setLoading(false));
     };
 
-    useEffect(() => { fetchData(); }, [timeRange, customRange]);
+    useEffect(() => { fetchData(); }, [timeRange, customRange, currentBranchId]);
 
 
     const processedData = useMemo(() => {
@@ -549,6 +571,7 @@ const Analytics = () => {
             <div className="flex bg-stone-100 p-1 rounded-lg w-fit shrink-0">
                 <button onClick={() => setMainTab('trends')} className={`px-5 py-2 text-sm font-bold rounded-md transition-all ${mainTab === 'trends' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Revenue Trends</button>
                 <button onClick={() => setMainTab('paddles')} className={`px-5 py-2 text-sm font-bold rounded-md transition-all ${mainTab === 'paddles' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Product Rankings</button>
+                <button onClick={() => setMainTab('categories')} className={`px-5 py-2 text-sm font-bold rounded-md transition-all ${mainTab === 'categories' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Category Breakdown</button>
             </div>
 
             {/* Charts Area */}
@@ -662,6 +685,226 @@ const Analytics = () => {
                                 </div>
                             </div>
                         )}
+                    </div>
+                )}
+
+                {mainTab === 'categories' && (
+                    <div className="flex flex-col gap-6 flex-1 min-h-[400px]">
+                        {/* Top visual charts row: Revenue Share Donut & Unit Volume Donut */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 shrink-0">
+                            {/* Revenue Distribution Chart */}
+                            <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm flex flex-col">
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <PieIcon size={18} className="text-indigo-600" />
+                                        <h4 className="text-sm font-black text-zinc-900 tracking-tight">Sales Revenue Share by Category</h4>
+                                    </div>
+                                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                        {categoryData ? formatCurrency(categoryData.totalRevenue) : '...'}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-zinc-400 mb-4">Percentage of total gross sales generated</p>
+
+                                {loading ? (
+                                    <div className="h-64 flex items-center justify-center text-zinc-400"><RefreshCw size={24} className="animate-spin" /></div>
+                                ) : !categoryData?.categories?.length ? (
+                                    <div className="h-64 flex flex-col items-center justify-center text-zinc-400">
+                                        <Package size={32} className="opacity-20 mb-2" />
+                                        <p className="text-sm">No category sales recorded in this period.</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                                        <div className="w-full sm:w-1/2 h-60">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={categoryData.categories}
+                                                        dataKey="revenue"
+                                                        nameKey="category"
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={50}
+                                                        outerRadius={85}
+                                                        paddingAngle={3}
+                                                    >
+                                                        {categoryData.categories.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.category] || PIE_COLORS[index % PIE_COLORS.length]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <RechartsTooltip
+                                                        formatter={(val, name, item) => [
+                                                            `${formatCurrency(val)} (${item.payload.revenuePercentage.toFixed(1)}%)`,
+                                                            name
+                                                        ]}
+                                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="w-full sm:w-1/2 flex flex-col gap-2">
+                                            {categoryData.categories.map((cat, idx) => (
+                                                <div key={cat.category} className="flex items-center justify-between text-xs">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span
+                                                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                            style={{ backgroundColor: CATEGORY_COLORS[cat.category] || PIE_COLORS[idx % PIE_COLORS.length] }}
+                                                        />
+                                                        <span className="font-bold text-zinc-700 truncate">{cat.category}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-right">
+                                                        <span className="font-semibold text-zinc-500 font-mono">{formatCurrency(cat.revenue)}</span>
+                                                        <span className="font-black text-zinc-900 w-12 text-right">{cat.revenuePercentage.toFixed(1)}%</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Units Volume Distribution Chart */}
+                            <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm flex flex-col">
+                                <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-2">
+                                        <Layers size={18} className="text-blue-600" />
+                                        <h4 className="text-sm font-black text-zinc-900 tracking-tight">Units Volume Share by Category</h4>
+                                    </div>
+                                    <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                                        {categoryData ? `${categoryData.totalUnitsSold.toLocaleString()} units` : '...'}
+                                    </span>
+                                </div>
+                                <p className="text-xs text-zinc-400 mb-4">Percentage of total items sold</p>
+
+                                {loading ? (
+                                    <div className="h-64 flex items-center justify-center text-zinc-400"><RefreshCw size={24} className="animate-spin" /></div>
+                                ) : !categoryData?.categories?.length ? (
+                                    <div className="h-64 flex flex-col items-center justify-center text-zinc-400">
+                                        <Package size={32} className="opacity-20 mb-2" />
+                                        <p className="text-sm">No category sales recorded in this period.</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col sm:flex-row items-center gap-4">
+                                        <div className="w-full sm:w-1/2 h-60">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={categoryData.categories}
+                                                        dataKey="unitsSold"
+                                                        nameKey="category"
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={50}
+                                                        outerRadius={85}
+                                                        paddingAngle={3}
+                                                    >
+                                                        {categoryData.categories.map((entry, index) => (
+                                                            <Cell key={`cell-u-${index}`} fill={CATEGORY_COLORS[entry.category] || PIE_COLORS[index % PIE_COLORS.length]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <RechartsTooltip
+                                                        formatter={(val, name, item) => [
+                                                            `${val.toLocaleString()} units (${item.payload.unitsPercentage.toFixed(1)}%)`,
+                                                            name
+                                                        ]}
+                                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                                    />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                        <div className="w-full sm:w-1/2 flex flex-col gap-2">
+                                            {categoryData.categories.map((cat, idx) => (
+                                                <div key={cat.category} className="flex items-center justify-between text-xs">
+                                                    <div className="flex items-center gap-2 min-w-0">
+                                                        <span
+                                                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                                                            style={{ backgroundColor: CATEGORY_COLORS[cat.category] || PIE_COLORS[idx % PIE_COLORS.length] }}
+                                                        />
+                                                        <span className="font-bold text-zinc-700 truncate">{cat.category}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-right">
+                                                        <span className="font-semibold text-zinc-500">{cat.unitsSold.toLocaleString()} units</span>
+                                                        <span className="font-black text-zinc-900 w-12 text-right">{cat.unitsPercentage.toFixed(1)}%</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Detailed Category Breakdown Table */}
+                        <div className="bg-white border border-stone-200 rounded-2xl shadow-sm p-6 flex flex-col">
+                            <h4 className="text-sm font-black text-zinc-900 mb-4 tracking-tight">Complete Category Performance Matrix</h4>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse text-sm">
+                                    <thead>
+                                        <tr className="border-b border-stone-200 text-xs uppercase tracking-wider text-zinc-400 font-bold">
+                                            <th className="pb-3">Category</th>
+                                            <th className="pb-3 text-right">Sales Revenue</th>
+                                            <th className="pb-3 text-right">% of Sales</th>
+                                            <th className="pb-3 text-right">Units Sold</th>
+                                            <th className="pb-3 text-right">% of Volume</th>
+                                            <th className="pb-3 text-right">Avg Item Price</th>
+                                            <th className="pb-3 text-right">Gross Profit</th>
+                                            <th className="pb-3 text-right">Margin</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-stone-100">
+                                        {categoryData?.categories?.map((cat, idx) => (
+                                            <tr key={cat.category} className="hover:bg-stone-50/80 transition-colors">
+                                                <td className="py-3 font-bold text-zinc-900 flex items-center gap-2">
+                                                    <span
+                                                        className="w-2.5 h-2.5 rounded-full"
+                                                        style={{ backgroundColor: CATEGORY_COLORS[cat.category] || PIE_COLORS[idx % PIE_COLORS.length] }}
+                                                    />
+                                                    {cat.category}
+                                                </td>
+                                                <td className="py-3 text-right font-black text-emerald-600 font-mono">
+                                                    {formatCurrency(cat.revenue)}
+                                                </td>
+                                                <td className="py-3 text-right font-bold text-zinc-700">
+                                                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-black text-xs">
+                                                        {cat.revenuePercentage.toFixed(1)}%
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 text-right font-black text-zinc-900">
+                                                    {cat.unitsSold.toLocaleString()}
+                                                </td>
+                                                <td className="py-3 text-right font-bold text-zinc-700">
+                                                    <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 font-black text-xs">
+                                                        {cat.unitsPercentage.toFixed(1)}%
+                                                    </span>
+                                                </td>
+                                                <td className="py-3 text-right text-zinc-600 font-mono text-xs">
+                                                    {formatCurrency(cat.avgSellingPrice)}
+                                                </td>
+                                                <td className="py-3 text-right font-bold text-purple-600 font-mono">
+                                                    {formatCurrency(cat.profit)}
+                                                </td>
+                                                <td className="py-3 text-right font-black text-zinc-800 text-xs">
+                                                    {cat.profitMargin.toFixed(1)}%
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                    {categoryData && (
+                                        <tfoot>
+                                            <tr className="border-t-2 border-stone-200 font-black text-sm bg-stone-50/50">
+                                                <td className="py-3 font-black text-zinc-900">Total Across All Categories</td>
+                                                <td className="py-3 text-right text-emerald-600 font-mono">{formatCurrency(categoryData.totalRevenue)}</td>
+                                                <td className="py-3 text-right text-emerald-700">100.0%</td>
+                                                <td className="py-3 text-right text-zinc-900">{categoryData.totalUnitsSold.toLocaleString()}</td>
+                                                <td className="py-3 text-right text-blue-700">100.0%</td>
+                                                <td className="py-3 text-right text-zinc-600 font-mono text-xs">—</td>
+                                                <td className="py-3 text-right text-purple-600 font-mono">{formatCurrency(categoryData.totalProfit)}</td>
+                                                <td className="py-3 text-right text-zinc-900">{categoryData.overallProfitMargin?.toFixed(1)}%</td>
+                                            </tr>
+                                        </tfoot>
+                                    )}
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 )}
             </div>

@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import pb.market.entity.*;
+import pb.market.repository.BranchRepository;
 import pb.market.repository.ProductRepository;
 import pb.market.repository.StockAdjustmentRepository;
 import pb.market.repository.StockBatchRepository;
@@ -28,6 +29,7 @@ public class ProductService {
     private final SupplierRepository supplierRepository;
     private final TransactionRepository transactionRepository;
     private final StockAdjustmentRepository stockAdjustmentRepository;
+    private final BranchRepository branchRepository;
     private final EntityManager entityManager;
 
 /*
@@ -52,6 +54,24 @@ public class ProductService {
     }
 */
 
+    public Branch getMainBranch() {
+        List<Branch> branches = branchRepository.findAll();
+        return branches.stream()
+                .filter(b -> b.getName() != null && b.getName().toLowerCase().contains("main"))
+                .findFirst()
+                .orElseGet(() -> branches.stream()
+                        .filter(b -> b.getId() != null && b.getId() == 1L)
+                        .findFirst()
+                        .orElseGet(() -> branches.isEmpty() ? null : branches.get(0)));
+    }
+
+    public boolean isMainBranch(Branch b) {
+        if (b == null) return true;
+        if (b.getName() != null && b.getName().toLowerCase().contains("main")) return true;
+        Branch main = getMainBranch();
+        return main != null && b.getId() != null && b.getId().equals(main.getId());
+    }
+
     public java.util.Optional<Product> findById(Long id) {
         return productRepository.findById(id);
     }
@@ -75,31 +95,36 @@ public class ProductService {
 
     @Transactional(readOnly = true)
     public List<Product> getAllProducts() {
+        return getAllProducts(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Product> getAllProducts(Long branchId) {
         List<Product> products = productRepository.findAllWithVariants();
         if (products.isEmpty()) return products;
 
-        // Fetch all aggregates in single batch queries — no N+1 subqueries
-        Map<Long, Long> addedMap = stockBatchRepository.sumQuantityByVariantId().stream()
+        // Fetch all aggregates in single batch queries — scoped to branch if provided
+        Map<Long, Long> addedMap = stockBatchRepository.sumQuantityByVariantIdAndBranch(branchId).stream()
                 .collect(Collectors.toMap(
                     row -> ((Number) row[0]).longValue(), 
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
-        Map<Long, Long> soldMap = transactionRepository.countByVariantId().stream()
+        Map<Long, Long> soldMap = transactionRepository.countByVariantIdAndBranch(branchId).stream()
                 .collect(Collectors.toMap(
                     row -> ((Number) row[0]).longValue(), 
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
-        // Current remaining stock per variant (replaces old @Formula)
-        Map<Long, Long> stockMap = stockBatchRepository.sumRemainingQuantityByVariantId().stream()
+        // Current remaining stock per variant
+        Map<Long, Long> stockMap = stockBatchRepository.sumRemainingQuantityByVariantIdAndBranch(branchId).stream()
                 .collect(Collectors.toMap(
                     row -> ((Number) row[0]).longValue(),
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
-        // Total units removed via manual adjustments (damaged, returned to supplier, etc.)
-        Map<Long, Long> adjustedMap = stockAdjustmentRepository.sumQuantityByVariantId().stream()
+        // Total units removed via manual adjustments
+        Map<Long, Long> adjustedMap = stockAdjustmentRepository.sumQuantityByVariantIdAndBranch(branchId).stream()
                 .collect(Collectors.toMap(
                     row -> ((Number) row[0]).longValue(),
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
@@ -166,16 +191,71 @@ public class ProductService {
     @Transactional
     public ProductVariant addStock(Long variantId, int quantity, BigDecimal acquisitionPrice,
                                    Long supplierId, boolean consigned) {
+        return addStock(variantId, quantity, acquisitionPrice, supplierId, consigned, null);
+    }
+
+    @Transactional
+    public ProductVariant addStock(Long variantId, int quantity, BigDecimal acquisitionPrice,
+                                   Long supplierId, boolean consigned, Long branchId) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("Quantity must be greater than zero.");
         }
         ProductVariant variant = variantRepository.findById(variantId)
                 .orElseThrow(() -> new RuntimeException("Variant not found with id: " + variantId));
 
-        // Resolve the supplier if provided
+        // Resolve the supplier if provided, or fallback to variant default supplier
         Supplier supplier = null;
         if (supplierId != null) {
             supplier = supplierRepository.findById(supplierId).orElse(null);
+        } else if (variant.getDefaultSupplier() != null) {
+            supplier = variant.getDefaultSupplier();
+        }
+
+        if (acquisitionPrice == null) {
+            acquisitionPrice = variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO;
+        }
+
+        Branch branch = null;
+        if (branchId != null) {
+            branch = branchRepository.findById(branchId).orElse(null);
+        }
+
+        Branch mainBranch = getMainBranch();
+        boolean isTransferFromMain = (branch != null && !isMainBranch(branch));
+        if (isTransferFromMain) {
+            Long mainBranchId = mainBranch != null ? mainBranch.getId() : 1L;
+            List<StockBatch> mainBatches = stockBatchRepository
+                    .findReceivableForMainForUpdate(variantId, mainBranchId);
+            int availableInMain = mainBatches.stream()
+                    .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
+                    .sum();
+            if (quantity > availableInMain) {
+                String name = variant.getProduct() != null 
+                    ? variant.getProduct().getBrandName() + " " + variant.getProduct().getModelName() + " (" + variant.getSku() + ")"
+                    : "Variant #" + variantId;
+                throw new IllegalArgumentException("Cannot add to " + branch.getName() +
+                    ": Insufficient stock in Main Inventory for " + name + ". Available in Main: " + availableInMain + ", requested: " + quantity + ".");
+            }
+            int remainingToDeduct = quantity;
+            for (StockBatch mainBatch : mainBatches) {
+                if (remainingToDeduct <= 0) break;
+                int available = mainBatch.getRemainingQuantity() != null ? mainBatch.getRemainingQuantity() : 0;
+                if (available >= remainingToDeduct) {
+                    mainBatch.setRemainingQuantity(available - remainingToDeduct);
+                    remainingToDeduct = 0;
+                } else {
+                    mainBatch.setRemainingQuantity(0);
+                    remainingToDeduct -= available;
+                }
+                stockBatchRepository.save(mainBatch);
+            }
+            StockAdjustment adj = new StockAdjustment();
+            adj.setVariant(variant);
+            adj.setQuantity(quantity);
+            adj.setReason("Transfer to " + branch.getName());
+            adj.setNote("Stock transfer to branch: " + branch.getName());
+            adj.setBranch(mainBranch);
+            stockAdjustmentRepository.save(adj);
         }
 
         StockBatch batch = new StockBatch();
@@ -185,31 +265,37 @@ public class ProductService {
         batch.setAcquisitionPrice(acquisitionPrice);
         batch.setSupplier(supplier);
         batch.setConsigned(consigned);
+        batch.setBranch(branch);
         batch.setBatchId(UUID.randomUUID().toString());
         stockBatchRepository.save(batch);
 
-        // Flush then query the true remaining stock from the DB — no stale @Formula
+        // Flush then query the true remaining stock from the DB
         entityManager.flush();
-        Long currentStock = stockBatchRepository.sumRemainingQuantityForVariant(variantId);
+        Long currentStock = stockBatchRepository.sumRemainingQuantityForVariantAndBranch(variantId, branchId);
         variant.setStockQuantity(currentStock != null ? currentStock.intValue() : 0);
         return variant;
     }
 
     @Transactional
     public ProductVariant deductStock(Long variantId, int quantity, String reason, String note) {
+        return deductStock(variantId, quantity, reason, note, null);
+    }
+
+    @Transactional
+    public ProductVariant deductStock(Long variantId, int quantity, String reason, String note, Long branchId) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("Quantity must be greater than zero.");
         }
         ProductVariant variant = variantRepository.findById(variantId)
                 .orElseThrow(() -> new RuntimeException("Variant not found with id: " + variantId));
 
-        // ── RACE-CONDITION FIX ──────────────────────────────────────────────────
-        // Lock ALL receivable batch rows FIRST (PESSIMISTIC_WRITE), then validate
-        // available stock from the locked snapshot. This eliminates the old
-        // check-then-act gap where a concurrent sale could drain stock between
-        // the @Formula read and the actual deduction.
+        Branch branch = null;
+        if (branchId != null) {
+            branch = branchRepository.findById(branchId).orElse(null);
+        }
+
         List<StockBatch> batches = stockBatchRepository
-            .findReceivableByVariantIdForUpdate(variantId);
+            .findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
 
         int actualAvailable = batches.stream()
                 .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
@@ -239,11 +325,12 @@ public class ProductService {
         adj.setQuantity(quantity);
         adj.setReason(reason == null || reason.isBlank() ? "Manual Adjustment" : reason);
         adj.setNote(note);
+        adj.setBranch(branch);
         stockAdjustmentRepository.save(adj);
 
         // Flush then query the true remaining stock from the DB
         entityManager.flush();
-        Long currentStock = stockBatchRepository.sumRemainingQuantityForVariant(variantId);
+        Long currentStock = stockBatchRepository.sumRemainingQuantityForVariantAndBranch(variantId, branchId);
         variant.setStockQuantity(currentStock != null ? currentStock.intValue() : 0);
         return variant;
     }
@@ -283,5 +370,9 @@ public class ProductService {
 
     public List<StockAdjustment> getAdjustments(Long variantId) {
         return stockAdjustmentRepository.findByVariantIdOrderByAdjustedAtDesc(variantId);
+    }
+
+    public List<StockAdjustment> getAdjustments(Long variantId, Long branchId) {
+        return stockAdjustmentRepository.findByVariantIdAndBranchOrderByAdjustedAtDesc(variantId, branchId);
     }
 }

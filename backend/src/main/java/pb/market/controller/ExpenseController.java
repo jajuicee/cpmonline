@@ -15,19 +15,36 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ExpenseController {
     private final ExpenseRepository expenseRepository;
+    private final pb.market.repository.BranchRepository branchRepository;
 
     @GetMapping
-    public List<Expense> getAll() {
-        return expenseRepository.findAllByOrderByExpenseDateDesc();
+    public List<Expense> getAll(
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        return expenseRepository.findAllByBranchOrderByExpenseDateDesc(branchId);
     }
 
     @PostMapping
-    public ResponseEntity<?> create(@RequestBody Expense expense) {
+    public ResponseEntity<?> create(
+            @RequestBody Expense expense,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (expense.getName() == null || expense.getName().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Expense name is required."));
         }
         if (expense.getCost() == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Cost is required."));
+        }
+        Long branchId = null;
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        } else if (expense.getBranch() != null && expense.getBranch().getId() != null) {
+            branchId = expense.getBranch().getId();
+        }
+        if (branchId != null) {
+            branchRepository.findById(branchId).ifPresent(expense::setBranch);
         }
         Expense saved = expenseRepository.save(expense);
         return ResponseEntity.ok(saved);

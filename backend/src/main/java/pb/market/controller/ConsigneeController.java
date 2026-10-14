@@ -14,16 +14,33 @@ import java.util.List;
 public class ConsigneeController {
 
     private final ConsigneeRepository consigneeRepository;
+    private final pb.market.repository.BranchRepository branchRepository;
 
     @GetMapping
-    public List<Consignee> getAllConsignees() {
-        return consigneeRepository.findAll();
+    public List<Consignee> getAllConsignees(
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        return consigneeRepository.findAllByBranch(branchId);
     }
 
     @PostMapping
-    public Consignee addConsignee(@RequestBody Consignee consignee) {
+    public Consignee addConsignee(
+            @RequestBody Consignee consignee,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (consignee.getName() == null || consignee.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Consignee name is required.");
+        }
+        Long branchId = null;
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        } else if (consignee.getBranch() != null && consignee.getBranch().getId() != null) {
+            branchId = consignee.getBranch().getId();
+        }
+        if (branchId != null) {
+            branchRepository.findById(branchId).ifPresent(consignee::setBranch);
         }
         return consigneeRepository.save(consignee);
     }

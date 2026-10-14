@@ -46,6 +46,11 @@ public class StockBatch {
     @Column(name = "eta")
     private LocalDate eta;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    private Branch branch;
+
     @PrePersist
     public void prePersist() {
         if (this.restockedAt == null) {

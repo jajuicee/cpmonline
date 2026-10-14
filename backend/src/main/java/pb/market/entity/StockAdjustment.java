@@ -31,6 +31,11 @@ public class StockAdjustment {
     @Column(columnDefinition = "TEXT")
     private String note;
 
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    private Branch branch;
+
     @Column(nullable = false)
     private LocalDateTime adjustedAt;
 

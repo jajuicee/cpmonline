@@ -19,8 +19,12 @@ import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import pb.market.dto.CategorySalesDTO;
+import pb.market.dto.CategorySalesSummaryDTO;
+import pb.market.dto.ProductRankingDTO;
 
 @CrossOrigin(origins = "*")
 @RestController
@@ -34,11 +38,14 @@ public class TransactionController {
     private final StockWebSocketHandler stockWebSocketHandler;
     private final ConsigneeRepository consigneeRepository;
     private final PaymentLogRepository paymentLogRepository;
+    private final pb.market.repository.BranchRepository branchRepository;
 
     // ── Create a new transaction + deduct 1 from stock ───────────────────────
     @Transactional
     @PostMapping
-    public ResponseEntity<?> create(@RequestBody Transaction transaction) {
+    public ResponseEntity<?> create(
+            @RequestBody Transaction transaction,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (transaction.getVariant() == null || transaction.getVariant().getId() == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "Variant ID is required."));
         }
@@ -49,14 +56,23 @@ public class TransactionController {
         }
         ProductVariant variant = variantOpt.get();
 
-        // Find oldest stock batch for FIFO using a PESSIMISTIC WRITE lock.
-        // This prevents two concurrent sales from both reading remainingQuantity > 0
-        // and both deducting, which would allow overselling the last unit.
-        List<StockBatch> batches = stockBatchRepository.findReceivableByVariantIdForUpdate(variantId);
+        Long branchId = null;
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        } else if (transaction.getBranch() != null && transaction.getBranch().getId() != null) {
+            branchId = transaction.getBranch().getId();
+        }
+
+        if (branchId != null) {
+            branchRepository.findById(branchId).ifPresent(transaction::setBranch);
+        }
+
+        // Find oldest stock batch for FIFO in this branch using a PESSIMISTIC WRITE lock.
+        List<StockBatch> batches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
         if (batches.isEmpty()) {
             // No sellable stock — reject the transaction
             return ResponseEntity.badRequest()
-                    .body(Map.of("error", "This item is out of stock."));
+                    .body(Map.of("error", "This item is out of stock in this branch."));
         }
 
         // Deduct 1 from the oldest batch (FIFO)
@@ -110,29 +126,227 @@ public class TransactionController {
 
 
     // ── Get transactions with optional date-range filter ─────────────────────
-    // Preset limits: TODAY=300, 1W=1500, 1M=5000, 1Y=10000, ALL=100000
     @GetMapping
     public List<Transaction> getAll(
             @RequestParam(value = "from", required = false) String fromStr,
             @RequestParam(value = "to",   required = false) String toStr,
-            @RequestParam(value = "limit", required = false, defaultValue = "100000") int limit) {
+            @RequestParam(value = "limit", required = false, defaultValue = "100000") int limit,
+            @RequestParam(value = "branchId", required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
         if (fromStr != null && toStr != null) {
             java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
             java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
-            return transactionRepository.findAllWithDetailsByActivityDate(from, to, page);
+            return transactionRepository.findAllWithDetailsByActivityDateAndBranch(from, to, branchId, page);
         }
-        return transactionRepository.findAllWithDetails(page);
+        return transactionRepository.findAllWithDetailsByBranch(branchId, page);
     }
 
     // ── Get only CONSIGNMENT transactions (for ConsigneesPage) ───────────────
     @GetMapping("/consignment")
-    public List<Transaction> getConsignmentAll() {
-        return transactionRepository.findAllConsignmentWithDetails(
-                org.springframework.data.domain.PageRequest.of(0, 100000));
+    public List<Transaction> getConsignmentAll(
+            @RequestParam(value = "branchId", required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        return transactionRepository.findAllConsignmentWithDetailsByBranch(
+                branchId, org.springframework.data.domain.PageRequest.of(0, 100000));
+    }
+
+    // ── Category Sales breakdown & percentages ──────────────────────────────
+    @GetMapping("/category-sales")
+    public ResponseEntity<pb.market.dto.CategorySalesSummaryDTO> getCategorySales(
+            @RequestParam(value = "from", required = false) String fromStr,
+            @RequestParam(value = "to",   required = false) String toStr,
+            @RequestParam(value = "branchId", required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+
+        List<Object[]> rows;
+        if (fromStr != null && !fromStr.isBlank() && toStr != null && !toStr.isBlank()) {
+            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
+            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+            rows = transactionRepository.findCategorySalesInRange(from, to, branchId);
+        } else {
+            rows = transactionRepository.findCategorySalesAllTime(branchId);
+        }
+
+        BigDecimal totalRevenue = BigDecimal.ZERO;
+        long totalUnits = 0;
+        BigDecimal totalCost = BigDecimal.ZERO;
+
+        for (Object[] r : rows) {
+            long units = ((Number) r[1]).longValue();
+            BigDecimal rev = (BigDecimal) r[2];
+            BigDecimal cost = (BigDecimal) r[3];
+            totalUnits += units;
+            totalRevenue = totalRevenue.add(rev != null ? rev : BigDecimal.ZERO);
+            totalCost = totalCost.add(cost != null ? cost : BigDecimal.ZERO);
+        }
+
+        BigDecimal totalProfit = totalRevenue.subtract(totalCost);
+        double overallMargin = totalRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? totalProfit.multiply(BigDecimal.valueOf(100)).divide(totalRevenue, 2, java.math.RoundingMode.HALF_UP).doubleValue()
+                : 0.0;
+
+        List<pb.market.dto.CategorySalesDTO> categories = new java.util.ArrayList<>();
+        for (Object[] r : rows) {
+            String cat = r[0] != null ? (String) r[0] : "Uncategorized";
+            long units = ((Number) r[1]).longValue();
+            BigDecimal rev = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
+            BigDecimal cost = r[3] != null ? (BigDecimal) r[3] : BigDecimal.ZERO;
+            BigDecimal profit = rev.subtract(cost);
+
+            double revPct = totalRevenue.compareTo(BigDecimal.ZERO) > 0
+                    ? rev.multiply(BigDecimal.valueOf(100)).divide(totalRevenue, 2, java.math.RoundingMode.HALF_UP).doubleValue()
+                    : 0.0;
+            double unitPct = totalUnits > 0
+                    ? (double) Math.round(((double) units / totalUnits * 100.0) * 100.0) / 100.0
+                    : 0.0;
+            BigDecimal avgPrice = units > 0
+                    ? rev.divide(BigDecimal.valueOf(units), 2, java.math.RoundingMode.HALF_UP)
+                    : BigDecimal.ZERO;
+            double margin = rev.compareTo(BigDecimal.ZERO) > 0
+                    ? profit.multiply(BigDecimal.valueOf(100)).divide(rev, 2, java.math.RoundingMode.HALF_UP).doubleValue()
+                    : 0.0;
+
+            categories.add(pb.market.dto.CategorySalesDTO.builder()
+                    .category(cat)
+                    .unitsSold(units)
+                    .revenue(rev)
+                    .cost(cost)
+                    .profit(profit)
+                    .revenuePercentage(revPct)
+                    .unitsPercentage(unitPct)
+                    .avgSellingPrice(avgPrice)
+                    .profitMargin(margin)
+                    .build());
+        }
+
+        pb.market.dto.CategorySalesSummaryDTO summary = pb.market.dto.CategorySalesSummaryDTO.builder()
+                .totalRevenue(totalRevenue)
+                .totalUnitsSold(totalUnits)
+                .totalCost(totalCost)
+                .totalProfit(totalProfit)
+                .overallProfitMargin(overallMargin)
+                .categories(categories)
+                .build();
+
+        return ResponseEntity.ok(summary);
+    }
+
+    // ── Variant Sales breakdown (for ultra-fast Product Sales page) ───────────
+    @GetMapping("/variant-sales")
+    public ResponseEntity<?> getVariantSales(
+            @RequestParam(value = "from", required = false) String fromStr,
+            @RequestParam(value = "to",   required = false) String toStr,
+            @RequestParam(value = "branchId", required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+
+        List<Object[]> rows;
+        if (fromStr != null && !fromStr.isBlank() && toStr != null && !toStr.isBlank()) {
+            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
+            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+            rows = transactionRepository.findVariantSalesInRange(from, to, branchId);
+        } else {
+            rows = transactionRepository.findVariantSalesAllTime(branchId);
+        }
+
+        Map<Long, Map<String, Object>> map = new HashMap<>();
+        for (Object[] r : rows) {
+            if (r[0] != null) {
+                Long vId = ((Number) r[0]).longValue();
+                long units = ((Number) r[1]).longValue();
+                BigDecimal rev = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
+                map.put(vId, Map.of("unitsSold", units, "revenue", rev));
+            }
+        }
+        return ResponseEntity.ok(map);
+    }
+
+    // ── Top Ranking Units (for Branch Sales and leaderboard) ─────────────────
+    @GetMapping("/ranking")
+    public ResponseEntity<List<pb.market.dto.ProductRankingDTO>> getTopRankingUnits(
+            @RequestParam(value = "from", required = false) String fromStr,
+            @RequestParam(value = "to",   required = false) String toStr,
+            @RequestParam(value = "branchId", required = false) Long branchId,
+            @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "limit", required = false, defaultValue = "50") int limit,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+
+        org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
+        List<Object[]> rows;
+        if (fromStr != null && !fromStr.isBlank() && toStr != null && !toStr.isBlank()) {
+            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
+            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+            rows = transactionRepository.findTopRankingUnitsInRange(from, to, branchId, page);
+        } else {
+            rows = transactionRepository.findTopRankingUnitsAllTime(branchId, page);
+        }
+
+        List<pb.market.dto.ProductRankingDTO> ranking = new java.util.ArrayList<>();
+        int rank = 1;
+        for (Object[] r : rows) {
+            Long vId = ((Number) r[0]).longValue();
+            String brand = r[1] != null ? (String) r[1] : "";
+            String model = r[2] != null ? (String) r[2] : "";
+            String color = r[3] != null ? (String) r[3] : "";
+            String shape = r[4] != null ? (String) r[4] : "";
+            Integer thick = r[5] != null ? ((Number) r[5]).intValue() : null;
+            String sku = r[6] != null ? (String) r[6] : "";
+            String cat = r[7] != null ? (String) r[7] : "Uncategorized";
+            long units = ((Number) r[8]).longValue();
+            BigDecimal rev = r[9] != null ? (BigDecimal) r[9] : BigDecimal.ZERO;
+
+            if (category != null && !category.isBlank() && !"All".equalsIgnoreCase(category)) {
+                if (!cat.equalsIgnoreCase(category)) continue;
+            }
+
+            StringBuilder nameBuilder = new StringBuilder(brand).append(" ").append(model);
+            if (color != null && !color.isBlank() && !"N/A".equalsIgnoreCase(color)) {
+                nameBuilder.append(" (").append(color).append(")");
+            }
+            if (thick != null && thick > 0) {
+                nameBuilder.append(" ").append(thick).append("mm");
+            }
+            if (shape != null && !shape.isBlank() && !"N/A".equalsIgnoreCase(shape)) {
+                nameBuilder.append(" Size ").append(shape);
+            }
+
+            ranking.add(pb.market.dto.ProductRankingDTO.builder()
+                    .rank(rank++)
+                    .variantId(vId)
+                    .productName(nameBuilder.toString().trim())
+                    .brandName(brand)
+                    .modelName(model)
+                    .color(color)
+                    .shape(shape)
+                    .thicknessMm(thick)
+                    .sku(sku)
+                    .category(cat)
+                    .unitsSold(units)
+                    .revenue(rev)
+                    .build());
+        }
+
+        return ResponseEntity.ok(ranking);
     }
 
     // ── Mark a PARTIAL transaction as FULL once remaining balance is paid ─────
+
+
     @Transactional
     @PatchMapping("/{id}/complete")
     public ResponseEntity<?> complete(@PathVariable("id") Long id, @RequestBody(required = false) Map<String, String> body) {

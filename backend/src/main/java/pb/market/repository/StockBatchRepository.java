@@ -29,6 +29,22 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
            "AND b.remainingQuantity > 0 ORDER BY b.consigned ASC, b.restockedAt ASC")
     List<StockBatch> findReceivableByVariantIdForUpdate(@Param("variantId") Long variantId);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM StockBatch b WHERE b.variant.id = :variantId AND b.status = 'RECEIVED' " +
+           "AND (:branchId IS NULL OR b.branch.id = :branchId) " +
+           "AND b.remainingQuantity > 0 ORDER BY b.consigned ASC, b.restockedAt ASC")
+    List<StockBatch> findReceivableByVariantIdAndBranchIdForUpdate(@Param("variantId") Long variantId, @Param("branchId") Long branchId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM StockBatch b WHERE b.variant.id = :variantId AND b.status = 'RECEIVED' " +
+           "AND (b.branch.id = :mainBranchId OR b.branch IS NULL) " +
+           "AND b.remainingQuantity > 0 ORDER BY b.consigned ASC, b.restockedAt ASC")
+    List<StockBatch> findReceivableForMainForUpdate(@Param("variantId") Long variantId, @Param("mainBranchId") Long mainBranchId);
+
+    @Query("SELECT COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.variant.id = :variantId AND s.status = 'RECEIVED' " +
+           "AND (s.branch.id = :mainBranchId OR s.branch IS NULL)")
+    Long sumRemainingQuantityForMain(@Param("variantId") Long variantId, @Param("mainBranchId") Long mainBranchId);
+
     // For refunding stock, we want the most recently RECEIVED batch (so we order by restockedAt DESC)
     List<StockBatch> findByVariantIdAndStatusOrderByRestockedAtDesc(Long variantId, String status);
 
@@ -41,13 +57,29 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
     @Query("SELECT s.variant.id, SUM(s.quantity) FROM StockBatch s WHERE s.status = 'RECEIVED' GROUP BY s.variant.id")
     List<Object[]> sumQuantityByVariantId();
 
+    @Query("SELECT s.variant.id, SUM(s.quantity) FROM StockBatch s WHERE s.status = 'RECEIVED' " +
+           "AND (:branchId IS NULL OR s.branch.id = :branchId) GROUP BY s.variant.id")
+    List<Object[]> sumQuantityByVariantIdAndBranch(@Param("branchId") Long branchId);
+
     // Current sellable stock per variant — replaces the old @Formula on ProductVariant
     @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' GROUP BY s.variant.id")
     List<Object[]> sumRemainingQuantityByVariantId();
 
+    @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' " +
+           "AND (:branchId IS NULL OR s.branch.id = :branchId) GROUP BY s.variant.id")
+    List<Object[]> sumRemainingQuantityByVariantIdAndBranch(@Param("branchId") Long branchId);
+
     // Single-variant version — used after add/deduct to return the refreshed count
     @Query("SELECT COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.variant.id = :variantId AND s.status = 'RECEIVED'")
     Long sumRemainingQuantityForVariant(@Param("variantId") Long variantId);
+
+    @Query("SELECT COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.variant.id = :variantId AND s.status = 'RECEIVED' " +
+           "AND (:branchId IS NULL OR s.branch.id = :branchId)")
+    Long sumRemainingQuantityForVariantAndBranch(@Param("variantId") Long variantId, @Param("branchId") Long branchId);
+
+    @Query("SELECT b FROM StockBatch b WHERE b.variant.id = :variantId " +
+           "AND (:branchId IS NULL OR b.branch.id = :branchId) ORDER BY b.consigned ASC, b.restockedAt ASC")
+    List<StockBatch> findByVariantIdAndBranchOrderByConsignedAscRestockedAtAsc(@Param("variantId") Long variantId, @Param("branchId") Long branchId);
 
     // Eagerly loads variant → product and supplier in ONE query to avoid N+1 loops
     @Query("SELECT b FROM StockBatch b JOIN FETCH b.variant v JOIN FETCH v.product LEFT JOIN FETCH b.supplier WHERE b.batchId IS NOT NULL")

@@ -29,6 +29,11 @@ public class Expense {
 
     private LocalDateTime expenseDate;
 
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    private Branch branch;
+
     // Used to group expenses with specific stock batches for the "revert" feature
     @Column(name = "batch_id", length = 36)
     private String batchId;

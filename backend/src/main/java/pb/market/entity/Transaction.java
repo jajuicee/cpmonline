@@ -55,6 +55,11 @@ public class Transaction {
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private Consignee consignee;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+    private Branch branch;
+
     @Transient
     private java.util.List<java.util.Map<String, Object>> splits;
 

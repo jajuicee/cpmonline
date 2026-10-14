@@ -3,8 +3,10 @@ import axios from 'axios';
 import {
     History, CheckCircle2, Clock, CreditCard,
     AlertCircle, Loader2, RefreshCw, ChevronDown, Package,
-    Calendar, X, ChevronLeft, ChevronRight, Search, MessageSquare, XCircle, Pen
+    Calendar, X, ChevronLeft, ChevronRight, Search, MessageSquare, XCircle, Pen,
+    Store, MapPin
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import PasswordModal from './PasswordModal';
 
 const STATUS_ALL = 'ALL';
@@ -345,6 +347,8 @@ const EditPaymentModal = ({ group, methods, onSave, onClose }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const OrderHistory = () => {
+    const { user, isAdmin, isBranch, currentBranchId, selectedBranchId, setSelectedBranchId } = useAuth();
+    const [branchList, setBranchList] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [paymentLogs, setPaymentLogs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -375,6 +379,14 @@ const OrderHistory = () => {
     const [customRange, setCustomRange] = useState(null);
     const [showCalendar, setShowCalendar] = useState(false);
     const calendarRef = useRef(null);
+
+    useEffect(() => {
+        if (isAdmin) {
+            axios.get('/api/admin/branches')
+                .then(res => setBranchList(Array.isArray(res.data) ? res.data : []))
+                .catch(err => console.error('Failed to load branches:', err));
+        }
+    }, [isAdmin]);
 
     useEffect(() => {
         const handler = (e) => {
@@ -445,6 +457,7 @@ const OrderHistory = () => {
     const buildFetchUrl = (preset, custom) => {
         const base = `/api/transactions`;
         const now = new Date();
+        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
         // Convert to local time string matching LocalDateTime (YYYY-MM-DDTHH:mm:ss)
         const fmt = (d) => {
             const pad = (n) => n.toString().padStart(2, '0');
@@ -454,32 +467,32 @@ const OrderHistory = () => {
         if (custom) {
             const from = fmt(custom.start);
             const to = fmt(new Date(custom.end.getTime()));
-            return `${base}?from=${from}&to=${to}&limit=5000`;
+            return `${base}?from=${from}&to=${to}&limit=5000${branchParam}`;
         }
         switch (preset) {
             case 'TODAY': {
                 const from = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0));
                 const to = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59));
-                return `${base}?from=${from}&to=${to}&limit=300`;
+                return `${base}?from=${from}&to=${to}&limit=300${branchParam}`;
             }
             case '1W': {
                 const weekStart = new Date(now);
                 weekStart.setDate(now.getDate() - now.getDay());
                 weekStart.setHours(0, 0, 0, 0);
-                return `${base}?from=${fmt(weekStart)}&to=${fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59))}&limit=1500`;
+                return `${base}?from=${fmt(weekStart)}&to=${fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59))}&limit=1500${branchParam}`;
             }
             case '1M': {
                 const from = fmt(new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0));
                 const to = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59));
-                return `${base}?from=${from}&to=${to}&limit=5000`;
+                return `${base}?from=${from}&to=${to}&limit=5000${branchParam}`;
             }
             case '1Y': {
                 const from = fmt(new Date(now.getFullYear(), 0, 1, 0, 0, 0));
                 const to = fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59));
-                return `${base}?from=${from}&to=${to}&limit=10000`;
+                return `${base}?from=${from}&to=${to}&limit=10000${branchParam}`;
             }
             default: // ALL
-                return `${base}?limit=100000`;
+                return `${base}?limit=100000${branchParam}`;
         }
     };
 
@@ -492,9 +505,10 @@ const OrderHistory = () => {
         const urlObj = new URL(url, 'http://localhost');
         const plFrom = urlObj.searchParams.get('from');
         const plTo   = urlObj.searchParams.get('to');
+        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
         const plUrl  = plFrom && plTo
-            ? `/api/payment-logs?from=${plFrom}&to=${plTo}`
-            : `/api/payment-logs`;
+            ? `/api/payment-logs?from=${plFrom}&to=${plTo}${branchParam}`
+            : (currentBranchId ? `/api/payment-logs?branchId=${currentBranchId}` : `/api/payment-logs`);
 
         Promise.all([
             axios.get(url),
@@ -508,8 +522,8 @@ const OrderHistory = () => {
             .finally(() => setLoading(false));
     };
 
-    // Re-fetch whenever the active preset or custom range changes
-    useEffect(() => { fetchTransactions(activePreset, customRange); }, [activePreset, customRange]);
+    // Re-fetch whenever the active preset, custom range, or branch filter changes
+    useEffect(() => { fetchTransactions(activePreset, customRange); }, [activePreset, customRange, currentBranchId]);
 
     const handleCompleteItem = async (item) => {
         setCompleting(item.id);
@@ -634,6 +648,7 @@ const OrderHistory = () => {
                     paymentDetails: t.paymentDetails,
                     status: t.status,
                     date: t.transactionDate,
+                    branchName: t.branch?.name || (isBranch ? user?.branchName : 'Main Store'),
                     items: [],
                     paymentLogs: [],
                     totalPrice: 0,
@@ -943,6 +958,32 @@ const OrderHistory = () => {
                 {/* PAYMENT FILTER */}
                 <PaymentFilter transactions={transactions} value={paymentFilter} onChange={setPaymentFilter} />
 
+                {/* BRANCH FILTER */}
+                {isAdmin && (
+                    <div className="flex items-center gap-1.5 bg-white border border-stone-300 px-3 py-1.5 rounded-lg shadow-sm text-xs">
+                        <MapPin size={13} className="text-zinc-500" />
+                        <span className="font-bold text-zinc-500 uppercase tracking-wider text-[11px]">Branch:</span>
+                        <select
+                            value={selectedBranchId || ''}
+                            onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
+                            className="bg-transparent font-black text-zinc-800 focus:outline-none cursor-pointer"
+                        >
+                            <option value="">All Branches</option>
+                            {branchList.map((b) => (
+                                <option key={b.id} value={b.id}>
+                                    {b.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
+                {isBranch && (
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-sm">
+                        <Store size={13} className="text-emerald-600" />
+                        <span>{user?.branchName || 'Assigned Branch'}</span>
+                    </div>
+                )}
+
                 {/* Spacer */}
                 <div className="flex-1" />
 
@@ -1237,6 +1278,11 @@ const OrderHistory = () => {
                                                 <span className="font-mono text-xs font-bold text-zinc-500">
                                                     #{group.displayId}
                                                 </span>
+                                                {group.branchName && (
+                                                    <span className="block text-[10px] font-black uppercase tracking-wider text-stone-500 mt-0.5">
+                                                        {group.branchName}
+                                                    </span>
+                                                )}
                                                 {group.paymentLogs.length > 0 && (
                                                     <span
                                                         className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full align-middle"

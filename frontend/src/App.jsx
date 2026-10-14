@@ -1,11 +1,30 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Dashboard from './components/Dashboard';
 import TabletLayout from './components/TabletLayout';
+import Login from './components/Login';
+import { Loader2 } from 'lucide-react';
 
-import { useState, useEffect } from 'react';
+const ProtectedRoute = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
 
-function App() {
+  if (loading) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-[#0d0f12]">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+};
+
+function AppContent() {
   const [isTablet, setIsTablet] = useState(window.innerWidth <= 1024);
 
   useEffect(() => {
@@ -15,14 +34,39 @@ function App() {
   }, []);
 
   return (
+    <div className="App overflow-hidden">
+      <Routes>
+        {/* Public Login Route */}
+        <Route path="/login" element={<Login />} />
+
+        {/* Protected Application Routes */}
+        <Route
+          path="/tablet/*"
+          element={
+            <ProtectedRoute>
+              <TabletLayout />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              {isTablet ? <TabletLayout /> : <Dashboard />}
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </div>
+  );
+}
+
+function App() {
+  return (
     <BrowserRouter>
-      <div className="App overflow-hidden">
-        <Routes>
-          {/* Support both the explicit path and the automatic detection */}
-          <Route path="/tablet/*" element={<TabletLayout />} />
-          <Route path="/*" element={isTablet ? <TabletLayout /> : <Dashboard />} />
-        </Routes>
-      </div>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

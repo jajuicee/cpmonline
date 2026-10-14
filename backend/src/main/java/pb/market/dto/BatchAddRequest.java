@@ -11,6 +11,7 @@ public class BatchAddRequest {
     private String status;
     private java.time.LocalDate eta;
     private BigDecimal totalExpense;
+    private Long branchId;
     private List<BatchItem> items;
 
     @Data
@@ -18,5 +19,6 @@ public class BatchAddRequest {
         private Long variantId;
         private Integer quantity;
         private BigDecimal baseCost; // Cost before shipping
+        private Boolean consigned;
     }
 }

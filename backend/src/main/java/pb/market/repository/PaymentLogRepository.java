@@ -15,10 +15,16 @@ public interface PaymentLogRepository extends JpaRepository<PaymentLog, Long> {
     @Query("SELECT pl FROM PaymentLog pl WHERE pl.paymentDate BETWEEN :from AND :to ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findByPaymentDateBetween(LocalDateTime from, LocalDateTime to);
 
+    @Query("SELECT pl FROM PaymentLog pl LEFT JOIN pl.transaction t WHERE pl.paymentDate BETWEEN :from AND :to AND (:branchId IS NULL OR t.branch.id = :branchId) ORDER BY pl.paymentDate DESC")
+    List<PaymentLog> findByPaymentDateBetweenAndBranch(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, @Param("branchId") Long branchId);
+
     void deleteByOrderId(String orderId);
 
     @Query("SELECT pl FROM PaymentLog pl ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findAllOrdered();
+
+    @Query("SELECT pl FROM PaymentLog pl LEFT JOIN pl.transaction t WHERE (:branchId IS NULL OR t.branch.id = :branchId) ORDER BY pl.paymentDate DESC")
+    List<PaymentLog> findAllOrderedByBranch(@Param("branchId") Long branchId);
 
     // Check if backfill has already been done (to avoid duplicate logs)
     boolean existsByOrderId(String orderId);

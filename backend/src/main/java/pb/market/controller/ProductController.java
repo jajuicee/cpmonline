@@ -27,8 +27,13 @@ public class ProductController {
     private final StockWebSocketHandler stockWebSocketHandler;
 
     @GetMapping
-    public List<Product> getAll() {
-        return productService.getAllProducts();
+    public List<Product> getAll(
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        return productService.getAllProducts(branchId);
     }
 
     @PostMapping
@@ -185,8 +190,14 @@ public class ProductController {
 
     /** Recent manual stock adjustments for one variant (used in the View Batches modal). */
     @GetMapping("/variants/{id}/adjustments")
-    public List<StockAdjustment> getAdjustments(@PathVariable("id") Long id) {
-        return productService.getAdjustments(id);
+    public List<StockAdjustment> getAdjustments(
+            @PathVariable("id") Long id,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        return productService.getAdjustments(id, branchId);
     }
 
     @PatchMapping("/variants/{id}/add-stock")
@@ -195,9 +206,14 @@ public class ProductController {
             @RequestParam int quantity,
             @RequestParam(required = false) BigDecimal acquisitionPrice,
             @RequestParam(required = false) Long supplierId,
-            @RequestParam(required = false, defaultValue = "false") boolean consigned) {
+            @RequestParam(required = false, defaultValue = "false") boolean consigned,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         try {
-            ProductVariant updated = productService.addStock(id, quantity, acquisitionPrice, supplierId, consigned);
+            if (user != null && "BRANCH".equals(user.getRole())) {
+                branchId = user.getBranchId();
+            }
+            ProductVariant updated = productService.addStock(id, quantity, acquisitionPrice, supplierId, consigned, branchId);
             stockWebSocketHandler.broadcastStockUpdate();
             return ResponseEntity.ok(Map.of(
                 "id", updated.getId(),
@@ -215,9 +231,14 @@ public class ProductController {
             @PathVariable("id") Long id,
             @RequestParam int quantity,
             @RequestParam(required = false) String reason,
-            @RequestParam(required = false) String note) {
+            @RequestParam(required = false) String note,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         try {
-            ProductVariant variant = productService.deductStock(id, quantity, reason, note);
+            if (user != null && "BRANCH".equals(user.getRole())) {
+                branchId = user.getBranchId();
+            }
+            ProductVariant variant = productService.deductStock(id, quantity, reason, note, branchId);
             stockWebSocketHandler.broadcastStockUpdate();
             return ResponseEntity.ok(Map.of(
                 "id", variant.getId(),

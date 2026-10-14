@@ -3,8 +3,10 @@ import axios from 'axios';
 import {
     ShoppingCart, Search, User, CreditCard, Tag, X,
     AlertCircle, CheckCircle, Loader2, ClipboardList, Trash2,
-    Printer, Receipt
+    Printer, Receipt, Store, Layers, Plus, Minus, ArrowRight,
+    RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const EMPTY_FORM = {
     customerName: '',
@@ -16,42 +18,58 @@ const EMPTY_FORM = {
 const fmt = (val) =>
     val != null && val !== '' ? `₱${Number(val).toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—';
 
-// Ticket number is built once per cart cycle so the live preview, the review modal,
-// and the printed receipt all carry the same identifier.
+const CATEGORY_STYLES = {
+    Paddles: { bg: 'bg-indigo-50', text: 'text-indigo-700', border: 'border-indigo-200' },
+    Accessories: { bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200' },
+    Balls: { bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200' },
+    Shoes: { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200' },
+    Bags: { bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200' },
+    Apparel: { bg: 'bg-cyan-50', text: 'text-cyan-700', border: 'border-cyan-200' },
+    Default: { bg: 'bg-stone-50', text: 'text-stone-700', border: 'border-stone-200' }
+};
+
+const PAYMENT_METHODS = [
+    { id: 'GCash', label: 'GCash', icon: QrCode },
+    { id: 'Cash', label: 'Cash', icon: Banknote },
+    { id: 'Maya', label: 'Maya', icon: QrCode },
+    { id: 'Credit Card', label: 'Card', icon: CreditCard },
+    { id: 'QRPH', label: 'QRPH', icon: QrCode },
+    { id: 'Split Payment', label: 'Split', icon: Split }
+];
+
+// Ticket number is built once per cart cycle
 const newTicketNumber = () =>
     'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
-// Props: products (array), loading (bool), refetchProducts (fn)
 const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
-    const [searchQuery, setSearchQuery]   = useState('');
-    const [cart, setCart]                 = useState([]); // Array of { variant, qty, finalPrice }
-    const [formData, setFormData]         = useState(EMPTY_FORM);
-    const [showSummary, setShowSummary]   = useState(false);
-    const [submitting, setSubmitting]     = useState(false);
-    const [status, setStatus]             = useState({ type: '', message: '' });
-    const [ticketNumber, setTicketNumber] = useState(newTicketNumber);
+    const { user } = useAuth();
+    const [searchQuery, setSearchQuery]         = useState('');
+    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [cart, setCart]                       = useState([]); // Array of { variant, qty, finalPrice, paymentStatus, downpayment }
+    const [formData, setFormData]               = useState(EMPTY_FORM);
+    const [showSummary, setShowSummary]         = useState(false);
+    const [submitting, setSubmitting]           = useState(false);
+    const [status, setStatus]                   = useState({ type: '', message: '' });
+    const [ticketNumber, setTicketNumber]       = useState(newTicketNumber);
 
     // Consignment additions
-    const [orderMode, setOrderMode]       = useState('REGULAR'); // REGULAR or CONSIGNMENT
-    const [consignees, setConsignees]     = useState([]);
+    const [orderMode, setOrderMode]             = useState('REGULAR'); // REGULAR or CONSIGNMENT
+    const [consignees, setConsignees]           = useState([]);
     const [selectedConsigneeId, setSelectedConsigneeId] = useState('');
     const [showAddConsignee, setShowAddConsignee] = useState(false);
     const [newConsigneeName, setNewConsigneeName] = useState('');
 
-    // Print only the ticket. The @media print CSS in the JSX below hides everything
-    // outside the .pos-ticket-printable element so we don't need a popup window.
     const handlePrintTicket = () => window.print();
 
     const fetchConsignees = async () => {
         try {
             const res = await axios.get(`/api/consignees`);
-            setConsignees(res.data);
+            setConsignees(Array.isArray(res.data) ? res.data : []);
         } catch {
             console.error('Failed to fetch consignees');
         }
     };
 
-    // Refetch products on mount so we always have fresh stock data
     useEffect(() => {
         if (refetchProducts) refetchProducts();
         fetchConsignees();
@@ -70,37 +88,70 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         }
     };
 
-    // ── Product search ────────────────────────────────────────────────────────
-    const inventoryList = useMemo(() =>
-        products.flatMap(p => p.variants.map(v => {
+    // Flatten all variants with category info
+    const inventoryList = useMemo(() => {
+        return products.flatMap(p => (p.variants || []).map(v => {
             const isShoe = p.category === 'Shoes';
+            const specs = [
+                v.color && v.color !== 'N/A' ? v.color : '',
+                v.thicknessMm ? `${v.thicknessMm}mm` : '',
+                v.shape && v.shape !== 'N/A' ? v.shape : ''
+            ].filter(Boolean).join(' • ') || 'Standard';
+
             return {
                 ...v,
+                productCategory: p.category || 'General',
+                productBrand: p.brandName,
+                productModel: p.modelName,
+                variantSpecs: specs,
                 displayName: `${p.brandName} ${p.modelName}${v.color && v.color !== 'N/A' ? ` (${v.color})` : ''}${isShoe && v.shape ? ` Size ${v.shape}` : ''}`
             };
-        })).sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true })),
-    [products]);
+        })).sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true }));
+    }, [products]);
 
-    const filteredResults = useMemo(() => {
-        if (!searchQuery.trim()) return [];
-        const q = searchQuery.toLowerCase();
-        return inventoryList
-            .filter(i =>
-                (i.displayName || '').toLowerCase().includes(q) ||
-                (i.sku || '').toLowerCase().includes(q)
-            )
-            .filter(i => i.stockQuantity > 0) // Only allow searching for in-stock items
-            .slice(0, 15);
-    }, [searchQuery, inventoryList]);
+    // Unique Categories
+    const categories = useMemo(() => {
+        const set = new Set(['All']);
+        products.forEach(p => {
+            if (p.category) set.add(p.category);
+        });
+        return Array.from(set);
+    }, [products]);
+
+    // Filtered Catalog
+    const filteredCatalog = useMemo(() => {
+        let list = inventoryList;
+        if (selectedCategory !== 'All') {
+            list = list.filter(item => item.productCategory === selectedCategory);
+        }
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(item =>
+                (item.displayName || '').toLowerCase().includes(q) ||
+                (item.sku || '').toLowerCase().includes(q) ||
+                (item.productBrand || '').toLowerCase().includes(q) ||
+                (item.productModel || '').toLowerCase().includes(q)
+            );
+        }
+        return list;
+    }, [inventoryList, selectedCategory, searchQuery]);
+
+    // Quick lookup map for quantities in cart
+    const cartMap = useMemo(() => {
+        const map = new Map();
+        cart.forEach(item => {
+            map.set(item.variant.id, item.qty);
+        });
+        return map;
+    }, [cart]);
 
     const handleAddToCart = (item) => {
         const existing = cart.find(c => c.variant.id === item.id);
         if (existing) {
             setCart(cart.map(c => c.variant.id === item.id ? { ...c, qty: c.qty + 1 } : c));
         } else {
-            setCart([...cart, { variant: item, qty: 1, finalPrice: item.sellingPrice, paymentStatus: 'PAID' }]);
+            setCart([...cart, { variant: item, qty: 1, finalPrice: item.sellingPrice, paymentStatus: 'PAID', downpayment: '' }]);
         }
-        setSearchQuery('');
         setStatus({ type: '', message: '' });
     };
 
@@ -108,20 +159,31 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         setCart(cart.map(c => c.variant.id === variantId ? { ...c, [field]: value } : c));
     };
 
+    const handleQtyStep = (variantId, delta) => {
+        const item = cart.find(c => c.variant.id === variantId);
+        if (!item) return;
+        const newQty = item.qty + delta;
+        if (newQty <= 0) {
+            removeCartItem(variantId);
+        } else {
+            updateCartItem(variantId, 'qty', Math.min(newQty, item.variant.stockQuantity || 999));
+        }
+    };
+
     const removeCartItem = (variantId) => {
         setCart(cart.filter(c => c.variant.id !== variantId));
     };
 
-    // ── Totals ────────────────────────────────────────────────────────────────
-    const cartTotal = cart.reduce((sum, item) => sum + ((parseFloat(item.finalPrice) || 0) * (parseInt(item.qty) || 0)), 0);
-    const amountPaid = cart.reduce((sum, item) => {
+    // Totals
+    const totalUnits = useMemo(() => cart.reduce((sum, item) => sum + (parseInt(item.qty) || 0), 0), [cart]);
+    const cartTotal = useMemo(() => cart.reduce((sum, item) => sum + ((parseFloat(item.finalPrice) || 0) * (parseInt(item.qty) || 0)), 0), [cart]);
+    const amountPaid = useMemo(() => cart.reduce((sum, item) => {
         if (item.paymentStatus === 'PAID') return sum + ((parseFloat(item.finalPrice) || 0) * (parseInt(item.qty) || 0));
         if (item.paymentStatus === 'PARTIAL') return sum + ((parseFloat(item.downpayment) || 0) * (parseInt(item.qty) || 0));
         return sum;
-    }, 0);
+    }, 0), [cart]);
     const amountUnpaid = cartTotal - amountPaid;
 
-    // ── Reset ─────────────────────────────────────────────────────────────────
     const resetForm = () => {
         setCart([]);
         setFormData(EMPTY_FORM);
@@ -135,27 +197,21 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         setNewConsigneeName('');
     };
 
-    // ── Confirm ───────────────────────────────────────────────────────────────
     const handleConfirm = () => {
-        // Fix #4: Validate all quantities against available stock before submitting
         const oversold = cart.find(item => parseInt(item.qty) > item.variant.stockQuantity);
         if (oversold) {
             setShowSummary(false);
             setStatus({
                 type: 'error',
-                message: `"${oversold.variant.displayName}" only has ${oversold.variant.stockQuantity} in stock but you ordered ${oversold.qty}. Please adjust the quantity.`
+                message: `"${oversold.variant.displayName}" only has ${oversold.variant.stockQuantity} in stock but you selected ${oversold.qty}.`
             });
             return;
         }
 
         setSubmitting(true);
-        // Use the live ticket number that the cashier already sees on the POS preview
-        // so the printed receipt matches what's stored in the DB.
         const generatedTransactionId = ticketNumber;
-
         const payloads = [];
 
-        // Track remaining splits to distribute them across items
         let remainingSplits = [];
         if (formData.paymentMethod === 'Split Payment' && formData.splits && formData.splits.length > 0) {
             remainingSplits = JSON.parse(JSON.stringify(formData.splits));
@@ -164,7 +220,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         cart.forEach(item => {
             const qty = parseInt(item.qty) || 1;
             const pricePerItem = parseFloat(item.finalPrice) || 0;
-            // Expand quantity into individual transactions since 1 transaction = 1 item in DB
+
             for(let i = 0; i < qty; i++) {
                 let amountToPayForItem = 0;
                 if (item.paymentStatus === 'PAID') amountToPayForItem = pricePerItem;
@@ -177,7 +233,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         if (itemRemaining <= 0) break;
                         const splitAmt = parseFloat(split.amount) || 0;
                         if (splitAmt <= 0) continue;
-                        
+
                         let take = Math.min(itemRemaining, splitAmt);
                         itemSplits.push({ method: split.method, amount: take });
                         split.amount = splitAmt - take;
@@ -215,7 +271,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
             setShowSummary(false);
             if (failedItems.length === 0) {
-                setStatus({ type: 'success', message: `Order ${generatedTransactionId} placed successfully!` });
+                setStatus({ type: 'success', message: `Order #${generatedTransactionId} placed successfully!` });
                 resetForm();
                 if (refetchProducts) refetchProducts();
             } else if (failedItems.length < payloads.length) {
@@ -231,620 +287,688 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     };
 
     return (
-        <div className="w-full lg:h-full flex flex-col space-y-6 p-4 md:p-0">
-            {/* Print-only CSS: when the cashier hits Print, every part of the page is hidden
-                except the .pos-ticket-printable receipt, which expands to fill the page. */}
+        <div className="max-w-7xl mx-auto w-full space-y-5">
+            {/* Print-only CSS */}
             <style>{`
                 @media print {
-                    /* Hide everything by default */
-                    body * {
-                        visibility: hidden !important;
-                    }
-                    /* Show the ticket and all its children */
-                    .pos-ticket-printable, .pos-ticket-printable * {
-                        visibility: visible !important;
-                    }
-
-                    /* Completely remove layout-blocking columns and sidebars from taking space */
-                    aside, header, .pos-ticket-no-print {
-                        display: none !important;
-                    }
-
-                    /* Prevent parent containers from clipping the ticket */
-                    html, body, #root, .App, .flex, main, .overflow-hidden, .bg-brand-cream, .bg-stone-50 {
-                        overflow: visible !important;
-                        height: auto !important;
-                        min-height: 0 !important;
-                        background: white !important;
-                        border: none !important;
-                        box-shadow: none !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
-
-                    /* Target printable container */
+                    body * { visibility: hidden !important; }
+                    .pos-ticket-printable, .pos-ticket-printable * { visibility: visible !important; }
+                    aside, header, .pos-ticket-no-print { display: none !important; }
+                    html, body, #root, .App, .flex, main { overflow: visible !important; height: auto !important; background: white !important; }
                     .pos-ticket-printable {
-                        position: absolute !important;
-                        left: 0 !important;
-                        top: 0 !important;
-                        width: 72mm !important;
-                        max-width: 72mm !important;
-                        height: auto !important;
-                        max-height: none !important;
-                        padding: 3mm 4mm !important;
-                        background: white !important;
-                        box-shadow: none !important;
-                        border: none !important;
-                        box-sizing: border-box !important;
-                        overflow: visible !important;
-                        font-size: 9px !important;
-                        line-height: 1.25 !important;
-                        z-index: 9999999 !important;
-                    }
-                    .pos-ticket-printable * {
-                        font-size: 9px !important;
-                        line-height: 1.25 !important;
-                    }
-                    .pos-ticket-printable .ticket-header-title {
-                        font-size: 11px !important;
-                    }
-                    .pos-ticket-printable .ticket-header-subtitle {
-                        font-size: 8px !important;
-                    }
-                    .pos-ticket-printable .ticket-divider {
-                        margin-top: 4px !important;
-                        margin-bottom: 4px !important;
-                    }
-                    .pos-ticket-printable .ticket-total-price {
-                        font-size: 12px !important;
-                    }
-                    .pos-ticket-printable .ticket-total-label {
-                        font-size: 10px !important;
+                        position: absolute !important; left: 0 !important; top: 0 !important;
+                        width: 72mm !important; max-width: 72mm !important; padding: 4mm !important;
+                        background: white !important; font-size: 9px !important; line-height: 1.25 !important;
                     }
                     @page { size: 72mm auto; margin: 0; }
                 }
             `}</style>
 
-            <div className="flex-1 bg-white rounded-xl shadow-sm border border-stone-200 lg:overflow-hidden flex flex-col lg:flex-row lg:min-h-0">
+            {/* ─── Top Banner (Aesthetic Header) ─── */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-stone-200 shadow-sm pos-ticket-no-print">
+                <div>
+                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700">
+                        <Store size={16} />
+                        <span>{user?.branchName || 'Point of Sale'}</span>
+                    </div>
+                    <h1 className="text-2xl font-black text-stone-900 tracking-tight mt-1">
+                        POS Multi-Item Checkout
+                    </h1>
+                    <p className="text-xs text-stone-500 mt-1">
+                        Select items from the catalog on the left to build the order cart, then configure payment and finalize receipt.
+                    </p>
+                </div>
 
-                {/* LEFT COLUMN: CART BUILDING */}
-                <div className="flex-1 p-4 lg:p-8 border-b lg:border-b-0 lg:border-r border-stone-200 overflow-y-auto pb-24 lg:pb-8 pos-ticket-no-print">
-                    <div className="flex items-center gap-3 mb-6">
-                        <ShoppingCart className="text-zinc-600" />
-                        <h2 className="text-xl font-bold text-zinc-800 uppercase tracking-wide">Multi-Item Checkout</h2>
+                <div className="flex items-center gap-2.5">
+                    {cart.length > 0 && (
+                        <button
+                            onClick={resetForm}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-stone-100 hover:bg-rose-50 hover:text-rose-600 text-stone-600 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                        >
+                            <Trash2 size={13} />
+                            <span>Clear Cart</span>
+                        </button>
+                    )}
+                    <button
+                        onClick={() => refetchProducts && refetchProducts()}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        title="Refresh catalog items"
+                    >
+                        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+                        <span>Refresh Catalog</span>
+                    </button>
+                </div>
+            </div>
+
+            {/* Status alerts */}
+            {status.message && (
+                <div className={`p-4 rounded-xl border flex items-center justify-between gap-3 shadow-sm pos-ticket-no-print ${
+                    status.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-red-50 border-red-200 text-red-900'
+                }`}>
+                    <div className="flex items-center gap-2.5 text-sm font-semibold">
+                        {status.type === 'success' ? <CheckCircle2 size={18} className="text-emerald-600" /> : <AlertCircle size={18} className="text-red-600" />}
+                        <span>{status.message}</span>
+                    </div>
+                    <button onClick={() => setStatus({ type: '', message: '' })} className="hover:opacity-75">
+                        <X size={15} />
+                    </button>
+                </div>
+            )}
+
+            {/* ─── TWO-COLUMN WORKSPACE (7 cols : 5 cols) ─── */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pos-ticket-no-print">
+
+                {/* ─── LEFT PANEL: 1. CATALOG PRODUCTS (7 cols) ─── */}
+                <div className="lg:col-span-7 bg-white p-5 rounded-2xl border border-stone-200 shadow-sm flex flex-col h-[740px]">
+                    <div className="space-y-3 mb-4 shrink-0">
+                        <div className="flex items-center justify-between">
+                            <label className="block text-xs font-black uppercase tracking-wider text-stone-700">
+                                1. Catalog Products
+                            </label>
+                            <span className="text-[11px] font-bold text-stone-400">
+                                Click "+ Add" to add to cart
+                            </span>
+                        </div>
+
+                        {/* Search Input */}
+                        <div className="relative">
+                            <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search by brand, model, SKU, or color..."
+                                className="w-full bg-stone-50 border border-stone-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-stone-900 placeholder-stone-400 focus:outline-none focus:border-stone-900 focus:bg-white transition-all shadow-inner"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery('')}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700"
+                                >
+                                    <X size={15} />
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Category Filter Pills */}
+                        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                            {categories.map(cat => (
+                                <button
+                                    key={cat}
+                                    onClick={() => setSelectedCategory(cat)}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                                        selectedCategory === cat
+                                            ? 'bg-stone-900 text-white shadow-sm'
+                                            : 'bg-stone-100 hover:bg-stone-200 text-stone-600'
+                                    }`}
+                                >
+                                    {cat}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
-                    {status.message && (
-                        <div className={`p-4 mb-6 rounded-lg flex items-center gap-3 ${status.type === 'success' ? 'bg-green-50 border border-green-200 text-green-800' : 'bg-red-50 border border-red-200 text-red-800'}`}>
-                            {status.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
-                            <span className="font-medium inline-block flex-1">{status.message}</span>
-                        </div>
-                    )}
-
-                    {/* PRODUCT SEARCH */}
-                    <div className="relative mb-6">
-                        <label className="block text-sm font-bold text-zinc-700 mb-2 flex items-center gap-2">
-                            <Tag size={16} /> Search & Add Product
-                        </label>
+                    {/* Catalog Items List */}
+                    <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 custom-scrollbar">
                         {loading ? (
-                            <div className="flex items-center gap-2 w-full px-4 py-3 border rounded-lg bg-stone-50 text-zinc-400">
-                                <Loader2 size={14} className="animate-spin" />
-                                <span className="text-sm">Loading products...</span>
+                            <div className="flex flex-col items-center justify-center py-24 text-center text-stone-400">
+                                <Loader2 size={30} className="animate-spin text-stone-400 mb-2" />
+                                <span className="text-xs font-bold">Loading live catalog…</span>
+                            </div>
+                        ) : filteredCatalog.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-24 text-center text-stone-400">
+                                <Search size={36} className="text-stone-300 mb-2 stroke-[1.5]" />
+                                <p className="text-sm font-bold text-stone-600">No matching products found</p>
+                                <p className="text-xs text-stone-400 mt-0.5">Try searching with a different brand, model, or category.</p>
                             </div>
                         ) : (
-                            <div className="relative">
-                                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                                <input
-                                    type="text" value={searchQuery}
-                                    onChange={e => setSearchQuery(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-3 border border-stone-300 rounded-lg focus:ring-2 focus:ring-zinc-950 outline-none"
-                                    placeholder="Type SKU or Brand name to add to cart..."
-                                />
-                            </div>
-                        )}
-                        {searchQuery && filteredResults.length > 0 && (
-                            <div className="absolute w-full mt-1 bg-white border border-stone-200 rounded-lg shadow-xl z-50 overflow-hidden">
-                                {filteredResults.map(item => (
-                                    <div key={item.sku} onClick={() => handleAddToCart(item)}
-                                        className="px-4 py-3 hover:bg-stone-50 cursor-pointer text-sm border-b border-stone-100 last:border-0">
-                                        <div className="flex justify-between items-center">
-                                            <div>
-                                                <span className="font-bold text-zinc-900">{item.displayName}</span>
-                                                <span className="block text-xs font-mono text-zinc-400 mt-0.5">SKU: {item.sku}</span>
+                            filteredCatalog.map(item => {
+                                const inCartQty = cartMap.get(item.id) || 0;
+                                const isAvailable = (item.stockQuantity || 0) > 0;
+                                const style = CATEGORY_STYLES[item.productCategory] || CATEGORY_STYLES.Default;
+
+                                return (
+                                    <div
+                                        key={item.id}
+                                        className={`p-4 rounded-xl border transition-all flex items-center justify-between gap-4 ${
+                                            inCartQty > 0
+                                                ? 'bg-stone-50 border-stone-300 shadow-sm'
+                                                : 'bg-white hover:bg-stone-50/70 border-stone-200 hover:border-stone-300 shadow-sm'
+                                        }`}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <span className={`px-2 py-0.5 text-[10px] font-black uppercase tracking-wider rounded-md border ${style.bg} ${style.text} ${style.border}`}>
+                                                    {item.productCategory}
+                                                </span>
+                                                <span className="font-mono text-xs text-stone-400 truncate">
+                                                    {item.sku}
+                                                </span>
+                                                {inCartQty > 0 && (
+                                                    <span className="px-2 py-0.5 text-[10px] font-black rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                                        ✓ {inCartQty} in cart
+                                                    </span>
+                                                )}
                                             </div>
-                                            <span className="text-xs font-bold px-2 py-1 rounded bg-green-100 text-green-700">
-                                                Available
+
+                                            <h4 className="text-sm font-black text-stone-900 leading-snug truncate">
+                                                {item.productBrand} {item.productModel}
+                                            </h4>
+
+                                            <div className="text-xs text-stone-500 font-medium mt-0.5 flex items-center gap-2">
+                                                <span>{item.variantSpecs}</span>
+                                                <span className="text-stone-300">•</span>
+                                                <span className={isAvailable ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
+                                                    {isAvailable ? `${item.stockQuantity} in stock` : 'Out of stock'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-4 shrink-0">
+                                            <div className="text-right">
+                                                <span className="text-base font-black text-emerald-600 font-mono block">
+                                                    {fmt(item.sellingPrice)}
+                                                </span>
+                                                <span className="text-[10px] text-stone-400 font-medium">per unit</span>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => handleAddToCart(item)}
+                                                disabled={!isAvailable}
+                                                className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
+                                                    isAvailable
+                                                        ? inCartQty > 0
+                                                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm active:scale-95'
+                                                            : 'bg-stone-900 hover:bg-stone-800 text-white shadow-sm active:scale-95'
+                                                        : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                                                }`}
+                                            >
+                                                <Plus size={13} />
+                                                <span>{inCartQty > 0 ? 'Add More' : 'Add'}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })
+                        )}
+                    </div>
+                </div>
+
+                {/* ─── RIGHT PANEL: 2. ORDER CART & CHECKOUT (5 cols) ─── */}
+                <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-stone-200 shadow-sm flex flex-col h-[740px]">
+                    <div className="flex items-center justify-between pb-3 border-b border-stone-100 shrink-0">
+                        <div>
+                            <label className="block text-xs font-black uppercase tracking-wider text-stone-700">
+                                2. Order Cart
+                            </label>
+                            <span className="text-[11px] font-bold text-stone-400">
+                                Configure quantities & payment
+                            </span>
+                        </div>
+                        <span className="text-xs font-black bg-stone-900 text-white px-3 py-1 rounded-full shadow-sm">
+                            {cart.length} items • {totalUnits} units
+                        </span>
+                    </div>
+
+                    {/* Cart Items List */}
+                    <div className="flex-1 overflow-y-auto py-3 space-y-2.5 pr-1 custom-scrollbar">
+                        {cart.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-full text-center py-16 text-stone-400">
+                                <Layers size={44} className="text-stone-200 mb-2.5 stroke-[1.2]" />
+                                <h4 className="text-sm font-black uppercase tracking-wider text-stone-600">Cart is Empty</h4>
+                                <p className="text-xs text-stone-400 mt-1 max-w-[220px]">
+                                    Click "+ Add" on any catalog item on the left to add it to this order.
+                                </p>
+                            </div>
+                        ) : (
+                            cart.map((item) => (
+                                <div
+                                    key={item.variant.id}
+                                    className="p-3.5 bg-stone-50/80 border border-stone-200 rounded-xl space-y-2.5"
+                                >
+                                    <div className="flex items-start justify-between gap-2">
+                                        <div className="min-w-0">
+                                            <h5 className="text-xs font-black text-stone-900 truncate">
+                                                {item.variant.displayName}
+                                            </h5>
+                                            <span className="text-[10px] font-mono text-stone-400">
+                                                {item.variant.sku}
                                             </span>
                                         </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeCartItem(item.variant.id)}
+                                            className="text-stone-400 hover:text-rose-500 transition-colors p-1"
+                                            title="Remove item"
+                                        >
+                                            <Trash2 size={14} />
+                                        </button>
                                     </div>
-                                ))}
-                            </div>
-                        )}
-                        {searchQuery && filteredResults.length === 0 && (
-                            <div className="absolute w-full mt-1 bg-white border border-stone-200 rounded-lg shadow-xl z-50 p-4 text-center text-zinc-500 text-sm">
-                                No in-stock items found.
-                            </div>
-                        )}
-                    </div>
 
-                    {/* THE CART LIST */}
-                    <div className="space-y-3">
-                        <label className="block text-sm font-bold text-zinc-700 mb-2">Cart Items ({cart.length})</label>
-                        
-                        {cart.length === 0 ? (
-                            <div className="p-8 border-2 border-dashed border-stone-200 rounded-xl text-center text-zinc-400">
-                                <ShoppingCart size={32} className="mx-auto mb-2 opacity-30" />
-                                <p className="text-sm font-medium">Cart is empty.</p>
-                                <p className="text-xs">Search for a product above to add.</p>
-                            </div>
-                        ) : (
-                            cart.map((item, idx) => (
-                                <div key={idx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 border border-stone-200 rounded-lg bg-stone-50 gap-4">
-                                    <div className="flex-1 min-w-0">
-                                        <p className="font-bold text-zinc-900 truncate">{item.variant.displayName}</p>
-                                        <p className="text-xs font-mono text-zinc-500">
-                                            SKU: {item.variant.sku} <span className="text-amber-600 font-bold ml-2">Available</span>
-                                        </p>
-                                    </div>
-                                    
-                                    <div className="flex items-center gap-3 w-full sm:w-auto mt-3 sm:mt-0 pb-1 sm:pb-0">
-                                        <div className="flex-1 sm:w-20">
-                                            <label className="block text-[10px] uppercase font-bold text-zinc-500 mb-1">Qty</label>
-                                            <input type="number" min="1" max={item.variant.stockQuantity} required value={item.qty}
-                                                onChange={e => updateCartItem(item.variant.id, 'qty', e.target.value)}
-                                                className="w-full px-2 py-1.5 text-sm border rounded focus:ring-2 focus:ring-zinc-950 font-bold" />
+                                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-stone-200/60">
+                                        {/* Stepper */}
+                                        <div className="flex items-center gap-1.5 bg-white border border-stone-200 rounded-lg p-0.5 shadow-sm">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleQtyStep(item.variant.id, -1)}
+                                                className="w-6 h-6 flex items-center justify-center text-stone-600 hover:bg-stone-100 rounded text-xs font-bold"
+                                            >
+                                                <Minus size={11} />
+                                            </button>
+                                            <span className="w-8 text-center text-xs font-black text-stone-900">
+                                                {item.qty}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleQtyStep(item.variant.id, 1)}
+                                                className="w-6 h-6 flex items-center justify-center text-stone-600 hover:bg-stone-100 rounded text-xs font-bold"
+                                            >
+                                                <Plus size={11} />
+                                            </button>
                                         </div>
-                                        <div className="flex-1 sm:w-24">
-                                            <label className="block text-[10px] uppercase font-bold text-zinc-500 mb-1">Price</label>
-                                            <input type="number" min="0" required value={item.finalPrice}
-                                                onChange={e => updateCartItem(item.variant.id, 'finalPrice', e.target.value)}
-                                                placeholder="Price..."
-                                                className="w-full px-2 py-1.5 text-sm border rounded focus:ring-2 focus:ring-zinc-950 font-bold" />
-                                        </div>
-                                        <div className="flex-1 sm:w-28">
-                                            <label className="block text-[10px] uppercase font-bold text-zinc-500 mb-1">Status</label>
-                                            <select value={item.paymentStatus} onChange={e => updateCartItem(item.variant.id, 'paymentStatus', e.target.value)}
-                                                className={`w-full px-2 py-1.5 text-sm border rounded outline-none font-bold ${item.paymentStatus === 'PAID' ? 'bg-green-50 text-green-700 border-green-200 focus:ring-green-500' : (item.paymentStatus === 'PARTIAL' ? 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-500' : 'bg-amber-50 text-amber-700 border-amber-200 focus:ring-amber-500')}`}>
+
+                                        {/* Price & Payment Status */}
+                                        <div className="flex items-center gap-2">
+                                            <select
+                                                value={item.paymentStatus}
+                                                onChange={(e) => updateCartItem(item.variant.id, 'paymentStatus', e.target.value)}
+                                                className="text-[10px] font-black uppercase px-2 py-1 bg-white border border-stone-200 rounded-md focus:outline-none"
+                                            >
                                                 <option value="PAID">PAID</option>
                                                 <option value="PARTIAL">PARTIAL</option>
                                                 <option value="UNPAID">UNPAID</option>
                                             </select>
-                                        </div>
-                                        {item.paymentStatus === 'PARTIAL' && (
-                                            <div className="flex-1 sm:w-24 mt-2 sm:mt-0">
-                                                <label className="block text-[10px] uppercase font-bold text-zinc-500 mb-1">Paid / Item</label>
-                                                <input type="number" min="0" max={item.finalPrice} required value={item.downpayment || ''}
-                                                    onChange={e => updateCartItem(item.variant.id, 'downpayment', e.target.value)}
-                                                    placeholder="0"
-                                                    className="w-full px-2 py-1.5 text-sm border rounded focus:ring-2 focus:ring-zinc-950 font-bold" />
+                                            <div className="text-right">
+                                                <span className="text-xs font-black text-emerald-600 font-mono">
+                                                    {fmt(item.finalPrice * item.qty)}
+                                                </span>
                                             </div>
-                                        )}
-                                        <button type="button" onClick={() => removeCartItem(item.variant.id)}
-                                            className="text-zinc-400 hover:text-red-500 p-2 mt-4 transition-colors">
-                                            <Trash2 size={18} />
-                                        </button>
+                                        </div>
                                     </div>
+
+                                    {item.paymentStatus === 'PARTIAL' && (
+                                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-stone-200/60 text-xs">
+                                            <span className="text-[10px] font-bold text-stone-400 uppercase">Paid / Unit:</span>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max={item.finalPrice}
+                                                value={item.downpayment || ''}
+                                                onChange={(e) => updateCartItem(item.variant.id, 'downpayment', e.target.value)}
+                                                placeholder="0.00"
+                                                className="w-24 px-2 py-1 text-right text-xs font-black border border-stone-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-stone-900"
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             ))
                         )}
                     </div>
-                </div>
 
-                {/* MIDDLE COLUMN: POS TICKET (live receipt preview) */}
-                <div className="w-full lg:w-[340px] bg-gradient-to-b from-stone-100 to-stone-200/60 p-4 lg:p-6 border-b lg:border-b-0 lg:border-r border-stone-200 flex flex-col overflow-y-auto">
-                    <PosTicket
-                        cart={cart}
-                        cartTotal={cartTotal}
-                        amountPaid={amountPaid}
-                        amountUnpaid={amountUnpaid}
-                        ticketNumber={ticketNumber}
-                        customerName={orderMode === 'REGULAR' ? formData.customerName : consignees.find(c => c.id.toString() === selectedConsigneeId)?.name || 'Consignee'}
-                        paymentMethod={formData.paymentMethod}
-                        orderNote={formData.orderNote}
-                        onPrint={handlePrintTicket}
-                    />
-                </div>
-
-                {/* RIGHT COLUMN: CUSTOMER & PAYMENT DETAILS */}
-                <div className="w-full lg:w-[360px] bg-stone-50 p-4 lg:p-8 flex flex-col overflow-y-auto pb-24 lg:pb-8 pos-ticket-no-print">
-                    <form onSubmit={(e) => { e.preventDefault(); setShowSummary(true); }} className="space-y-6 flex-1 flex flex-col">
-                        
-                        {/* MODE TOGGLE */}
-                        <div className="flex bg-stone-200 p-1 rounded-xl w-full">
-                            <button type="button" onClick={() => setOrderMode('REGULAR')}
-                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${orderMode === 'REGULAR' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>
-                                Regular Sale
-                            </button>
-                            <button type="button" onClick={() => setOrderMode('CONSIGNMENT')}
-                                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${orderMode === 'CONSIGNMENT' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>
-                                Consignment
-                            </button>
-                        </div>
-
-                        {orderMode === 'REGULAR' ? (
-                            <div>
-                                <label className="block text-sm font-bold text-zinc-700 mb-2 flex items-center gap-2">
-                                    <User size={16} /> Customer Name
-                                </label>
-                                <input type="text" required value={formData.customerName}
-                                    onChange={e => setFormData({ ...formData, customerName: e.target.value })}
-                                    className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-zinc-950 outline-none"
-                                    placeholder="e.g. Juan dela Cruz" />
+                    {/* Customer & Checkout Controls */}
+                    {cart.length > 0 && (
+                        <div className="pt-3 border-t border-stone-200 space-y-3 shrink-0">
+                            {/* Mode Toggle */}
+                            <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-bold">
+                                <button
+                                    type="button"
+                                    onClick={() => setOrderMode('REGULAR')}
+                                    className={`flex-1 py-1.5 rounded-lg transition-all ${
+                                        orderMode === 'REGULAR' ? 'bg-white text-stone-900 shadow-sm font-black' : 'text-stone-500 hover:text-stone-800'
+                                    }`}
+                                >
+                                    Regular Sale
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setOrderMode('CONSIGNMENT')}
+                                    className={`flex-1 py-1.5 rounded-lg transition-all ${
+                                        orderMode === 'CONSIGNMENT' ? 'bg-white text-stone-900 shadow-sm font-black' : 'text-stone-500 hover:text-stone-800'
+                                    }`}
+                                >
+                                    Consignment
+                                </button>
                             </div>
-                        ) : (
-                            <div className="space-y-3">
+
+                            {/* Customer / Consignee Input */}
+                            {orderMode === 'REGULAR' ? (
                                 <div>
-                                    <label className="block text-sm font-bold text-zinc-700 mb-2 flex items-center gap-2">
-                                        <User size={16} /> Select Consignee
-                                    </label>
-                                    <select required value={selectedConsigneeId} onChange={e => setSelectedConsigneeId(e.target.value)}
-                                        className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-zinc-950 outline-none bg-white">
-                                        <option value="" disabled>-- Choose a Consignee --</option>
-                                        {consignees.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                    </select>
+                                    <input
+                                        type="text"
+                                        required
+                                        value={formData.customerName}
+                                        onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+                                        placeholder="Customer Name (e.g. Juan dela Cruz)"
+                                        className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2 text-xs font-medium focus:outline-none focus:border-stone-900 focus:bg-white transition-all shadow-inner"
+                                    />
                                 </div>
-                                {!showAddConsignee ? (
-                                    <button type="button" onClick={() => setShowAddConsignee(true)} className="text-xs font-bold text-blue-600 hover:underline">
-                                        + Add New Consignee
-                                    </button>
-                                ) : (
-                                    <div className="flex items-center gap-2 bg-white p-2 rounded border border-stone-200">
-                                        <input type="text" value={newConsigneeName} onChange={e => setNewConsigneeName(e.target.value)}
-                                            className="flex-1 px-2 py-1 text-sm border rounded" placeholder="New Consignee Name..." />
-                                        <button type="button" onClick={handleAddConsignee} className="px-3 py-1 bg-zinc-950 text-white text-xs rounded font-bold">Add</button>
-                                        <button type="button" onClick={() => setShowAddConsignee(false)} className="px-2 py-1 bg-stone-200 text-xs rounded"><X size={14}/></button>
+                            ) : (
+                                <div className="space-y-1.5">
+                                    <div className="flex gap-2">
+                                        <select
+                                            value={selectedConsigneeId}
+                                            onChange={(e) => setSelectedConsigneeId(e.target.value)}
+                                            className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2 text-xs font-bold focus:outline-none"
+                                        >
+                                            <option value="" disabled>-- Select Consignee --</option>
+                                            {consignees.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                        </select>
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowAddConsignee(v => !v)}
+                                            className="px-2.5 py-1 text-xs font-black bg-stone-100 hover:bg-stone-200 rounded-xl"
+                                        >
+                                            + New
+                                        </button>
                                     </div>
-                                )}
-                            </div>
-                        )}
-
-                        <div>
-                            <label className="block text-sm font-bold text-zinc-700 mb-2 flex items-center gap-2">
-                                <CreditCard size={16} /> Payment Method
-                            </label>
-                            <select value={formData.paymentMethod}
-                                onChange={e => setFormData({ ...formData, paymentMethod: e.target.value })}
-                                className="w-full px-4 py-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-zinc-950 mb-3">
-                                <option value="GCash">GCash</option>
-                                <option value="QRPH">QRPH</option>
-                                <option value="Banko">Banko</option>
-                                <option value="BDO">BDO</option>
-                                <option value="BPI">BPI</option>
-                                <option value="GoTyme">GoTyme</option>
-                                <option value="Cash">Cash</option>
-                                <option value="Credit Card">Credit Card</option>
-                                <option value="Maya">Maya</option>
-                                <option value="Split Payment">Split Payment</option>
-                            </select>
-
-                            {formData.paymentMethod === 'Split Payment' && (
-                                <div className="p-4 bg-stone-100 rounded-xl border border-stone-200 space-y-3">
-                                    <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider">Define Splits</label>
-                                    {(formData.splits || []).map((split, idx) => (
-                                        <div key={idx} className="flex gap-2">
-                                            <select 
-                                                value={split.method}
-                                                onChange={e => {
-                                                    const newSplits = [...formData.splits];
-                                                    newSplits[idx].method = e.target.value;
-                                                    setFormData({ ...formData, splits: newSplits });
-                                                }}
-                                                className="flex-1 px-3 py-2 text-sm border rounded bg-white outline-none focus:ring-2 focus:ring-zinc-950">
-                                                <option value="GCash">GCash</option>
-                                                <option value="QRPH">QRPH</option>
-                                                <option value="Banko">Banko</option>
-                                                <option value="BDO">BDO</option>
-                                                <option value="BPI">BPI</option>
-                                                <option value="GoTyme">GoTyme</option>
-                                                <option value="Cash">Cash</option>
-                                                <option value="Credit Card">Credit Card</option>
-                                                <option value="Maya">Maya</option>
-                                            </select>
-                                            <input 
-                                                type="number" min="0" step="0.01"
-                                                value={split.amount}
-                                                placeholder="Amount"
-                                                onChange={e => {
-                                                    const newSplits = [...formData.splits];
-                                                    newSplits[idx].amount = e.target.value;
-                                                    setFormData({ ...formData, splits: newSplits });
-                                                }}
-                                                className="w-24 px-3 py-2 text-sm border rounded outline-none focus:ring-2 focus:ring-zinc-950 font-bold"
+                                    {showAddConsignee && (
+                                        <div className="flex gap-1.5">
+                                            <input
+                                                type="text"
+                                                value={newConsigneeName}
+                                                onChange={(e) => setNewConsigneeName(e.target.value)}
+                                                placeholder="New consignee name..."
+                                                className="flex-1 px-3 py-1 text-xs border border-stone-200 rounded-lg"
                                             />
-                                            <button type="button" onClick={() => {
-                                                const newSplits = formData.splits.filter((_, i) => i !== idx);
-                                                setFormData({ ...formData, splits: newSplits });
-                                            }} className="p-2 text-zinc-400 hover:text-red-500">
-                                                <X size={16}/>
+                                            <button
+                                                type="button"
+                                                onClick={handleAddConsignee}
+                                                className="px-3 py-1 bg-stone-900 text-white text-xs font-bold rounded-lg"
+                                            >
+                                                Add
                                             </button>
                                         </div>
-                                    ))}
-                                    <button type="button" onClick={() => setFormData({ ...formData, splits: [...(formData.splits || []), { method: 'GCash', amount: '' }] })}
-                                        className="text-xs font-bold text-blue-600 hover:underline">
-                                        + Add Another Split
-                                    </button>
-                                    <div className="pt-2 border-t border-stone-200 flex justify-between text-xs font-bold">
-                                        <span className="text-zinc-500">Total Splits</span>
-                                        <span className={((formData.splits || []).reduce((s, x) => s + (parseFloat(x.amount)||0), 0) !== amountPaid) ? 'text-red-600' : 'text-green-600'}>
-                                            {fmt((formData.splits || []).reduce((s, x) => s + (parseFloat(x.amount)||0), 0))} / {fmt(amountPaid)}
-                                        </span>
-                                    </div>
+                                    )}
                                 </div>
                             )}
-                        </div>
 
-                        <div>
-                            <label className="block text-sm font-bold text-zinc-700 mb-2">Order Notes (Optional)</label>
-                            <textarea 
-                                value={formData.orderNote}
-                                onChange={e => setFormData({ ...formData, orderNote: e.target.value })}
-                                className="w-full px-4 py-2 border rounded-lg bg-white outline-none focus:ring-2 focus:ring-zinc-950 resize-none h-20 text-sm"
-                                placeholder="e.g. Paid 500 in GCash, 300 in Cash..."
-                            />
-                        </div>
-
-                        <div className="mt-auto pt-6 border-t border-stone-200">
-                            <div className="flex justify-between items-end mb-2">
-                                <span className="font-bold text-zinc-500 uppercase tracking-wide text-sm">Order Total</span>
-                                <span className="text-3xl font-black text-zinc-900">{fmt(cartTotal)}</span>
+                            {/* Payment Method Pills */}
+                            <div>
+                                <span className="block text-[10px] font-black uppercase tracking-wider text-stone-400 mb-1.5">
+                                    Payment Method:
+                                </span>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                    {PAYMENT_METHODS.map(m => {
+                                        const isSelected = formData.paymentMethod === m.id;
+                                        const Icon = m.icon;
+                                        return (
+                                            <button
+                                                key={m.id}
+                                                type="button"
+                                                onClick={() => setFormData({ ...formData, paymentMethod: m.id })}
+                                                className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                                                    isSelected
+                                                        ? 'bg-stone-900 border-stone-900 text-white shadow-sm'
+                                                        : 'bg-stone-50 border-stone-200 text-stone-600 hover:bg-stone-100'
+                                                }`}
+                                            >
+                                                <Icon size={12} />
+                                                <span>{m.label}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                            
-                            {amountUnpaid > 0 && (
-                                <div className="flex justify-between items-center mb-6 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
-                                    <span className="text-xs font-bold text-amber-700 uppercase">Unpaid Balance</span>
-                                    <span className="text-sm font-black text-amber-800">{fmt(amountUnpaid)}</span>
+
+                            {/* Split payment definitions */}
+                            {formData.paymentMethod === 'Split Payment' && (
+                                <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 space-y-2 text-xs">
+                                    <div className="flex justify-between items-center text-[10px] font-black uppercase text-stone-500">
+                                        <span>Define Splits</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, splits: [...(formData.splits || []), { method: 'Cash', amount: '' }] })}
+                                            className="text-emerald-700 font-bold hover:underline"
+                                        >
+                                            + Add
+                                        </button>
+                                    </div>
+                                    {(formData.splits || []).map((split, idx) => (
+                                        <div key={idx} className="flex gap-2">
+                                            <select
+                                                value={split.method}
+                                                onChange={(e) => {
+                                                    const s = [...formData.splits]; s[idx].method = e.target.value;
+                                                    setFormData({ ...formData, splits: s });
+                                                }}
+                                                className="flex-1 bg-white border border-stone-200 rounded-lg px-2 py-1 text-xs font-bold"
+                                            >
+                                                <option value="GCash">GCash</option>
+                                                <option value="Cash">Cash</option>
+                                                <option value="Maya">Maya</option>
+                                                <option value="Credit Card">Card</option>
+                                                <option value="QRPH">QRPH</option>
+                                            </select>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value={split.amount}
+                                                onChange={(e) => {
+                                                    const s = [...formData.splits]; s[idx].amount = e.target.value;
+                                                    setFormData({ ...formData, splits: s });
+                                                }}
+                                                placeholder="Amount"
+                                                className="w-24 px-2 py-1 text-xs font-mono font-bold bg-white border border-stone-200 rounded-lg text-right"
+                                            />
+                                        </div>
+                                    ))}
                                 </div>
                             )}
 
-                            <button type="submit" disabled={
-                                cart.length === 0 || 
-                                (orderMode === 'REGULAR' ? !formData.customerName : !selectedConsigneeId) ||
-                                (formData.paymentMethod === 'Split Payment' && (formData.splits || []).reduce((s, x) => s + (parseFloat(x.amount)||0), 0) !== amountPaid)
-                            }
-                                className="w-full bg-zinc-950 text-white px-8 py-4 mt-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-all text-lg shadow-md">
-                                <ClipboardList size={20} /> Review Order
+                            {/* Order Total & Submit Action */}
+                            <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">
+                                        Grand Total
+                                    </span>
+                                    <span className="text-2xl font-black text-stone-900 font-mono leading-none">
+                                        {fmt(cartTotal)}
+                                    </span>
+                                </div>
+                                {amountUnpaid > 0 && (
+                                    <span className="text-[10px] font-black px-2 py-1 rounded bg-amber-100 text-amber-800">
+                                        Unpaid: {fmt(amountUnpaid)}
+                                    </span>
+                                )}
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => setShowSummary(true)}
+                                disabled={
+                                    cart.length === 0 ||
+                                    (orderMode === 'REGULAR' ? !formData.customerName.trim() : !selectedConsigneeId) ||
+                                    (formData.paymentMethod === 'Split Payment' && (formData.splits || []).reduce((s, x) => s + (parseFloat(x.amount)||0), 0) !== amountPaid)
+                                }
+                                className="w-full py-3.5 px-4 rounded-xl text-xs font-black uppercase tracking-wider bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                            >
+                                <span>Review & Checkout ({fmt(cartTotal)})</span>
+                                <ArrowRight size={15} />
                             </button>
                         </div>
-                    </form>
+                    )}
                 </div>
-
             </div>
 
-            {/* ── ORDER SUMMARY MODAL ─────────────────────────────────────────────── */}
+            {/* ─── REVIEW & CHECKOUT MODAL ─── */}
             {showSummary && (
-                <div className="fixed inset-0 bg-zinc-950/70 z-50 flex items-center justify-center p-4 pos-ticket-no-print">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-
-                        {/* Modal header */}
-                        <div className="bg-zinc-950 px-6 py-5 flex items-center justify-between shrink-0">
-                            <div className="flex items-center gap-3 text-white">
-                                <ClipboardList size={20} />
-                                <h3 className="text-lg font-bold uppercase tracking-wide">Order Summary</h3>
+                <div className="fixed inset-0 bg-stone-950/70 z-50 flex items-center justify-center p-4 backdrop-blur-sm pos-ticket-no-print">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
+                        {/* Modal Header */}
+                        <div className="bg-stone-950 px-6 py-4 flex items-center justify-between text-white shrink-0">
+                            <div className="flex items-center gap-2.5">
+                                <ClipboardList size={18} className="text-emerald-400" />
+                                <h3 className="text-base font-black uppercase tracking-wider">Review Order Ticket</h3>
                             </div>
-                            <button onClick={() => setShowSummary(false)} className="text-zinc-400 hover:text-white">
-                                <X size={20} />
+                            <button onClick={() => setShowSummary(false)} className="text-stone-400 hover:text-white">
+                                <X size={18} />
                             </button>
                         </div>
 
-                        {/* Summary scrolling content */}
-                        <div className="p-6 overflow-y-auto">
-                            <div className="mb-6 space-y-2 text-sm border-b pb-4">
-                                <div className="flex justify-between">
-                                    <span className="text-zinc-500 font-medium">{orderMode === 'REGULAR' ? 'Customer' : 'Consignee'}</span>
-                                    <span className="font-bold text-zinc-900">
+                        {/* Modal Body */}
+                        <div className="p-6 overflow-y-auto space-y-5">
+                            {/* Meta Card */}
+                            <div className="bg-stone-50 border border-stone-200 rounded-2xl p-4 grid grid-cols-2 gap-4 text-xs">
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block mb-0.5">
+                                        {orderMode === 'REGULAR' ? 'Customer' : 'Consignee'}
+                                    </span>
+                                    <span className="font-black text-stone-900 text-sm">
                                         {orderMode === 'REGULAR' ? formData.customerName : consignees.find(c => c.id.toString() === selectedConsigneeId)?.name}
                                     </span>
                                 </div>
-                                <div className="flex justify-between items-start">
-                                    <span className="text-zinc-500 font-medium mt-1">Payment Method</span>
-                                    <div className="text-right">
-                                        <span className="font-bold text-zinc-900">{formData.paymentMethod}</span>
-                                        {formData.orderNote && (
-                                            <span className="text-xs text-zinc-500 font-mono block mt-0.5">
-                                                Note: {formData.orderNote}
-                                            </span>
-                                        )}
-                                    </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block mb-0.5">
+                                        Payment Method
+                                    </span>
+                                    <span className="font-black text-stone-900 text-sm">
+                                        {formData.paymentMethod}
+                                    </span>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-zinc-500 font-medium">Payment Status</span>
-                                    <span className="font-bold text-zinc-900">{amountUnpaid > 0 ? 'Mixed / Selected Partial' : 'All Paid'}</span>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block mb-0.5">
+                                        Ticket Number
+                                    </span>
+                                    <span className="font-mono font-bold text-stone-700">
+                                        {ticketNumber}
+                                    </span>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block mb-0.5">
+                                        Status
+                                    </span>
+                                    <span className="font-bold text-emerald-700">
+                                        {amountUnpaid > 0 ? 'Partial Payment' : 'Fully Paid'}
+                                    </span>
                                 </div>
                             </div>
 
-                            <p className="font-bold text-zinc-800 mb-3 text-sm">Items in Cart</p>
-                            <div className="space-y-3 mb-6">
-                                {cart.map((item, idx) => (
-                                    <div key={idx} className="flex justify-between text-sm py-2 px-3 bg-stone-50 rounded border">
-                                        <div className="flex-[2] truncate pr-2 font-medium text-zinc-800 flex items-center gap-2">
-                                            {item.qty}x {item.variant.displayName}
-                                            {item.paymentStatus === 'UNPAID' && <span className="bg-amber-100 text-amber-800 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">UNPAID</span>}
-                                            {item.paymentStatus === 'PARTIAL' && <span className="bg-blue-100 text-blue-800 text-[10px] uppercase font-bold px-1.5 py-0.5 rounded">PARTIAL (Paid {fmt(item.downpayment || 0)} / ea)</span>}
+                            {/* Cart Items Table */}
+                            <div>
+                                <span className="text-xs font-black uppercase tracking-wider text-stone-500 mb-2 block">
+                                    Items ({totalUnits} units)
+                                </span>
+                                <div className="border border-stone-200 rounded-xl overflow-hidden divide-y divide-stone-100 text-xs">
+                                    {cart.map((item, idx) => (
+                                        <div key={idx} className="p-3 bg-white flex items-center justify-between gap-4">
+                                            <div className="min-w-0">
+                                                <div className="font-black text-stone-900 truncate">
+                                                    {item.qty}x {item.variant.displayName}
+                                                </div>
+                                                <div className="font-mono text-[10px] text-stone-400">
+                                                    {item.variant.sku}
+                                                </div>
+                                            </div>
+                                            <div className="text-right shrink-0">
+                                                <span className="font-black text-stone-900 font-mono">
+                                                    {fmt(item.finalPrice * item.qty)}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div className="font-mono text-zinc-500 text-xs mt-0.5 w-24 truncate">{item.variant.sku}</div>
-                                        <div className="font-bold text-zinc-900 text-right w-24">{fmt(item.finalPrice * item.qty)}</div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
 
-                            <div className="space-y-2 border-t pt-4 text-base">
-                                <div className="flex justify-between font-bold">
-                                    <span className="text-zinc-800 text-lg">Order Total</span>
-                                    <span className="text-zinc-900 text-xl">{fmt(cartTotal)}</span>
+                            {/* Totals */}
+                            <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-2xl p-4 flex items-center justify-between">
+                                <div>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
+                                        Total Payable
+                                    </span>
+                                    <span className="text-2xl font-black text-emerald-700 font-mono">
+                                        {fmt(cartTotal)}
+                                    </span>
                                 </div>
                                 {amountUnpaid > 0 && (
-                                    <>
-                                        <div className="flex justify-between text-emerald-700 font-bold">
-                                            <span>Paid Now</span>
-                                            <span>{fmt(amountPaid)}</span>
-                                        </div>
-                                        <div className="flex justify-between font-bold text-amber-600 border-t border-dashed border-stone-300 pt-2 mt-2">
-                                            <span>Remaining Unpaid Balance</span>
-                                            <span>{fmt(amountUnpaid)}</span>
-                                        </div>
-                                    </>
+                                    <div className="text-right">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 block">
+                                            Unpaid Balance
+                                        </span>
+                                        <span className="text-lg font-black text-amber-700 font-mono">
+                                            {fmt(amountUnpaid)}
+                                        </span>
+                                    </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Confirm / Cancel */}
-                        <div className="p-5 bg-stone-50 border-t flex gap-3 shrink-0">
-                            <button onClick={() => setShowSummary(false)} disabled={submitting}
-                                className="flex-1 px-4 py-3 rounded-lg border border-stone-300 font-bold text-zinc-600 hover:bg-stone-100 disabled:opacity-50 transition-all">
-                                Edit Details
+                        {/* Modal Action Footer */}
+                        <div className="p-5 bg-stone-50 border-t border-stone-200 flex gap-3 shrink-0">
+                            <button
+                                type="button"
+                                onClick={handlePrintTicket}
+                                className="px-4 py-3 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+                            >
+                                <Printer size={15} />
+                                <span>Print Ticket</span>
                             </button>
-                            <button onClick={handleConfirm} disabled={submitting}
-                                className="flex-[2] px-4 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-all">
-                                {submitting
-                                    ? <><Loader2 size={16} className="animate-spin" /> Processing…</>
-                                    : <><CheckCircle size={16} /> Confirm Checkout</>}
+                            <button
+                                type="button"
+                                onClick={() => setShowSummary(false)}
+                                disabled={submitting}
+                                className="flex-1 py-3 px-4 border border-stone-300 font-black text-xs uppercase tracking-wider text-stone-600 hover:bg-stone-100 rounded-xl transition-all cursor-pointer"
+                            >
+                                Edit Order
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirm}
+                                disabled={submitting}
+                                className="flex-[2] py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                            >
+                                {submitting ? (
+                                    <>
+                                        <Loader2 size={15} className="animate-spin" />
+                                        <span>Processing…</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Check size={15} />
+                                        <span>Confirm Checkout</span>
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
-        </div>
-    );
-};
 
-/* ============================================================================
- * POS Ticket — receipt-style live preview of the current cart.
- * Mimics an 80mm thermal-printer slip: monospace font, dashed separators,
- * right-aligned line totals, prominent grand total.
- * Print button uses window.print(); the page-level @media print CSS in
- * OrderPage hides everything except the .pos-ticket-printable wrapper.
- * ========================================================================== */
-const PosTicket = ({ cart, cartTotal, amountPaid, amountUnpaid, ticketNumber, customerName, paymentMethod, orderNote, onPrint }) => {
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
-    const timeStr = now.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
-    const totalItems = cart.reduce((sum, item) => sum + (parseInt(item.qty) || 0), 0);
-    const hasUnpaid = amountUnpaid > 0;
-
-    return (
-        <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between mb-3 pos-ticket-no-print">
-                <h3 className="text-sm font-black text-zinc-700 uppercase tracking-wider flex items-center gap-2">
-                    <Receipt size={16} /> POS Ticket
-                </h3>
-                <button
-                    onClick={onPrint}
-                    disabled={cart.length === 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 text-white rounded-lg text-xs font-bold hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
-                    title="Print ticket"
-                >
-                    <Printer size={13} /> Print
-                </button>
-            </div>
-
-            {/* Receipt body */}
-            <div className="pos-ticket-printable bg-white rounded-xl shadow-md border border-stone-300 px-5 py-6 font-mono text-[12px] leading-relaxed text-zinc-900 flex-1 overflow-y-auto">
-                {/* Header */}
+            {/* Hidden Printable Ticket */}
+            <div className="pos-ticket-printable hidden">
                 <div className="text-center mb-3">
                     <div className="ticket-header-title text-[15px] font-black tracking-wider uppercase">Cebu Pickleball Market</div>
                     <div className="ticket-header-subtitle text-[10px] text-zinc-500 mt-0.5">Authorized Paddle Retailer</div>
+                    <div className="ticket-header-subtitle text-[10px] text-zinc-500">{user?.branchName || 'Branch Terminal'}</div>
                 </div>
 
                 <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
-                {/* Meta */}
-                <div className="space-y-0.5 text-[11px]">
-                    <div className="flex">
-                        <span className="text-zinc-500 w-20 shrink-0">Ticket #</span>
-                        <span className="font-bold">{ticketNumber}</span>
-                    </div>
-                    <div className="flex">
-                        <span className="text-zinc-500 w-20 shrink-0">Date</span>
-                        <span>{dateStr} · {timeStr}</span>
-                    </div>
-                    <div className="flex">
-                        <span className="text-zinc-500 w-20 shrink-0">Customer</span>
-                        <span className={customerName ? '' : 'italic text-zinc-400'}>{customerName || '—'}</span>
-                    </div>
-                    <div className="flex">
-                        <span className="text-zinc-500 w-20 shrink-0">Payment</span>
-                        <span>{paymentMethod}</span>
-                    </div>
+                <div className="space-y-0.5 mb-2 text-[10px]">
+                    <div className="flex justify-between"><span>Ticket:</span><span className="font-bold">{ticketNumber}</span></div>
+                    <div className="flex justify-between"><span>Customer:</span><span className="font-bold">{formData.customerName || 'Walk-in'}</span></div>
+                    <div className="flex justify-between"><span>Payment:</span><span className="font-bold">{formData.paymentMethod}</span></div>
                 </div>
 
                 <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
-                {/* Line items */}
-                {cart.length === 0 ? (
-                    <div className="text-center text-zinc-400 italic py-8 text-[11px]">
-                        Cart is empty.<br />Add items to build the ticket.
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {cart.map((item, idx) => {
-                            const qty = parseInt(item.qty) || 0;
-                            const price = parseFloat(item.finalPrice) || 0;
-                            const lineTotal = qty * price;
-                            return (
-                                <div key={idx} className="text-[11px] py-0.5">
-                                    <div className="flex justify-between items-start">
-                                        <div className="flex-1 pr-2">
-                                            <span className="font-bold">{qty} × {item.variant.displayName}</span>
-                                            {item.paymentStatus === 'UNPAID' && (
-                                                <span className="text-amber-700 font-bold text-[10px] block mt-0.5">[UNPAID]</span>
-                                            )}
-                                            {item.paymentStatus === 'PARTIAL' && (
-                                                <span className="text-blue-700 font-bold text-[10px] block mt-0.5">[PARTIAL: Paid {fmt(item.downpayment || 0)} / ea]</span>
-                                            )}
-                                        </div>
-                                        <span className="font-bold whitespace-nowrap">₱{lineTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-
-                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
-
-                {/* Totals */}
-                <div className="space-y-1 text-[11px]">
-                    <div className="flex justify-between">
-                        <span className="text-zinc-500">Items</span>
-                        <span>{totalItems}</span>
-                    </div>
-                    <div className="flex justify-between">
-                        <span className="text-zinc-500">Subtotal</span>
-                        <span>₱{cartTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                </div>
-
-                <div className="ticket-divider border-t border-double border-zinc-700 my-2" />
-
-                <div className="flex justify-between items-baseline">
-                    <span className="ticket-total-label text-[13px] font-black uppercase">Total</span>
-                    <span className="ticket-total-price text-[16px] font-black">₱{cartTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                </div>
-
-                {hasUnpaid && (
-                    <div className="mt-2 space-y-0.5">
-                        <div className="flex justify-between text-[10px] text-emerald-700 font-bold">
-                            <span>PAID NOW</span>
-                            <span>₱{amountPaid.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                <div className="space-y-1 mb-2">
+                    {cart.map((item, i) => (
+                        <div key={i} className="flex justify-between text-[10px]">
+                            <span>{item.qty}x {item.variant.displayName}</span>
+                            <span className="font-bold">{fmt(item.finalPrice * item.qty)}</span>
                         </div>
-                        <div className="px-2 py-1 bg-amber-50 border border-amber-300 rounded text-[10px] flex justify-between font-bold text-amber-800">
-                            <span>UNPAID BALANCE</span>
-                            <span>₱{amountUnpaid.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                    </div>
-                )}
+                    ))}
+                </div>
 
-                {orderNote && (
-                    <div className="mt-3 text-[10px] text-zinc-600 italic border-t border-dashed border-zinc-300 pt-2 ticket-divider">
-                        Note: {orderNote}
-                    </div>
-                )}
+                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
-                <div className="ticket-divider border-t border-dashed border-zinc-400 my-3" />
-
-                <div className="text-center text-[10px] text-zinc-500 leading-snug">
-                    <div className="font-bold text-zinc-700">Thank you for your purchase!</div>
-                    <div className="mt-1">Keep this receipt for warranty &amp; returns.</div>
+                <div className="flex justify-between text-[13px] font-black">
+                    <span>TOTAL:</span>
+                    <span>{fmt(cartTotal)}</span>
                 </div>
             </div>
         </div>

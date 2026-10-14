@@ -23,8 +23,14 @@ public class StockBatchController {
     /** Returns ALL batches for a variant (FIFO order) */
     @Transactional(readOnly = true)
     @GetMapping("/variant/{variantId}")
-    public ResponseEntity<?> getBatchesForVariant(@PathVariable("variantId") Long variantId) {
-        List<StockBatch> batches = stockBatchRepository.findByVariantIdOrderByConsignedAscRestockedAtAsc(variantId);
+    public ResponseEntity<?> getBatchesForVariant(
+            @PathVariable("variantId") Long variantId,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        List<StockBatch> batches = stockBatchRepository.findByVariantIdAndBranchOrderByConsignedAscRestockedAtAsc(variantId, branchId);
         var result = batches.stream().map(b -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", b.getId());
@@ -44,31 +50,16 @@ public class StockBatchController {
         return ResponseEntity.ok(result);
     }
 
-    /**
-     * Returns sale records for every batch of a given variant, grouped by the batch's DB id.
-     * Each record represents one unit sold from that batch.
-     *
-     * Response shape:
-     * {
-     *   "123": [                          // batch DB id (Long → String key)
-     *     {
-     *       "transactionId": "abc-uuid",  // order UUID (or "LEGACY-{id}" for old orders)
-     *       "internalId": 42,             // transaction row PK
-     *       "type": "REGULAR",            // REGULAR or CONSIGNMENT
-     *       "status": "FULL",             // FULL, PARTIAL, UNPAID
-     *       "customerName": "Jane",
-     *       "consigneeName": null,        // null for REGULAR, consignee name for CONSIGNMENT
-     *       "date": "2025-03-06T10:00:00"
-     *     },
-     *     ...
-     *   ],
-     *   "124": [ ... ]
-     * }
-     */
     @Transactional(readOnly = true)
     @GetMapping("/variant/{variantId}/sales")
-    public ResponseEntity<?> getSalesForVariantBatches(@PathVariable("variantId") Long variantId) {
-        List<StockBatch> batches = stockBatchRepository.findByVariantIdOrderByConsignedAscRestockedAtAsc(variantId);
+    public ResponseEntity<?> getSalesForVariantBatches(
+            @PathVariable("variantId") Long variantId,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
+        List<StockBatch> batches = stockBatchRepository.findByVariantIdAndBranchOrderByConsignedAscRestockedAtAsc(variantId, branchId);
         if (batches.isEmpty()) {
             return ResponseEntity.ok(Collections.emptyMap());
         }

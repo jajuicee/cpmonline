@@ -297,10 +297,13 @@ const Analytics = () => {
             groupBy = diffDays > 60 ? 'month' : 'day';
         }
 
-        // Build a lookup: orderId → transactionType so we can filter payment logs by type
+        // Build a lookup: orderId → transactionType so we can filter payment logs by type.
+        // Also index by LEGACY-{id} so old transactions without a transactionId are classified correctly.
         const txTypeMap = {};
         transactions.forEach(t => {
-            if (t.transactionId) txTypeMap[t.transactionId] = t.transactionType || 'REGULAR';
+            const type = t.transactionType || 'REGULAR';
+            if (t.transactionId) txTypeMap[t.transactionId] = type;
+            if (t.id) txTypeMap[`LEGACY-${t.id}`] = type; // Fix: legacy CONSIGNMENT was always treated as REGULAR
         });
 
         // ── Revenue & Profit: from PAYMENT LOGS (by actual payment date) ──────
@@ -338,18 +341,45 @@ const Analytics = () => {
 
         const chartData = Object.values(grouped).sort((a, b) => a.xDate - b.xDate);
 
-        // ── Units & Product Rankings: from TRANSACTIONS (by order date) ───────
+        // Build a set of orderIds whose payment logs matched ALL active filters (date, payment
+        // method, type). Used for two purposes:
+        //   1. Include split-payment transactions in unit counts (t.paymentMethod = "Split Payment"
+        //      doesn't match specific methods, but their logs do).
+        //   2. Include CONSIGNMENT items paid in this period even though their transactionDate
+        //      is older (they are created as UNPAID on the consignment date and paid later via
+        //      ConsigneesPage — the payment log date is what matters for analytics).
+        const paidOrderIds = new Set(validLogs.map(pl => pl.orderId));
+
+        // ── Units & Product Rankings: from TRANSACTIONS ───────────────────────
+        // A transaction is "in scope" for unit counts if EITHER:
+        //   a) Its transactionDate falls in the selected range (standard regular sales), OR
+        //   b) It has a payment log in the selected range (covers CONSIGNMENT paid later +
+        //      split payments filtered by a specific method).
         const validTxs = transactions.filter(t => {
             const tDate = new Date(t.transactionDate);
-            const inDate = tDate >= cutoffDate && tDate <= toDate;
-            const inPayment = paymentFilter === 'All' || t.paymentMethod === paymentFilter;
+            const inDateByTx = tDate >= cutoffDate && tDate <= toDate;
+            const orderId = t.transactionId || `LEGACY-${t.id}`;
+            const hasPaidLogInRange = paidOrderIds.has(orderId); // paid in this period
+            const inDate = inDateByTx || hasPaidLogInRange;
+
+            const inPayment = paymentFilter === 'All'
+                || t.paymentMethod === paymentFilter
+                || hasPaidLogInRange; // split payments & consignment paid via specific method
             const isPaid = t.status !== 'UNPAID';
-            const inType = typeFilter === 'All' 
-                ? true 
-                : typeFilter === 'REGULAR' 
-                    ? t.transactionType !== 'CONSIGNMENT' 
+            const inType = typeFilter === 'All'
+                ? true
+                : typeFilter === 'REGULAR'
+                    ? t.transactionType !== 'CONSIGNMENT'
                     : t.transactionType === 'CONSIGNMENT';
             return inDate && inPayment && isPaid && inType;
+        });
+
+        // Build a lookup: orderId → total amount paid (from payment logs) so product rankings
+        // revenue matches the stat card revenue. Previously used finalPrice/downpayment from
+        // the transaction which diverged from the payment-log-based summary totals.
+        const paidAmountByTxId = {};
+        validLogs.forEach(pl => {
+            paidAmountByTxId[pl.orderId] = (paidAmountByTxId[pl.orderId] || 0) + pl.revenue;
         });
 
         const productMap = validTxs.reduce((acc, t) => {
@@ -357,7 +387,12 @@ const Analytics = () => {
             const p = t.variant.product;
             const name = `${p.brandName} ${p.modelName} ${t.variant.color ? `(${t.variant.color})` : ''}`.trim();
             const key = t.variant.sku;
-            const selling = t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0);
+            const orderId = t.transactionId || `LEGACY-${t.id}`;
+            // Fix: use actual cash received from payment logs to match the stat card revenue.
+            // Fall back to finalPrice if no payment log exists (e.g. very old legacy data).
+            const selling = paidAmountByTxId[orderId] !== undefined
+                ? paidAmountByTxId[orderId]
+                : (t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0));
             const cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
             if (!acc[key]) acc[key] = { name, sku: t.variant.sku, category: p.category || 'Uncategorized', units: 0, revenue: 0, profit: 0 };
             acc[key].units += 1;

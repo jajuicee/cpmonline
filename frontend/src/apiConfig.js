@@ -1,18 +1,42 @@
 /**
- * Centralized API configuration.
+ * Centralized API and WebSocket configuration.
  *
- * With the Vite proxy configured in vite.config.js, both dev and production
- * modes use relative paths (/api/...). Vite's proxy forwards requests from
- * :5173 to the Spring Boot backend on :8080 during development.
+ * Supports:
+ * 1. Cloud deployment (Vercel frontend + Render backend):
+ *    Set VITE_API_URL or VITE_API_BASE_URL in Vercel environment variables:
+ *    e.g. VITE_API_URL=https://your-backend.onrender.com
+ *    WS_BASE automatically converts http(s):// to ws(s)://
  *
- * In production (frontend served by Spring Boot on :8080), requests are
- * already same-origin.
+ * 2. Local development:
+ *    Vite proxy (/api and /ws forwarded to http://localhost:8080)
+ *
+ * 3. Monolithic production:
+ *    Same-origin relative paths.
  */
 
-// API base is always empty — Vite proxy handles dev, same-origin handles prod.
-export const API_BASE = '';
+const envApiUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').trim();
+export const API_BASE = envApiUrl ? envApiUrl.replace(/\/+$/, '') : '';
 
-// WebSocket needs the actual host and port since it's a direct connection.
-// In dev, Vite proxy handles /ws/* forwarding too.
-const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-export const WS_BASE = `${wsProtocol}//${window.location.host}`;
+export const getWebSocketBaseUrl = () => {
+    const envWsUrl = (import.meta.env.VITE_WS_BASE_URL || import.meta.env.VITE_WS_URL || '').trim();
+    if (envWsUrl) {
+        return envWsUrl.replace(/\/+$/, '');
+    }
+
+    if (API_BASE) {
+        try {
+            const url = new URL(API_BASE);
+            const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${wsProtocol}//${url.host}`;
+        } catch (e) {
+            console.error('Failed to parse API_BASE for WebSocket URL:', e);
+        }
+    }
+
+    // Default to current browser origin (local dev with proxy or monolith)
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProtocol}//${window.location.host}`;
+};
+
+export const WS_BASE = getWebSocketBaseUrl();
+

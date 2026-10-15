@@ -23,6 +23,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry
             .addHandler(stockWebSocketHandler, "/ws/stock")
-            .setAllowedOrigins("*"); // Allow all origins (same as REST CORS policy)
+            .setAllowedOriginPatterns("*"); // Allow all origins (same as REST CORS policy)
     }
 }

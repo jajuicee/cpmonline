@@ -14,15 +14,33 @@
  *    Same-origin relative paths.
  */
 
-const envApiUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').trim();
-// If VITE_API_URL is set, use it; otherwise in production on Vercel, default directly to the live Render backend
+function normalizeHttpUrl(url) {
+    if (!url) return '';
+    let cleaned = url.trim().replace(/\/+$/, '');
+    if (!cleaned) return '';
+    // If protocol was omitted by the user (e.g. cpmonline-backend.onrender.com), prepend https://
+    if (!/^https?:\/\//i.test(cleaned)) {
+        cleaned = `https://${cleaned}`;
+    }
+    return cleaned;
+}
+
+const rawEnvApiUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').trim();
+const normalizedEnvApiUrl = normalizeHttpUrl(rawEnvApiUrl);
+
+// If VITE_API_URL is provided, use its normalized version.
+// In production on Vercel, default to the live Render backend if unset.
 const defaultProdApiUrl = 'https://cpmonline-backend.onrender.com';
-export const API_BASE = envApiUrl ? envApiUrl.replace(/\/+$/, '') : (import.meta.env.PROD ? defaultProdApiUrl : '');
+export const API_BASE = normalizedEnvApiUrl || (import.meta.env.PROD ? defaultProdApiUrl : '');
 
 export const getWebSocketBaseUrl = () => {
-    const envWsUrl = (import.meta.env.VITE_WS_BASE_URL || import.meta.env.VITE_WS_URL || '').trim();
-    if (envWsUrl) {
-        return envWsUrl.replace(/\/+$/, '');
+    const rawWsUrl = (import.meta.env.VITE_WS_BASE_URL || import.meta.env.VITE_WS_URL || '').trim();
+    if (rawWsUrl) {
+        let wsCleaned = rawWsUrl.replace(/\/+$/, '');
+        if (!/^wss?:\/\//i.test(wsCleaned)) {
+            wsCleaned = `wss://${wsCleaned}`;
+        }
+        return wsCleaned;
     }
 
     if (API_BASE) {
@@ -36,8 +54,9 @@ export const getWebSocketBaseUrl = () => {
     }
 
     // Default to current browser origin (local dev with proxy or monolith)
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${wsProtocol}//${window.location.host}`;
+    const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
+    return `${wsProtocol}//${host}`;
 };
 
 export const WS_BASE = getWebSocketBaseUrl();

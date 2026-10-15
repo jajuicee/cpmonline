@@ -15,7 +15,9 @@
  */
 
 const envApiUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '').trim();
-export const API_BASE = envApiUrl ? envApiUrl.replace(/\/+$/, '') : '';
+// If VITE_API_URL is set, use it; otherwise in production on Vercel, default directly to the live Render backend
+const defaultProdApiUrl = 'https://cpmonline-backend.onrender.com';
+export const API_BASE = envApiUrl ? envApiUrl.replace(/\/+$/, '') : (import.meta.env.PROD ? defaultProdApiUrl : '');
 
 export const getWebSocketBaseUrl = () => {
     const envWsUrl = (import.meta.env.VITE_WS_BASE_URL || import.meta.env.VITE_WS_URL || '').trim();

@@ -34,8 +34,13 @@ const Login = () => {
             navigate('/', { replace: true });
         } catch (err) {
             console.error('Login error:', err);
-            const msg = err.response?.data?.error || 'Invalid username or password. Please try again.';
-            setError(msg);
+            if (!err.response) {
+                setError('Cannot connect to backend server. Please ensure the backend is active.');
+            } else if (err.response.status === 401) {
+                setError(err.response.data?.error || 'Invalid username or password. Please try again.');
+            } else {
+                setError(err.response.data?.error || `Server error (${err.response.status}). Please try again.`);
+            }
         } finally {
             setLoading(false);
         }

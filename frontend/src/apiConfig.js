@@ -16,8 +16,15 @@
 
 function normalizeHttpUrl(url) {
     if (!url) return '';
-    let cleaned = url.trim().replace(/\/+$/, '');
+    let cleaned = url.trim().replace(/[<>\"']/g, '').replace(/\/+$/, '');
     if (!cleaned) return '';
+
+    // Auto-fix if someone accidentally pasted a nested URL like https://<https://...>.onrender.com
+    const renderMatch = cleaned.match(/([a-zA-Z0-9-]+\.onrender\.com)/);
+    if (renderMatch) {
+        return `https://${renderMatch[1]}`;
+    }
+
     // If protocol was omitted by the user (e.g. cpmonline-backend.onrender.com), prepend https://
     if (!/^https?:\/\//i.test(cleaned)) {
         cleaned = `https://${cleaned}`;

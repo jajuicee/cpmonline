@@ -375,23 +375,51 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         processOrder();
     };
 
+    const rawBranch = completedReceipt?.branchName || user?.branchName || '';
+    const branchDisplayName = rawBranch
+        ? (rawBranch.toUpperCase().includes('BRANCH')
+            ? rawBranch.toUpperCase()
+            : `${rawBranch.toUpperCase()} BRANCH`)
+        : 'PUNTA BRANCH';
+
+    const activeReceiptDate = completedReceipt?.date ? new Date(completedReceipt.date) : new Date();
+    const dateStr = activeReceiptDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+    const timeStr = activeReceiptDate.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
+
+    const activeTicketNumber = completedReceipt?.ticketNumber || ticketNumber;
+    const activeCustomer = completedReceipt?.customerName || formData.customerName;
+    const activePaymentMethod = completedReceipt?.paymentMethod || formData.paymentMethod;
+    const activeOrderNote = completedReceipt?.orderNote || formData.orderNote;
+    const activeReceiptItems = completedReceipt?.items || cart;
+    const activeTotalAmount = completedReceipt?.cartTotal ?? cartTotal;
+    const activePaidAmount = completedReceipt?.amountPaid ?? amountPaid;
+    const activeUnpaidAmount = completedReceipt?.amountUnpaid ?? amountUnpaid;
+    const activeHasUnpaid = activeUnpaidAmount > 0;
+    const activeTotalUnits = completedReceipt?.totalUnits ?? totalUnits;
+
     return (
         <div className="max-w-7xl mx-auto w-full space-y-5">
-            {/* Print-only CSS */}
+            {/* Print-only CSS: Replicated from original commit thermal printer settings */}
             <style>{`
                 @media print {
                     body * { visibility: hidden !important; }
                     .pos-ticket-printable, .pos-ticket-printable * { visibility: visible !important; }
-                    aside, header, nav, .pos-ticket-no-print { display: none !important; }
-                    html, body, #root, .App, .flex, main { overflow: visible !important; height: auto !important; background: white !important; }
                     .pos-ticket-printable {
                         display: block !important;
-                        position: absolute !important; left: 0 !important; top: 0 !important;
-                        width: 72mm !important; max-width: 72mm !important; padding: 4mm !important;
-                        background: white !important; font-size: 10px !important; line-height: 1.3 !important;
-                        color: black !important;
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 80mm !important;
+                        max-width: 80mm !important;
+                        padding: 6mm !important;
+                        background: white !important;
+                        box-shadow: none !important;
+                        border: none !important;
+                        font-family: monospace !important;
+                        color: #18181b !important;
                     }
-                    @page { size: 72mm auto; margin: 0; }
+                    .pos-ticket-no-print { display: none !important; }
+                    @page { size: 80mm auto; margin: 0; }
                 }
             `}</style>
 
@@ -1159,14 +1187,14 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                             <div className="bg-white rounded-2xl border border-stone-300/80 p-6 shadow-md font-mono text-xs text-stone-800 space-y-4">
                                 {/* Receipt Header */}
                                 <div className="text-center pb-4 border-b border-dashed border-stone-300">
-                                    <h2 className="text-base font-black uppercase tracking-wider text-stone-900">
-                                        Cebu Pickleball Market
+                                    <h2 className="text-base font-black uppercase tracking-wider text-stone-900 font-sans">
+                                        CEBU PICKLEBALL MARKET
                                     </h2>
                                     <div className="text-[11px] text-stone-500 font-sans mt-0.5">
                                         Authorized Paddle Retailer
                                     </div>
-                                    <div className="text-xs font-bold text-emerald-700 mt-1">
-                                        {completedReceipt.branchName}
+                                    <div className="text-xs font-bold uppercase tracking-wider text-stone-800 mt-1 font-sans">
+                                        {branchDisplayName}
                                     </div>
                                 </div>
 
@@ -1279,69 +1307,112 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
             {/* Hidden Printable Ticket (Active Cart or Completed Order) */}
             <div className="pos-ticket-printable hidden">
+                {/* Header */}
                 <div className="text-center mb-3">
-                    <div className="ticket-header-title text-[15px] font-black tracking-wider uppercase">Cebu Pickleball Market</div>
-                    <div className="ticket-header-subtitle text-[10px] text-zinc-500 mt-0.5">Authorized Paddle Retailer</div>
-                    <div className="ticket-header-subtitle text-[10px] text-zinc-500">
-                        {completedReceipt?.branchName || user?.branchName || 'Branch Terminal'}
+                    <div className="text-[15px] font-black tracking-wider uppercase font-sans">CEBU PICKLEBALL MARKET</div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5 font-sans">Authorized Paddle Retailer</div>
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-800 mt-0.5 font-sans">
+                        {branchDisplayName}
                     </div>
                 </div>
 
-                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
+                <div className="border-t border-dashed border-zinc-400 my-2" />
 
-                <div className="space-y-0.5 mb-2 text-[10px]">
+                {/* Meta */}
+                <div className="space-y-0.5 text-[11px]">
                     <div className="flex justify-between">
-                        <span>Ticket:</span>
-                        <span className="font-bold">{completedReceipt?.ticketNumber || ticketNumber}</span>
+                        <span className="text-zinc-500">Ticket #</span>
+                        <span className="font-bold">{activeTicketNumber}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span>Customer:</span>
-                        <span className="font-bold">{completedReceipt?.customerName || formData.customerName || 'Walk-in'}</span>
+                        <span className="text-zinc-500">Date</span>
+                        <span>{dateStr} · {timeStr}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span>Payment:</span>
-                        <span className="font-bold">{completedReceipt?.paymentMethod || formData.paymentMethod}</span>
+                        <span className="text-zinc-500">Customer</span>
+                        <span className={activeCustomer ? 'font-bold' : 'italic text-zinc-400'}>{activeCustomer || '—'}</span>
                     </div>
                     <div className="flex justify-between">
-                        <span>Date:</span>
-                        <span>{new Date(completedReceipt?.date || Date.now()).toLocaleString('en-PH')}</span>
+                        <span className="text-zinc-500">Payment</span>
+                        <span className="font-bold">{activePaymentMethod}</span>
                     </div>
                 </div>
 
-                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
+                <div className="border-t border-dashed border-zinc-400 my-2" />
 
-                <div className="space-y-1 mb-2">
-                    {(completedReceipt?.items || cart).map((item, i) => {
-                        const displayName = item.displayName || item.variant?.displayName;
-                        const price = item.finalPrice;
-                        const qty = item.qty;
+                {/* Line items */}
+                <div className="space-y-2">
+                    {activeReceiptItems.map((item, idx) => {
+                        const qty = parseInt(item.qty, 10) || 0;
+                        const price = parseFloat(item.finalPrice) || 0;
+                        const lineTotal = qty * price;
+                        const name = item.displayName || item.variant?.displayName || 'Item';
+                        const specs = item.variantSpecs && item.variantSpecs !== 'Standard'
+                            ? item.variantSpecs
+                            : (item.variant?.color && item.variant?.color !== 'N/A' ? item.variant.color : '');
                         return (
-                            <div key={i} className="flex justify-between text-[10px]">
-                                <span>{qty}x {displayName}</span>
-                                <span className="font-bold">{fmt(price * qty)}</span>
+                            <div key={idx} className="text-[11px]">
+                                <div className="font-bold leading-tight">{name}</div>
+                                {specs && <div className="text-zinc-500 text-[10px]">{specs}</div>}
+                                <div className="flex justify-between mt-0.5">
+                                    <span className="text-zinc-500">
+                                        {qty} × ₱{price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                        {item.paymentStatus === 'UNPAID' && (
+                                            <span className="ml-2 text-amber-700 font-bold">[UNPAID]</span>
+                                        )}
+                                    </span>
+                                    <span className="font-bold">₱{lineTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                                </div>
                             </div>
                         );
                     })}
                 </div>
 
-                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
+                <div className="border-t border-dashed border-zinc-400 my-2" />
 
-                <div className="flex justify-between text-[13px] font-black">
-                    <span>TOTAL:</span>
-                    <span>{fmt(completedReceipt?.cartTotal || cartTotal)}</span>
+                {/* Totals */}
+                <div className="space-y-1 text-[11px]">
+                    <div className="flex justify-between">
+                        <span className="text-zinc-500">Items</span>
+                        <span>{activeTotalUnits}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span className="text-zinc-500">Subtotal</span>
+                        <span>₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                    </div>
                 </div>
-                {(completedReceipt ? completedReceipt.amountUnpaid > 0 : amountUnpaid > 0) && (
-                    <div className="flex justify-between text-[11px] font-bold text-zinc-700 mt-1">
-                        <span>BALANCE DUE:</span>
-                        <span>{fmt(completedReceipt?.amountUnpaid || amountUnpaid)}</span>
+
+                <div className="border-t border-double border-zinc-700 my-2" />
+
+                <div className="flex justify-between items-baseline">
+                    <span className="text-[13px] font-black uppercase">Total</span>
+                    <span className="text-[16px] font-black">₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                </div>
+
+                {activeHasUnpaid && (
+                    <div className="mt-2 space-y-0.5">
+                        <div className="flex justify-between text-[10px] text-emerald-700 font-bold">
+                            <span>PAID NOW</span>
+                            <span>₱{activePaidAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                        <div className="px-2 py-1 bg-amber-50 border border-amber-300 rounded text-[10px] flex justify-between font-bold text-amber-800">
+                            <span>UNPAID BALANCE</span>
+                            <span>₱{activeUnpaidAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        </div>
                     </div>
                 )}
 
-                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
+                {activeOrderNote && (
+                    <div className="mt-3 text-[10px] text-zinc-600 italic border-t border-dashed border-zinc-300 pt-2">
+                        Note: {activeOrderNote}
+                    </div>
+                )}
 
-                <div className="text-center text-[9px] text-zinc-500 mt-2">
-                    <div>Thank you for your purchase!</div>
-                    <div>Keep this receipt for warranty &amp; returns.</div>
+                <div className="border-t border-dashed border-zinc-400 my-3" />
+
+                <div className="text-center text-[10px] text-zinc-500 leading-snug">
+                    <div className="font-bold text-zinc-700">Thank you for your purchase!</div>
+                    <div className="mt-1">Keep this receipt for warranty &amp; returns.</div>
                 </div>
             </div>
         </div>

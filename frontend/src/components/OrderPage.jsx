@@ -201,10 +201,52 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         return map;
     }, [cart]);
 
+    // Auto-clamp cart quantities if stock changes or exceeds available units
+    useEffect(() => {
+        if (cart.length > 0 && inventoryList.length > 0) {
+            setCart(prev => {
+                let changed = false;
+                const next = prev.map(c => {
+                    const live = inventoryList.find(i => i.id === c.variant.id);
+                    if (!live) return c;
+                    const maxStock = live.stockQuantity ?? 0;
+                    if (maxStock <= 0) {
+                        changed = true;
+                        return null;
+                    }
+                    if (c.qty > maxStock) {
+                        changed = true;
+                        return {
+                            ...c,
+                            qty: maxStock,
+                            variant: { ...c.variant, stockQuantity: maxStock }
+                        };
+                    }
+                    return c;
+                }).filter(Boolean);
+
+                return changed ? next : prev;
+            });
+        }
+    }, [inventoryList]);
+
     const handleAddToCart = (item) => {
+        const maxStock = item.stockQuantity ?? 0;
+        if (maxStock <= 0) {
+            setStatus({ type: 'error', message: `Cannot add "${item.displayName || item.sku}": Out of stock.` });
+            return;
+        }
+
         const existing = cart.find(c => c.variant.id === item.id);
         if (existing) {
-            setCart(cart.map(c => c.variant.id === item.id ? { ...c, qty: c.qty + 1 } : c));
+            if (existing.qty >= maxStock) {
+                setStatus({
+                    type: 'error',
+                    message: `Maximum available stock (${maxStock}) already in cart for "${item.displayName || item.sku}".`
+                });
+                return;
+            }
+            setCart(cart.map(c => c.variant.id === item.id ? { ...c, qty: Math.min(maxStock, c.qty + 1) } : c));
         } else {
             setCart([...cart, { variant: item, qty: 1, finalPrice: item.sellingPrice, paymentStatus: 'PAID', downpayment: '' }]);
         }
@@ -212,17 +254,32 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     };
 
     const updateCartItem = (variantId, field, value) => {
-        setCart(cart.map(c => c.variant.id === variantId ? { ...c, [field]: value } : c));
+        setCart(cart.map(c => {
+            if (c.variant.id !== variantId) return c;
+            if (field === 'qty') {
+                const maxStock = c.variant.stockQuantity ?? 0;
+                const parsed = parseInt(value, 10);
+                if (isNaN(parsed) || parsed <= 0) return { ...c, qty: 1 };
+                return { ...c, qty: Math.min(parsed, maxStock) };
+            }
+            return { ...c, [field]: value };
+        }));
     };
 
     const handleQtyStep = (variantId, delta) => {
         const item = cart.find(c => c.variant.id === variantId);
         if (!item) return;
+        const maxStock = item.variant.stockQuantity ?? 0;
         const newQty = item.qty + delta;
         if (newQty <= 0) {
             removeCartItem(variantId);
+        } else if (newQty > maxStock) {
+            setStatus({
+                type: 'error',
+                message: `Maximum stock for "${item.variant.displayName || item.variant.sku}" is ${maxStock}.`
+            });
         } else {
-            updateCartItem(variantId, 'qty', Math.min(newQty, item.variant.stockQuantity || 999));
+            updateCartItem(variantId, 'qty', newQty);
         }
     };
 
@@ -539,13 +596,14 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         ) : filteredCatalog.length === 0 ? (
                             <div className="flex flex-col items-center justify-center py-24 text-center text-stone-400">
                                 <Search size={36} className="text-stone-300 mb-2 stroke-[1.5]" />
-                                <p className="text-sm font-bold text-stone-600">No matching products found</p>
                                 <p className="text-xs text-stone-400 mt-0.5">Try searching with a different brand, model, or category.</p>
                             </div>
                         ) : (
                             filteredCatalog.map(item => {
                                 const inCartQty = cartMap.get(item.id) || 0;
-                                const isAvailable = (item.stockQuantity || 0) > 0;
+                                const maxStock = item.stockQuantity ?? 0;
+                                const hasStock = maxStock > 0;
+                                const canAddMore = inCartQty < maxStock;
                                 const style = CATEGORY_STYLES[item.productCategory] || CATEGORY_STYLES.Default;
 
                                 return (
@@ -566,8 +624,12 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                                     {item.sku}
                                                 </span>
                                                 {inCartQty > 0 && (
-                                                    <span className="px-2 py-0.5 text-[10px] font-black rounded-md bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                                        ✓ {inCartQty} in cart
+                                                    <span className={`px-2 py-0.5 text-[10px] font-black rounded-md border ${
+                                                        !canAddMore
+                                                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                                            : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                                    }`}>
+                                                        ✓ {inCartQty} in cart {!canAddMore && '(Max)'}
                                                     </span>
                                                 )}
                                             </div>
@@ -579,8 +641,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             <div className="text-xs text-stone-500 font-medium mt-0.5 flex items-center gap-2">
                                                 <span>{item.variantSpecs}</span>
                                                 <span className="text-stone-300">•</span>
-                                                <span className={isAvailable ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
-                                                    {isAvailable ? `${item.stockQuantity} in stock` : 'Out of stock'}
+                                                <span className={hasStock ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
+                                                    {hasStock ? `${maxStock} in stock` : 'Out of stock'}
                                                 </span>
                                             </div>
                                         </div>
@@ -604,17 +666,27 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleAddToCart(item)}
-                                                disabled={!isAvailable}
-                                                className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${
-                                                    isAvailable
-                                                        ? inCartQty > 0
-                                                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm active:scale-95'
-                                                            : 'bg-stone-900 hover:bg-stone-800 text-white shadow-sm active:scale-95'
-                                                        : 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                                                disabled={!hasStock || !canAddMore}
+                                                className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 ${
+                                                    !hasStock
+                                                        ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                                                        : !canAddMore
+                                                        ? 'bg-amber-50 text-amber-800 border border-amber-300 cursor-not-allowed opacity-80'
+                                                        : inCartQty > 0
+                                                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm active:scale-95 cursor-pointer'
+                                                        : 'bg-stone-900 hover:bg-stone-800 text-white shadow-sm active:scale-95 cursor-pointer'
                                                 }`}
                                             >
-                                                <Plus size={13} />
-                                                <span>{inCartQty > 0 ? 'Add More' : 'Add'}</span>
+                                                {!hasStock ? (
+                                                    <span>Out of Stock</span>
+                                                ) : !canAddMore ? (
+                                                    <span>Max in Cart</span>
+                                                ) : (
+                                                    <>
+                                                        <Plus size={13} />
+                                                        <span>{inCartQty > 0 ? 'Add More' : 'Add'}</span>
+                                                    </>
+                                                )}
                                             </button>
                                         </div>
                                     </div>
@@ -681,7 +753,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleQtyStep(item.variant.id, -1)}
-                                                className="w-6 h-6 flex items-center justify-center text-stone-600 hover:bg-stone-100 rounded text-xs font-bold"
+                                                className="w-6 h-6 flex items-center justify-center text-stone-600 hover:bg-stone-100 rounded text-xs font-bold cursor-pointer"
                                             >
                                                 <Minus size={11} />
                                             </button>
@@ -691,7 +763,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             <button
                                                 type="button"
                                                 onClick={() => handleQtyStep(item.variant.id, 1)}
-                                                className="w-6 h-6 flex items-center justify-center text-stone-600 hover:bg-stone-100 rounded text-xs font-bold"
+                                                disabled={item.qty >= (item.variant.stockQuantity ?? 0)}
+                                                className={`w-6 h-6 flex items-center justify-center rounded text-xs font-bold transition-colors ${
+                                                    item.qty >= (item.variant.stockQuantity ?? 0)
+                                                        ? 'text-stone-300 cursor-not-allowed bg-stone-50'
+                                                        : 'text-stone-600 hover:bg-stone-100 cursor-pointer'
+                                                }`}
+                                                title={item.qty >= (item.variant.stockQuantity ?? 0) ? 'Maximum available stock reached' : 'Add 1 more'}
                                             >
                                                 <Plus size={11} />
                                             </button>

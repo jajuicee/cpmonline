@@ -456,27 +456,112 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
     return (
         <div className="max-w-7xl mx-auto w-full space-y-5">
-            {/* Print-only CSS: Replicated from original commit thermal printer settings */}
+            {/* Print-only CSS: Replicated from original thermal printer settings (72mm thermal width) */}
             <style>{`
                 @media print {
-                    body * { visibility: hidden !important; }
-                    .pos-ticket-printable, .pos-ticket-printable * { visibility: visible !important; }
+                    /* Hide everything on the page by default */
+                    body * {
+                        visibility: hidden !important;
+                    }
+
+                    /* Make only the receipt ticket and its contents visible */
+                    .pos-ticket-printable, .pos-ticket-printable * {
+                        visibility: visible !important;
+                    }
+
+                    /* Remove layout-blocking elements, headers, sidebars, modals from taking space */
+                    aside, header, nav, .pos-ticket-no-print, [role="dialog"], .backdrop-blur-sm {
+                        display: none !important;
+                    }
+
+                    /* Prevent parent containers from clipping the ticket */
+                    html, body, #root, .App, .flex, .flex-col, .flex-1, main, div, .overflow-hidden, .overflow-y-auto {
+                        overflow: visible !important;
+                        height: auto !important;
+                        min-height: 0 !important;
+                        max-height: none !important;
+                        background: white !important;
+                        border: none !important;
+                        box-shadow: none !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        position: static !important;
+                    }
+
+                    /* Target printable container (72mm thermal width, matching original commit) */
                     .pos-ticket-printable {
                         display: block !important;
+                        visibility: visible !important;
                         position: absolute !important;
                         left: 0 !important;
                         top: 0 !important;
-                        width: 80mm !important;
-                        max-width: 80mm !important;
-                        padding: 6mm !important;
+                        width: 72mm !important;
+                        max-width: 72mm !important;
+                        height: auto !important;
+                        max-height: none !important;
+                        padding: 3mm 4mm !important;
                         background: white !important;
                         box-shadow: none !important;
                         border: none !important;
-                        font-family: monospace !important;
-                        color: #18181b !important;
+                        box-sizing: border-box !important;
+                        overflow: visible !important;
+                        font-family: monospace, 'Courier New', Courier !important;
+                        font-size: 9px !important;
+                        line-height: 1.25 !important;
+                        color: #000000 !important;
+                        z-index: 9999999 !important;
                     }
-                    .pos-ticket-no-print { display: none !important; }
-                    @page { size: 80mm auto; margin: 0; }
+
+                    .pos-ticket-printable * {
+                        color: #000000 !important;
+                    }
+
+                    .pos-ticket-printable .ticket-header-title {
+                        font-size: 12px !important;
+                        font-weight: 900 !important;
+                        letter-spacing: 0.05em !important;
+                    }
+
+                    .pos-ticket-printable .ticket-header-sub {
+                        font-size: 8px !important;
+                    }
+
+                    .pos-ticket-printable .ticket-header-branch {
+                        font-size: 9px !important;
+                        font-weight: bold !important;
+                    }
+
+                    .pos-ticket-printable .ticket-divider {
+                        border-top: 1px dashed #000000 !important;
+                        margin: 4px 0 !important;
+                        height: 0 !important;
+                    }
+
+                    .pos-ticket-printable .ticket-double {
+                        border-top: 3px double #000000 !important;
+                        margin: 4px 0 !important;
+                        height: 0 !important;
+                    }
+
+                    .pos-ticket-printable .ticket-item {
+                        font-size: 9px !important;
+                        margin-bottom: 2px !important;
+                    }
+
+                    .pos-ticket-printable .ticket-total {
+                        font-size: 13px !important;
+                        font-weight: 900 !important;
+                    }
+
+                    .pos-ticket-printable .ticket-total-label {
+                        font-size: 10px !important;
+                        font-weight: 900 !important;
+                    }
+
+                    @page {
+                        size: 72mm auto;
+                        margin: 0;
+                    }
                 }
             `}</style>
 
@@ -707,9 +792,21 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 Configure quantities & payment
                             </span>
                         </div>
-                        <span className="text-xs font-black bg-stone-900 text-white px-3 py-1 rounded-full shadow-sm">
-                            {cart.length} items • {totalUnits} units
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={handlePrintTicket}
+                                disabled={cart.length === 0}
+                                className="flex items-center gap-1.5 px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-full text-xs font-bold transition-all shadow-sm cursor-pointer"
+                                title="Print thermal receipt ticket"
+                            >
+                                <Printer size={13} />
+                                <span>Print Slip</span>
+                            </button>
+                            <span className="text-xs font-black bg-stone-900 text-white px-3 py-1 rounded-full shadow-sm">
+                                {cart.length} items • {totalUnits} units
+                            </span>
+                        </div>
                     </div>
 
                     {/* Cart Items List */}
@@ -1384,17 +1481,21 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             )}
 
             {/* Hidden Printable Ticket (Active Cart or Completed Order) */}
-            <div className="pos-ticket-printable hidden">
+            <div className="pos-ticket-printable hidden print:block">
                 {/* Header */}
                 <div className="text-center mb-3">
-                    <div className="text-[15px] font-black tracking-wider uppercase font-sans">CEBU PICKLEBALL MARKET</div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5 font-sans">Authorized Paddle Retailer</div>
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-800 mt-0.5 font-sans">
+                    <div className="ticket-header-title text-[13px] font-black tracking-wider uppercase font-sans">
+                        CEBU PICKLEBALL MARKET
+                    </div>
+                    <div className="ticket-header-sub text-[10px] text-zinc-500 mt-0.5 font-sans">
+                        Authorized Paddle Retailer
+                    </div>
+                    <div className="ticket-header-branch text-[11px] font-bold uppercase tracking-wider text-zinc-800 mt-0.5 font-sans">
                         {branchDisplayName}
                     </div>
                 </div>
 
-                <div className="border-t border-dashed border-zinc-400 my-2" />
+                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
                 {/* Meta */}
                 <div className="space-y-0.5 text-[11px]">
@@ -1416,37 +1517,44 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     </div>
                 </div>
 
-                <div className="border-t border-dashed border-zinc-400 my-2" />
+                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
                 {/* Line items */}
-                <div className="space-y-2">
-                    {activeReceiptItems.map((item, idx) => {
-                        const qty = parseInt(item.qty, 10) || 0;
-                        const price = parseFloat(item.finalPrice) || 0;
-                        const lineTotal = qty * price;
-                        const name = item.displayName || item.variant?.displayName || 'Item';
-                        const specs = item.variantSpecs && item.variantSpecs !== 'Standard'
-                            ? item.variantSpecs
-                            : (item.variant?.color && item.variant?.color !== 'N/A' ? item.variant.color : '');
-                        return (
-                            <div key={idx} className="text-[11px]">
-                                <div className="font-bold leading-tight">{name}</div>
-                                {specs && <div className="text-zinc-500 text-[10px]">{specs}</div>}
-                                <div className="flex justify-between mt-0.5">
-                                    <span className="text-zinc-500">
-                                        {qty} × ₱{price.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                                        {item.paymentStatus === 'UNPAID' && (
-                                            <span className="ml-2 text-amber-700 font-bold">[UNPAID]</span>
-                                        )}
-                                    </span>
-                                    <span className="font-bold">₱{lineTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                <div className="space-y-1.5">
+                    {activeReceiptItems.length === 0 ? (
+                        <div className="text-center text-zinc-400 italic py-4 text-[10px]">
+                            Cart is empty.<br />Add items to build the ticket.
+                        </div>
+                    ) : (
+                        activeReceiptItems.map((item, idx) => {
+                            const qty = parseInt(item.qty, 10) || 0;
+                            const price = parseFloat(item.finalPrice) || 0;
+                            const lineTotal = qty * price;
+                            const name = item.displayName || item.variant?.displayName || item.sku || 'Item';
+                            const specs = item.specs || (item.variantSpecs && item.variantSpecs !== 'Standard'
+                                ? item.variantSpecs
+                                : (item.variant?.color && item.variant?.color !== 'N/A' ? item.variant.color : ''));
+                            return (
+                                <div key={idx} className="ticket-item text-[10px] leading-tight py-0.5">
+                                    <div className="flex justify-between items-start">
+                                        <div className="flex-1 pr-2">
+                                            <span className="font-bold">{qty} × {name}</span>
+                                            {specs ? <span className="text-zinc-500 block text-[9px]">{specs}</span> : null}
+                                            {item.paymentStatus === 'UNPAID' && (
+                                                <span className="text-amber-700 font-bold text-[9px] block">[UNPAID]</span>
+                                            )}
+                                        </div>
+                                        <span className="font-bold whitespace-nowrap">
+                                            ₱{lineTotal.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                                        </span>
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })}
+                            );
+                        })
+                    )}
                 </div>
 
-                <div className="border-t border-dashed border-zinc-400 my-2" />
+                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
                 {/* Totals */}
                 <div className="space-y-1 text-[11px]">
@@ -1460,20 +1568,22 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     </div>
                 </div>
 
-                <div className="border-t border-double border-zinc-700 my-2" />
+                <div className="ticket-double border-t border-double border-zinc-700 my-2" />
 
                 <div className="flex justify-between items-baseline">
-                    <span className="text-[13px] font-black uppercase">Total</span>
-                    <span className="text-[16px] font-black">₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                    <span className="ticket-total-label text-[12px] font-black uppercase">Total</span>
+                    <span className="ticket-total text-[15px] font-black">
+                        ₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </span>
                 </div>
 
                 {activeHasUnpaid && (
-                    <div className="mt-2 space-y-0.5">
-                        <div className="flex justify-between text-[10px] text-emerald-700 font-bold">
+                    <div className="mt-2 space-y-0.5 text-[10px]">
+                        <div className="flex justify-between text-emerald-700 font-bold">
                             <span>PAID NOW</span>
                             <span>₱{activePaidAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                         </div>
-                        <div className="px-2 py-1 bg-amber-50 border border-amber-300 rounded text-[10px] flex justify-between font-bold text-amber-800">
+                        <div className="flex justify-between font-bold text-amber-800">
                             <span>UNPAID BALANCE</span>
                             <span>₱{activeUnpaidAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                         </div>
@@ -1481,16 +1591,16 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 )}
 
                 {activeOrderNote && (
-                    <div className="mt-3 text-[10px] text-zinc-600 italic border-t border-dashed border-zinc-300 pt-2">
+                    <div className="mt-2 text-[10px] text-zinc-600 italic ticket-divider pt-1">
                         Note: {activeOrderNote}
                     </div>
                 )}
 
-                <div className="border-t border-dashed border-zinc-400 my-3" />
+                <div className="ticket-divider border-t border-dashed border-zinc-400 my-3" />
 
-                <div className="text-center text-[10px] text-zinc-500 leading-snug">
-                    <div className="font-bold text-zinc-700">Thank you for your purchase!</div>
-                    <div className="mt-1">Keep this receipt for warranty &amp; returns.</div>
+                <div className="text-center text-[10px] text-zinc-600 leading-snug">
+                    <div className="font-bold text-zinc-800">Thank you for your purchase!</div>
+                    <div className="mt-0.5 text-[9px]">Keep this receipt for warranty &amp; returns.</div>
                 </div>
             </div>
         </div>

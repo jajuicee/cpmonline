@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
     Building2,
@@ -26,7 +26,11 @@ import {
     Sparkles,
     Tag,
     ChevronRight,
-    ArrowUpRight
+    ArrowUpRight,
+    CheckSquare,
+    Square,
+    Layers,
+    ListFilter
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
@@ -35,10 +39,23 @@ const formatCurrency = (val) =>
 const BranchDetail = () => {
     const { branchId } = useParams();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
 
     const [branch, setBranch] = useState(null);
     const [loadingBranch, setLoadingBranch] = useState(true);
-    const [activeTab, setActiveTab] = useState('overview'); // overview, allocate, dues, inventory
+    const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'overview');
+
+    useEffect(() => {
+        const tabFromUrl = searchParams.get('tab');
+        if (tabFromUrl && tabFromUrl !== activeTab) {
+            setActiveTab(tabFromUrl);
+        }
+    }, [searchParams]);
+
+    const handleTabChange = (tabId) => {
+        setActiveTab(tabId);
+        setSearchParams({ tab: tabId });
+    };
 
     // Admin Master Products (for allocation source)
     const [adminProducts, setAdminProducts] = useState([]);
@@ -55,6 +72,9 @@ const BranchDetail = () => {
     // Stock Allocation Form State
     const [catalogSearch, setCatalogSearch] = useState('');
     const [catalogCategory, setCatalogCategory] = useState('All');
+    const [selectedVariantIds, setSelectedVariantIds] = useState(new Set());
+    const [bulkDefaultQty, setBulkDefaultQty] = useState(1);
+
     const [manifest, setManifest] = useState([]); // Array of { variantId, sku, brandName, modelName, maxStock, quantity, costPerUnit }
     const [allocationDeadline, setAllocationDeadline] = useState(() => {
         // Default deadline: 30 days from now
@@ -223,6 +243,124 @@ const BranchDetail = () => {
 
     const removeFromManifest = (variantId) => {
         setManifest(manifest.filter(m => m.variantId !== variantId));
+    };
+
+    // Multi-Select Helpers
+    const toggleSelectVariant = (variantId) => {
+        setSelectedVariantIds(prev => {
+            const next = new Set(prev);
+            if (next.has(variantId)) {
+                next.delete(variantId);
+            } else {
+                next.add(variantId);
+            }
+            return next;
+        });
+    };
+
+    const toggleSelectAllVisible = () => {
+        const stockable = filteredCatalogVariants.filter(v => v.adminStock > 0);
+        const allSelected = stockable.length > 0 && stockable.every(v => selectedVariantIds.has(v.variantId));
+        if (allSelected) {
+            setSelectedVariantIds(prev => {
+                const next = new Set(prev);
+                stockable.forEach(v => next.delete(v.variantId));
+                return next;
+            });
+        } else {
+            setSelectedVariantIds(prev => {
+                const next = new Set(prev);
+                stockable.forEach(v => next.add(v.variantId));
+                return next;
+            });
+        }
+    };
+
+    // Bulk Add Selected Variants to Manifest at Once
+    const addSelectedToManifest = (qtyToAdd = bulkDefaultQty) => {
+        const qty = Math.max(1, parseInt(qtyToAdd, 10) || 1);
+        const variantsToAdd = availableAdminVariants.filter(
+            v => selectedVariantIds.has(v.variantId) && v.adminStock > 0
+        );
+
+        if (variantsToAdd.length === 0) {
+            showFeedback('error', 'Please select at least one in-stock product from the catalog.');
+            return;
+        }
+
+        setManifest(prev => {
+            const next = [...prev];
+            variantsToAdd.forEach(v => {
+                const existingIdx = next.findIndex(m => m.variantId === v.variantId);
+                const targetQty = Math.min(v.adminStock, qty);
+                const defaultCost = v.acquisitionPrice > 0 ? v.acquisitionPrice : v.sellingPrice;
+
+                if (existingIdx >= 0) {
+                    next[existingIdx] = {
+                        ...next[existingIdx],
+                        quantity: Math.min(v.adminStock, next[existingIdx].quantity + targetQty)
+                    };
+                } else {
+                    next.push({
+                        variantId: v.variantId,
+                        sku: v.sku,
+                        brandName: v.brandName,
+                        modelName: v.modelName,
+                        maxStock: v.adminStock,
+                        quantity: targetQty,
+                        costPerUnit: defaultCost
+                    });
+                }
+            });
+            return next;
+        });
+
+        showFeedback('success', `Added ${variantsToAdd.length} products to allocation manifest.`);
+        setSelectedVariantIds(new Set());
+    };
+
+    // Bulk Manifest Actions
+    const applyBulkQtyToManifest = (val) => {
+        setManifest(prev => prev.map(m => {
+            if (val === 'max') {
+                return { ...m, quantity: m.maxStock };
+            }
+            const num = Math.min(m.maxStock, Math.max(1, parseInt(val, 10) || 1));
+            return { ...m, quantity: num };
+        }));
+    };
+
+    const applyBulkPricingToManifest = (type) => {
+        setManifest(prev => prev.map(m => {
+            const v = availableAdminVariants.find(x => x.variantId === m.variantId);
+            if (!v) return m;
+            if (type === 'acquisition') {
+                return { ...m, costPerUnit: v.acquisitionPrice > 0 ? v.acquisitionPrice : m.costPerUnit };
+            } else if (type === 'retail') {
+                return { ...m, costPerUnit: v.sellingPrice > 0 ? v.sellingPrice : m.costPerUnit };
+            }
+            return m;
+        }));
+    };
+
+    const clearManifest = () => {
+        if (manifest.length === 0) return;
+        if (window.confirm('Clear all items from allocation manifest?')) {
+            setManifest([]);
+        }
+    };
+
+    // Deadline Presets
+    const setDeadlinePreset = (daysFromNow) => {
+        const d = new Date();
+        d.setDate(d.getDate() + daysFromNow);
+        setAllocationDeadline(d.toISOString().split('T')[0]);
+    };
+
+    const setDeadlineEndOfMonth = () => {
+        const d = new Date();
+        const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+        setAllocationDeadline(endOfMonth.toISOString().split('T')[0]);
     };
 
     const manifestTotalUnits = useMemo(() => {
@@ -490,7 +628,7 @@ const BranchDetail = () => {
                     return (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => handleTabChange(tab.id)}
                             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
                                 isActive
                                     ? 'bg-stone-900 text-white shadow-sm'
@@ -546,7 +684,7 @@ const BranchDetail = () => {
                     {/* Quick Action Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div
-                            onClick={() => setActiveTab('allocate')}
+                            onClick={() => handleTabChange('allocate')}
                             className="bg-white rounded-2xl p-6 border border-emerald-200 hover:border-emerald-400 shadow-sm transition-all cursor-pointer group"
                         >
                             <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
@@ -554,7 +692,7 @@ const BranchDetail = () => {
                             </div>
                             <h4 className="font-black text-stone-900 text-lg">Allocate Stock to this Branch</h4>
                             <p className="text-xs text-stone-500 mt-1">
-                                Deduct paddles from master inventory, assign unit cost, and set a payment deadline.
+                                Select multiple paddles & items from master inventory at once, assign unit costs, and set a payment deadline.
                             </p>
                             <div className="mt-4 flex items-center gap-1.5 text-xs font-bold text-emerald-700">
                                 Open Allocation Manifest <ArrowUpRight size={14} />
@@ -562,7 +700,7 @@ const BranchDetail = () => {
                         </div>
 
                         <div
-                            onClick={() => setActiveTab('dues')}
+                            onClick={() => handleTabChange('dues')}
                             className="bg-white rounded-2xl p-6 border border-amber-200 hover:border-amber-400 shadow-sm transition-all cursor-pointer group"
                         >
                             <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
@@ -580,11 +718,12 @@ const BranchDetail = () => {
                 </div>
             )}
 
-            {/* TAB 2: ALLOCATE STOCK */}
+            {/* TAB 2: ALLOCATE STOCK (MULTI-PRODUCT SUPPORT) */}
             {activeTab === 'allocate' && (
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* Left: Master Catalog Selection (7 cols) */}
                     <div className="lg:col-span-7 space-y-4">
+                        {/* Search & Categories */}
                         <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
                             <div className="relative w-full md:w-80">
                                 <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
@@ -614,14 +753,74 @@ const BranchDetail = () => {
                             </div>
                         </div>
 
-                        {/* Master Catalog List */}
+                        {/* Sticky Batch Multi-Select Action Bar */}
+                        {selectedVariantIds.size > 0 && (
+                            <div className="bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-2xl p-3.5 shadow-lg flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center font-black text-xs">
+                                        {selectedVariantIds.size}
+                                    </div>
+                                    <div>
+                                        <div className="font-black text-xs">
+                                            {selectedVariantIds.size} {selectedVariantIds.size === 1 ? 'Product' : 'Products'} Selected
+                                        </div>
+                                        <div className="text-[10px] text-emerald-100">
+                                            Ready to allocate simultaneously
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-1.5 bg-black/20 rounded-xl px-2.5 py-1">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-200">Qty each:</span>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={bulkDefaultQty}
+                                            onChange={(e) => setBulkDefaultQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                                            className="w-12 text-center text-xs font-black text-white bg-white/20 rounded py-0.5 focus:outline-none focus:bg-white focus:text-stone-900"
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => addSelectedToManifest(bulkDefaultQty)}
+                                        className="px-3.5 py-1.5 bg-white text-emerald-800 hover:bg-emerald-50 rounded-xl text-xs font-black uppercase tracking-wider shadow-sm transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                    >
+                                        <Plus size={14} />
+                                        <span>Add Selected ({selectedVariantIds.size})</span>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedVariantIds(new Set())}
+                                        className="px-2.5 py-1.5 text-emerald-100 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                                    >
+                                        Deselect
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Master Catalog List with Checkboxes */}
                         <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
                             <div className="p-4 border-b border-stone-100 bg-stone-50/70 flex items-center justify-between">
-                                <span className="text-xs font-black uppercase tracking-wider text-stone-500">
-                                    Master Catalog Available Stock
-                                </span>
-                                <span className="text-xs text-stone-400">
-                                    Click (+) to add to allocation manifest
+                                <label className="flex items-center gap-2.5 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={
+                                            filteredCatalogVariants.filter(v => v.adminStock > 0).length > 0 &&
+                                            filteredCatalogVariants.filter(v => v.adminStock > 0).every(v => selectedVariantIds.has(v.variantId))
+                                        }
+                                        onChange={toggleSelectAllVisible}
+                                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                    />
+                                    <span className="text-xs font-black uppercase tracking-wider text-stone-700">
+                                        Master Catalog ({filteredCatalogVariants.length})
+                                    </span>
+                                </label>
+                                <span className="text-[11px] text-stone-400 font-medium">
+                                    Check boxes for multi-product allocation or click (+)
                                 </span>
                             </div>
 
@@ -633,22 +832,37 @@ const BranchDetail = () => {
                                 ) : (
                                     filteredCatalogVariants.map(v => {
                                         const isInManifest = manifest.some(m => m.variantId === v.variantId);
+                                        const isSelected = selectedVariantIds.has(v.variantId);
                                         const hasStock = v.adminStock > 0;
 
                                         return (
                                             <div
                                                 key={v.variantId}
                                                 className={`p-3.5 flex items-center justify-between transition-colors ${
-                                                    !hasStock ? 'opacity-40 bg-stone-50/50' : 'hover:bg-stone-50/80'
+                                                    !hasStock
+                                                        ? 'opacity-40 bg-stone-50/50'
+                                                        : isSelected
+                                                        ? 'bg-emerald-50/60'
+                                                        : 'hover:bg-stone-50/80'
                                                 }`}
                                             >
-                                                <div className="space-y-0.5">
-                                                    <div className="font-black text-stone-900 text-xs">{v.modelName}</div>
-                                                    <div className="text-[11px] text-stone-500 font-semibold">{v.brandName} • {v.category}</div>
-                                                    <div className="flex items-center gap-2 text-[10px] text-stone-400 font-mono">
-                                                        <span>{v.sku}</span>
-                                                        {v.color && <span>• {v.color}</span>}
-                                                        {v.thicknessMm && <span>• {v.thicknessMm}mm</span>}
+                                                <div className="flex items-center gap-3">
+                                                    <input
+                                                        type="checkbox"
+                                                        disabled={!hasStock}
+                                                        checked={isSelected}
+                                                        onChange={() => toggleSelectVariant(v.variantId)}
+                                                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer disabled:cursor-not-allowed"
+                                                    />
+
+                                                    <div className="space-y-0.5">
+                                                        <div className="font-black text-stone-900 text-xs">{v.modelName}</div>
+                                                        <div className="text-[11px] text-stone-500 font-semibold">{v.brandName} • {v.category}</div>
+                                                        <div className="flex items-center gap-2 text-[10px] text-stone-400 font-mono">
+                                                            <span>{v.sku}</span>
+                                                            {v.color && <span>• {v.color}</span>}
+                                                            {v.thicknessMm && <span>• {v.thicknessMm}mm</span>}
+                                                        </div>
                                                     </div>
                                                 </div>
 
@@ -665,6 +879,7 @@ const BranchDetail = () => {
                                                     <button
                                                         onClick={() => addToManifest(v)}
                                                         disabled={!hasStock}
+                                                        title={isInManifest ? 'Already in manifest (click to add 1 more)' : 'Add 1 to manifest'}
                                                         className={`p-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                                             !hasStock
                                                                 ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
@@ -690,12 +905,72 @@ const BranchDetail = () => {
                             <div className="flex items-center justify-between border-b border-stone-100 pb-3">
                                 <div>
                                     <h4 className="font-black text-stone-900 text-sm">Allocation Manifest</h4>
-                                    <p className="text-[11px] text-stone-400">Items to be dispatched to {branch.name}</p>
+                                    <p className="text-[11px] text-stone-400">Multiple items dispatched together to {branch.name}</p>
                                 </div>
                                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-100">
-                                    {manifest.length} items
+                                    {manifest.length} {manifest.length === 1 ? 'item' : 'items'}
                                 </span>
                             </div>
+
+                            {/* Batch Actions Toolbar for Manifest */}
+                            {manifest.length > 0 && (
+                                <div className="bg-stone-50 p-3 rounded-xl border border-stone-200 space-y-2.5">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1">
+                                            <Layers size={11} className="text-emerald-600" />
+                                            Batch Manifest Tools
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={clearManifest}
+                                            className="text-[10px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 cursor-pointer"
+                                        >
+                                            <Trash2 size={11} /> Clear All
+                                        </button>
+                                    </div>
+
+                                    {/* Set All Quantities */}
+                                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                                        <span className="text-[10px] font-bold text-stone-400">Qty for all:</span>
+                                        {[1, 2, 5, 10].map(q => (
+                                            <button
+                                                key={q}
+                                                type="button"
+                                                onClick={() => applyBulkQtyToManifest(q)}
+                                                className="px-2 py-0.5 bg-white border border-stone-200 hover:border-stone-400 rounded-md text-[11px] font-black text-stone-700 shadow-xs cursor-pointer"
+                                            >
+                                                {q}
+                                            </button>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={() => applyBulkQtyToManifest('max')}
+                                            className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-md text-[10px] font-black text-emerald-800 shadow-xs cursor-pointer"
+                                        >
+                                            Max Available
+                                        </button>
+                                    </div>
+
+                                    {/* Set All Cost */}
+                                    <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-stone-200/60 text-xs">
+                                        <span className="text-[10px] font-bold text-stone-400">Apply unit cost:</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => applyBulkPricingToManifest('acquisition')}
+                                            className="px-2 py-0.5 bg-white border border-stone-200 hover:border-stone-400 rounded-md text-[10px] font-bold text-stone-700 shadow-xs cursor-pointer"
+                                        >
+                                            Acquisition Cost
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => applyBulkPricingToManifest('retail')}
+                                            className="px-2 py-0.5 bg-white border border-stone-200 hover:border-stone-400 rounded-md text-[10px] font-bold text-stone-700 shadow-xs cursor-pointer"
+                                        >
+                                            Retail Price
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Manifest Items List */}
                             <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
@@ -703,7 +978,7 @@ const BranchDetail = () => {
                                     <div className="p-8 text-center text-stone-400 border border-dashed border-stone-200 rounded-xl">
                                         <PackagePlus size={24} className="mx-auto mb-2 opacity-30" />
                                         <p className="text-xs font-bold text-stone-600">Manifest is empty</p>
-                                        <p className="text-[11px] text-stone-400 mt-0.5">Select products from master catalog</p>
+                                        <p className="text-[11px] text-stone-400 mt-0.5">Select multiple products from the master catalog to allocate at once</p>
                                     </div>
                                 ) : (
                                     manifest.map(item => (
@@ -715,7 +990,8 @@ const BranchDetail = () => {
                                                 </div>
                                                 <button
                                                     onClick={() => removeFromManifest(item.variantId)}
-                                                    className="text-stone-400 hover:text-rose-600 p-1 rounded"
+                                                    className="text-stone-400 hover:text-rose-600 p-1 rounded transition-colors"
+                                                    title="Remove item"
                                                 >
                                                     <Trash2 size={13} />
                                                 </button>
@@ -761,13 +1037,43 @@ const BranchDetail = () => {
                                 )}
                             </div>
 
-                            {/* Terms: Deadline & Notes */}
+                            {/* Terms: Deadline Presets & Notes */}
                             <div className="pt-3 border-t border-stone-100 space-y-3">
                                 <div>
-                                    <label className="text-xs font-black text-stone-800 flex items-center gap-1.5 mb-1">
-                                        <Calendar size={13} className="text-stone-500" />
-                                        Payment Deadline Date *
-                                    </label>
+                                    <div className="flex items-center justify-between mb-1">
+                                        <label className="text-xs font-black text-stone-800 flex items-center gap-1.5">
+                                            <Calendar size={13} className="text-stone-500" />
+                                            Payment Deadline Date *
+                                        </label>
+                                        <span className="text-[10px] font-bold text-stone-400">Quick Presets:</span>
+                                    </div>
+
+                                    {/* Presets */}
+                                    <div className="flex items-center gap-1.5 mb-2 overflow-x-auto pb-1 custom-scrollbar">
+                                        {[
+                                            { label: '+7d', days: 7 },
+                                            { label: '+14d', days: 14 },
+                                            { label: '+30d', days: 30 },
+                                            { label: '+60d', days: 60 }
+                                        ].map(preset => (
+                                            <button
+                                                key={preset.label}
+                                                type="button"
+                                                onClick={() => setDeadlinePreset(preset.days)}
+                                                className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-black transition-all cursor-pointer shrink-0"
+                                            >
+                                                {preset.label}
+                                            </button>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={setDeadlineEndOfMonth}
+                                            className="px-2.5 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] font-black transition-all cursor-pointer shrink-0"
+                                        >
+                                            End of Month
+                                        </button>
+                                    </div>
+
                                     <input
                                         type="date"
                                         value={allocationDeadline}
@@ -782,7 +1088,7 @@ const BranchDetail = () => {
                                     </label>
                                     <input
                                         type="text"
-                                        placeholder="e.g. Batch #4 shipment, tournament restock..."
+                                        placeholder="e.g. Batch restock, new season shipment..."
                                         value={allocationNotes}
                                         onChange={(e) => setAllocationNotes(e.target.value)}
                                         className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-stone-300 bg-stone-50 focus:bg-white focus:outline-none"

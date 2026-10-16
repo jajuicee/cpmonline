@@ -4,7 +4,8 @@ import {
     ShoppingCart, Search, User, CreditCard, Tag, X,
     AlertCircle, CheckCircle, Loader2, ClipboardList, Trash2,
     Printer, Receipt, Store, Layers, Plus, Minus, ArrowRight,
-    RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split
+    RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split,
+    Pen, DollarSign, Calendar, Eye
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -59,7 +60,62 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const [showAddConsignee, setShowAddConsignee] = useState(false);
     const [newConsigneeName, setNewConsigneeName] = useState('');
 
-    const handlePrintTicket = () => window.print();
+    // --- IN-TAB PRICE EDITING STATE ---
+    const [priceModalOpen, setPriceModalOpen]   = useState(false);
+    const [editingVariant, setEditingVariant]   = useState(null);
+    const [newPriceInput, setNewPriceInput]     = useState('');
+    const [savingPrice, setSavingPrice]         = useState(false);
+
+    // --- RECEIPT SYSTEM STATE ---
+    const [completedReceipt, setCompletedReceipt] = useState(null);
+    const [showReceiptModal, setShowReceiptModal] = useState(false);
+
+    const handlePrintTicket = () => {
+        window.print();
+    };
+
+    const openPriceEdit = (variant, currentCartPrice = null) => {
+        setEditingVariant(variant);
+        const p = currentCartPrice != null ? currentCartPrice : (variant.sellingPrice || '');
+        setNewPriceInput(p.toString());
+        setPriceModalOpen(true);
+    };
+
+    const handleSavePrice = async (e) => {
+        e.preventDefault();
+        if (!editingVariant) return;
+        const val = parseFloat(newPriceInput);
+        if (isNaN(val) || val < 0) {
+            alert('Please enter a valid non-negative selling price.');
+            return;
+        }
+
+        setSavingPrice(true);
+        try {
+            await axios.put(`/api/products/variants/${editingVariant.id}/branch-price`, {
+                sellingPrice: val,
+                branchId: user?.branchId
+            });
+
+            // Update in active cart if present
+            setCart(prev => prev.map(c =>
+                c.variant.id === editingVariant.id ? { ...c, finalPrice: val } : c
+            ));
+
+            setPriceModalOpen(false);
+            setStatus({
+                type: 'success',
+                message: `Selling price for "${editingVariant.displayName || editingVariant.sku}" updated to ${fmt(val)}.`
+            });
+
+            if (refetchProducts) refetchProducts();
+        } catch (err) {
+            console.error('Failed to update price:', err);
+            alert(err.response?.data?.error || 'Failed to update branch selling price.');
+        } finally {
+            setSavingPrice(false);
+        }
+    };
 
     const fetchConsignees = async () => {
         try {
@@ -271,6 +327,39 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
             setShowSummary(false);
             if (failedItems.length === 0) {
+                // Build complete receipt record
+                const customerDisplay = orderMode === 'REGULAR'
+                    ? (formData.customerName || 'Walk-in Customer')
+                    : (consignees.find(c => c.id.toString() === selectedConsigneeId)?.name || 'Consignment Account');
+
+                const receiptData = {
+                    ticketNumber: generatedTransactionId,
+                    date: new Date(),
+                    customerName: customerDisplay,
+                    paymentMethod: formData.paymentMethod,
+                    splits: formData.paymentMethod === 'Split Payment' ? formData.splits : null,
+                    orderMode,
+                    orderNote: formData.orderNote,
+                    items: cart.map(item => ({
+                        id: item.variant.id,
+                        displayName: item.variant.displayName,
+                        sku: item.variant.sku,
+                        specs: item.variant.variantSpecs,
+                        qty: item.qty,
+                        finalPrice: item.finalPrice,
+                        paymentStatus: item.paymentStatus,
+                        downpayment: item.downpayment,
+                        lineTotal: (parseFloat(item.finalPrice) || 0) * (parseInt(item.qty, 10) || 0)
+                    })),
+                    totalUnits,
+                    cartTotal,
+                    amountPaid,
+                    amountUnpaid,
+                    branchName: user?.branchName || 'Cebu Pickleball Market'
+                };
+
+                setCompletedReceipt(receiptData);
+                setShowReceiptModal(true);
                 setStatus({ type: 'success', message: `Order #${generatedTransactionId} placed successfully!` });
                 resetForm();
                 if (refetchProducts) refetchProducts();
@@ -293,12 +382,14 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 @media print {
                     body * { visibility: hidden !important; }
                     .pos-ticket-printable, .pos-ticket-printable * { visibility: visible !important; }
-                    aside, header, .pos-ticket-no-print { display: none !important; }
+                    aside, header, nav, .pos-ticket-no-print { display: none !important; }
                     html, body, #root, .App, .flex, main { overflow: visible !important; height: auto !important; background: white !important; }
                     .pos-ticket-printable {
+                        display: block !important;
                         position: absolute !important; left: 0 !important; top: 0 !important;
                         width: 72mm !important; max-width: 72mm !important; padding: 4mm !important;
-                        background: white !important; font-size: 9px !important; line-height: 1.25 !important;
+                        background: white !important; font-size: 10px !important; line-height: 1.3 !important;
+                        color: black !important;
                     }
                     @page { size: 72mm auto; margin: 0; }
                 }
@@ -466,11 +557,19 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             </div>
                                         </div>
 
-                                        <div className="flex items-center gap-4 shrink-0">
+                                        <div className="flex items-center gap-3 shrink-0">
                                             <div className="text-right">
-                                                <span className="text-base font-black text-emerald-600 font-mono block">
-                                                    {fmt(item.sellingPrice)}
-                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openPriceEdit(item)}
+                                                    className="group flex items-center justify-end gap-1 hover:opacity-80 transition-opacity cursor-pointer"
+                                                    title="Click to edit branch selling price"
+                                                >
+                                                    <span className="text-base font-black text-emerald-600 font-mono block">
+                                                        {fmt(item.sellingPrice)}
+                                                    </span>
+                                                    <Pen size={12} className="text-stone-400 group-hover:text-emerald-700" />
+                                                </button>
                                                 <span className="text-[10px] text-stone-400 font-medium">per unit</span>
                                             </div>
 
@@ -582,9 +681,22 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                                 <option value="UNPAID">UNPAID</option>
                                             </select>
                                             <div className="text-right">
-                                                <span className="text-xs font-black text-emerald-600 font-mono">
-                                                    {fmt(item.finalPrice * item.qty)}
-                                                </span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openPriceEdit(item.variant, item.finalPrice)}
+                                                    className="group flex items-center justify-end gap-1 hover:opacity-80 cursor-pointer"
+                                                    title="Click to change price"
+                                                >
+                                                    <span className="text-xs font-black text-emerald-600 font-mono">
+                                                        {fmt(item.finalPrice * item.qty)}
+                                                    </span>
+                                                    <Pen size={10} className="text-stone-400 group-hover:text-emerald-700" />
+                                                </button>
+                                                {item.qty > 1 && (
+                                                    <span className="text-[10px] text-stone-400 font-medium block">
+                                                        ({fmt(item.finalPrice)}/ea)
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
@@ -937,38 +1049,299 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 </div>
             )}
 
-            {/* Hidden Printable Ticket */}
+            {/* ===== PRICE EDIT MODAL ===== */}
+            {priceModalOpen && editingVariant && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pos-ticket-no-print animate-fade-in">
+                    <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-stone-200 overflow-hidden">
+                        <div className="p-6 bg-stone-900 text-white flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">
+                                    ₱
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black tracking-tight">Edit Branch Selling Price</h3>
+                                    <p className="text-xs text-stone-400">Updates live POS catalog and future sales</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setPriceModalOpen(false)}
+                                className="text-stone-400 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSavePrice} className="p-6 space-y-4">
+                            <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200 text-xs space-y-1">
+                                <div className="font-black text-stone-900 text-sm">
+                                    {editingVariant.productBrand} {editingVariant.productModel}
+                                </div>
+                                <div className="text-stone-500 font-medium">
+                                    {editingVariant.variantSpecs}
+                                </div>
+                                <div className="font-mono text-stone-400 text-[11px]">
+                                    SKU: {editingVariant.sku}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-black uppercase tracking-wider text-stone-700 mb-1.5">
+                                    New Branch Selling Price (₱)
+                                </label>
+                                <div className="relative">
+                                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-stone-500 text-sm">
+                                        ₱
+                                    </span>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        autoFocus
+                                        value={newPriceInput}
+                                        onChange={(e) => setNewPriceInput(e.target.value)}
+                                        placeholder="0.00"
+                                        className="w-full pl-8 pr-4 py-3 bg-white border border-stone-300 rounded-xl font-mono text-base font-black text-stone-900 focus:outline-none focus:border-stone-900 focus:ring-1 focus:ring-stone-900"
+                                    />
+                                </div>
+                                <p className="text-[11px] text-stone-400 mt-1">
+                                    This customized price will apply specifically to {user?.branchName || 'your branch'}.
+                                </p>
+                            </div>
+
+                            <div className="pt-2 flex items-center justify-end gap-2.5">
+                                <button
+                                    type="button"
+                                    onClick={() => setPriceModalOpen(false)}
+                                    disabled={savingPrice}
+                                    className="px-4 py-2.5 rounded-xl border border-stone-200 text-stone-700 font-bold text-xs hover:bg-stone-100 transition-colors cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={savingPrice}
+                                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                >
+                                    {savingPrice ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                                    <span>Save Price</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ===== COMPLETED ORDER RECEIPT MODAL ===== */}
+            {showReceiptModal && completedReceipt && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 pos-ticket-no-print animate-fade-in overflow-y-auto">
+                    <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-stone-200 overflow-hidden my-8 flex flex-col max-h-[92vh]">
+                        {/* Modal Header */}
+                        <div className="bg-stone-950 p-6 text-white flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                                    <Receipt size={22} />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black tracking-tight">Order Receipt</h3>
+                                    <p className="text-xs text-stone-400">Payment completed & recorded</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowReceiptModal(false)}
+                                className="text-stone-400 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Paper-styled Receipt Card */}
+                        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar bg-stone-100/70">
+                            <div className="bg-white rounded-2xl border border-stone-300/80 p-6 shadow-md font-mono text-xs text-stone-800 space-y-4">
+                                {/* Receipt Header */}
+                                <div className="text-center pb-4 border-b border-dashed border-stone-300">
+                                    <h2 className="text-base font-black uppercase tracking-wider text-stone-900">
+                                        Cebu Pickleball Market
+                                    </h2>
+                                    <div className="text-[11px] text-stone-500 font-sans mt-0.5">
+                                        Authorized Paddle Retailer
+                                    </div>
+                                    <div className="text-xs font-bold text-emerald-700 mt-1">
+                                        {completedReceipt.branchName}
+                                    </div>
+                                </div>
+
+                                {/* Order Meta */}
+                                <div className="space-y-1 text-[11px]">
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-400">Ticket #:</span>
+                                        <span className="font-bold text-stone-900">{completedReceipt.ticketNumber}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-400">Date:</span>
+                                        <span>{new Date(completedReceipt.date).toLocaleString('en-PH')}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-400">Customer:</span>
+                                        <span className="font-bold text-stone-900">{completedReceipt.customerName}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-400">Payment:</span>
+                                        <span className="font-bold text-stone-900">{completedReceipt.paymentMethod}</span>
+                                    </div>
+                                    {completedReceipt.orderNote && (
+                                        <div className="flex justify-between text-stone-500 italic">
+                                            <span>Note:</span>
+                                            <span>{completedReceipt.orderNote}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Items Breakdown */}
+                                <div className="border-t border-b border-dashed border-stone-300 py-3 space-y-2">
+                                    <div className="flex justify-between text-[10px] font-black uppercase tracking-wider text-stone-400">
+                                        <span>Item Description</span>
+                                        <span>Amount</span>
+                                    </div>
+                                    {completedReceipt.items.map((it, i) => (
+                                        <div key={i} className="flex justify-between items-start text-[11px]">
+                                            <div className="pr-2 min-w-0">
+                                                <div className="font-bold text-stone-900">
+                                                    {it.qty}x {it.displayName}
+                                                </div>
+                                                <div className="text-[10px] text-stone-400 font-sans">
+                                                    {it.sku} • {fmt(it.finalPrice)}/ea
+                                                </div>
+                                                {it.paymentStatus !== 'PAID' && (
+                                                    <span className="text-[10px] font-bold text-amber-700">
+                                                        [{it.paymentStatus}]
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="font-bold text-stone-900 shrink-0">
+                                                {fmt(it.lineTotal)}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Totals & Due */}
+                                <div className="space-y-1.5 pt-1 text-xs">
+                                    <div className="flex justify-between text-stone-500">
+                                        <span>Total Units:</span>
+                                        <span>{completedReceipt.totalUnits}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm font-black text-stone-900 pt-1 border-t border-stone-200">
+                                        <span>TOTAL:</span>
+                                        <span className="text-emerald-700 font-black">{fmt(completedReceipt.cartTotal)}</span>
+                                    </div>
+                                    <div className="flex justify-between font-bold text-stone-700">
+                                        <span>Amount Paid:</span>
+                                        <span>{fmt(completedReceipt.amountPaid)}</span>
+                                    </div>
+                                    {completedReceipt.amountUnpaid > 0 && (
+                                        <div className="flex justify-between font-bold text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                                            <span>Balance Due:</span>
+                                            <span>{fmt(completedReceipt.amountUnpaid)}</span>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Footer Thank You */}
+                                <div className="text-center pt-4 border-t border-dashed border-stone-300 text-[10px] text-stone-400 font-sans leading-relaxed">
+                                    <div className="font-bold text-stone-700">Thank you for your purchase!</div>
+                                    <div>Keep this receipt for warranty and returns.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Modal Action Buttons */}
+                        <div className="p-5 bg-white border-t border-stone-200 flex items-center justify-between gap-3 shrink-0">
+                            <button
+                                type="button"
+                                onClick={handlePrintTicket}
+                                className="px-5 py-3 bg-stone-900 hover:bg-black text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                            >
+                                <Printer size={15} />
+                                <span>Print Receipt</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowReceiptModal(false)}
+                                className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                            >
+                                <Plus size={15} />
+                                <span>New Order</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Hidden Printable Ticket (Active Cart or Completed Order) */}
             <div className="pos-ticket-printable hidden">
                 <div className="text-center mb-3">
                     <div className="ticket-header-title text-[15px] font-black tracking-wider uppercase">Cebu Pickleball Market</div>
                     <div className="ticket-header-subtitle text-[10px] text-zinc-500 mt-0.5">Authorized Paddle Retailer</div>
-                    <div className="ticket-header-subtitle text-[10px] text-zinc-500">{user?.branchName || 'Branch Terminal'}</div>
+                    <div className="ticket-header-subtitle text-[10px] text-zinc-500">
+                        {completedReceipt?.branchName || user?.branchName || 'Branch Terminal'}
+                    </div>
                 </div>
 
                 <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
                 <div className="space-y-0.5 mb-2 text-[10px]">
-                    <div className="flex justify-between"><span>Ticket:</span><span className="font-bold">{ticketNumber}</span></div>
-                    <div className="flex justify-between"><span>Customer:</span><span className="font-bold">{formData.customerName || 'Walk-in'}</span></div>
-                    <div className="flex justify-between"><span>Payment:</span><span className="font-bold">{formData.paymentMethod}</span></div>
+                    <div className="flex justify-between">
+                        <span>Ticket:</span>
+                        <span className="font-bold">{completedReceipt?.ticketNumber || ticketNumber}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span>Customer:</span>
+                        <span className="font-bold">{completedReceipt?.customerName || formData.customerName || 'Walk-in'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span>Payment:</span>
+                        <span className="font-bold">{completedReceipt?.paymentMethod || formData.paymentMethod}</span>
+                    </div>
+                    <div className="flex justify-between">
+                        <span>Date:</span>
+                        <span>{new Date(completedReceipt?.date || Date.now()).toLocaleString('en-PH')}</span>
+                    </div>
                 </div>
 
                 <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
                 <div className="space-y-1 mb-2">
-                    {cart.map((item, i) => (
-                        <div key={i} className="flex justify-between text-[10px]">
-                            <span>{item.qty}x {item.variant.displayName}</span>
-                            <span className="font-bold">{fmt(item.finalPrice * item.qty)}</span>
-                        </div>
-                    ))}
+                    {(completedReceipt?.items || cart).map((item, i) => {
+                        const displayName = item.displayName || item.variant?.displayName;
+                        const price = item.finalPrice;
+                        const qty = item.qty;
+                        return (
+                            <div key={i} className="flex justify-between text-[10px]">
+                                <span>{qty}x {displayName}</span>
+                                <span className="font-bold">{fmt(price * qty)}</span>
+                            </div>
+                        );
+                    })}
                 </div>
 
                 <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
 
                 <div className="flex justify-between text-[13px] font-black">
                     <span>TOTAL:</span>
-                    <span>{fmt(cartTotal)}</span>
+                    <span>{fmt(completedReceipt?.cartTotal || cartTotal)}</span>
+                </div>
+                {(completedReceipt ? completedReceipt.amountUnpaid > 0 : amountUnpaid > 0) && (
+                    <div className="flex justify-between text-[11px] font-bold text-zinc-700 mt-1">
+                        <span>BALANCE DUE:</span>
+                        <span>{fmt(completedReceipt?.amountUnpaid || amountUnpaid)}</span>
+                    </div>
+                )}
+
+                <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
+
+                <div className="text-center text-[9px] text-zinc-500 mt-2">
+                    <div>Thank you for your purchase!</div>
+                    <div>Keep this receipt for warranty &amp; returns.</div>
                 </div>
             </div>
         </div>

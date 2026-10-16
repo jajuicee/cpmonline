@@ -18,7 +18,8 @@ import {
     Store,
     CreditCard,
     ChevronRight,
-    ArrowUpRight
+    ArrowUpRight,
+    PackagePlus
 } from 'lucide-react';
 
 const BranchesAdmin = () => {
@@ -245,10 +246,23 @@ const BranchesAdmin = () => {
                             </div>
 
                             <div className="px-6 py-3.5 bg-stone-50/70 border-t border-stone-100 flex items-center justify-between text-xs">
-                                <span className="text-stone-400 font-medium">All-time Revenue</span>
-                                <span className="font-black text-stone-900">
-                                    ₱{Number(b.totalRevenue || 0).toLocaleString()}
-                                </span>
+                                <div>
+                                    <span className="text-stone-400 font-medium block text-[10px]">All-time Revenue</span>
+                                    <span className="font-black text-stone-900">
+                                        ₱{Number(b.totalRevenue || 0).toLocaleString()}
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/branches/${b.id}?tab=allocate`);
+                                    }}
+                                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                                >
+                                    <PackagePlus size={13} />
+                                    <span>Allocate</span>
+                                </button>
                             </div>
                         </div>
                     ))}

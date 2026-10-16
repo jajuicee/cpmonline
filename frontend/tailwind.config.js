@@ -6,6 +6,10 @@ export default {
     ],
     theme: {
         extend: {
+            fontFamily: {
+                sans: ['Montserrat', 'sans-serif'],
+                montserrat: ['Montserrat', 'sans-serif'],
+            },
             colors: {
                 brand: {
                     cream: '#F4F1E1', // The warm off-white background of the logo

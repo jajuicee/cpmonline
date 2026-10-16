@@ -24,7 +24,9 @@ import {
     LogOut,
     ChevronDown,
     MapPin,
-    User
+    User,
+    DollarSign,
+    CreditCard
 } from 'lucide-react';
 
 // Main Page Components
@@ -44,6 +46,12 @@ const ConsigneesPage = lazy(() => import('./ConsigneesPage'));
 const Reporting = lazy(() => import('./Reporting'));
 const BranchesAdmin = lazy(() => import('./BranchesAdmin'));
 const AccountsAdmin = lazy(() => import('./AccountsAdmin'));
+
+// New Overhaul Components
+const BranchDetail = lazy(() => import('./BranchDetail'));
+const BranchPrices = lazy(() => import('./BranchPrices'));
+const BranchDues = lazy(() => import('./BranchDues'));
+const BranchAnalytics = lazy(() => import('./BranchAnalytics'));
 
 const Dashboard = () => {
     const location = useLocation();
@@ -89,22 +97,23 @@ const Dashboard = () => {
             {
                 title: 'Store Operations',
                 items: [
-                    { name: 'POS System',        path: '/orders',       icon: ShoppingCart },
-                    { name: 'Sales Overview',    path: '/branch-sales', icon: TrendingUp },
+                    { name: 'POS System',        path: '/orders',           icon: ShoppingCart },
+                    { name: 'Analytics',         path: '/branch-analytics', icon: TrendingUp },
                 ]
             },
             {
-                title: 'Inventory & Stocks',
+                title: 'Inventory & Pricing',
                 items: [
-                    { name: 'Add Inventory',     path: '/add-stock',    icon: PackagePlus },
-                    { name: 'Current Inventory', path: '/inventory',    icon: Boxes },
-                    { name: 'Consignees',        path: '/consignees',   icon: Users },
+                    { name: 'Current Inventory', path: '/inventory',        icon: Boxes },
+                    { name: 'Set Prices',        path: '/branch-prices',    icon: DollarSign },
+                    { name: 'Consignees',        path: '/consignees',       icon: Users },
                 ]
             },
             {
-                title: 'Audit & Records',
+                title: 'Payments & Records',
                 items: [
-                    { name: 'Order History',     path: '/history',      icon: History },
+                    { name: 'My Dues',           path: '/branch-dues',      icon: CreditCard },
+                    { name: 'Order History',     path: '/history',          icon: History },
                 ]
             }
         ]
@@ -344,11 +353,9 @@ const Dashboard = () => {
                                 <Route path="/" element={<Navigate to="/orders" replace />} />
                                 <Route path="/orders" element={<OrderPage products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                 
-                                {/* Branch Stock Adding vs Master Product Catalog CRUD */}
-                                <Route path="/add-stock" element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
-                                
                                 {isAdmin ? (
                                     <>
+                                        <Route path="/add-stock" element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/add-product" element={<AddProduct onProductAdded={fetchProducts} />} />
                                         <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                         <Route path="/manage-inventory" element={<ManageInventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
@@ -362,12 +369,15 @@ const Dashboard = () => {
                                         <Route path="/analytics" element={<Analytics />} />
                                         <Route path="/expenses" element={<Expenses />} />
                                         <Route path="/branches" element={<BranchesAdmin />} />
+                                        <Route path="/branches/:branchId" element={<BranchDetail />} />
                                         <Route path="/accounts" element={<AccountsAdmin />} />
                                     </>
                                 ) : (
                                     <>
                                         <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                                        <Route path="/branch-sales" element={<BranchSales />} />
+                                        <Route path="/branch-prices" element={<BranchPrices products={products} refetchProducts={fetchProducts} />} />
+                                        <Route path="/branch-dues" element={<BranchDues />} />
+                                        <Route path="/branch-analytics" element={<BranchAnalytics />} />
                                         <Route path="/history" element={<OrderHistory />} />
                                         <Route path="/consignees" element={<ConsigneesPage />} />
                                         {/* Fallback for unauthorized branch routes */}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
     Building2,
@@ -14,10 +15,14 @@ import {
     Check,
     X,
     AlertCircle,
-    Store
+    Store,
+    CreditCard,
+    ChevronRight,
+    ArrowUpRight
 } from 'lucide-react';
 
 const BranchesAdmin = () => {
+    const navigate = useNavigate();
     const [branches, setBranches] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
@@ -146,11 +151,12 @@ const BranchesAdmin = () => {
                     {branches.map((b) => (
                         <div
                             key={b.id}
-                            className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden flex flex-col justify-between hover:shadow-md transition-shadow"
+                            onClick={() => navigate(`/branches/${b.id}`)}
+                            className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden flex flex-col justify-between hover:shadow-xl hover:border-stone-400 transition-all cursor-pointer group"
                         >
                             <div className="p-6">
                                 <div className="flex items-start justify-between gap-3 mb-4">
-                                    <div className="w-10 h-10 rounded-xl bg-stone-100 flex items-center justify-center text-stone-800 font-bold shrink-0">
+                                    <div className="w-10 h-10 rounded-xl bg-stone-100 group-hover:bg-stone-900 group-hover:text-white transition-colors flex items-center justify-center text-stone-800 font-bold shrink-0">
                                         <Building2 size={20} />
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -162,18 +168,24 @@ const BranchesAdmin = () => {
                                             {b.active ? 'Active' : 'Inactive'}
                                         </span>
                                         <button
-                                            onClick={() => handleOpenModal(b)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleOpenModal(b);
+                                            }}
                                             className="p-1.5 text-stone-400 hover:text-stone-800 hover:bg-stone-100 rounded-lg transition-colors cursor-pointer"
-                                            title="Edit branch"
+                                            title="Edit branch details"
                                         >
                                             <Edit2 size={14} />
                                         </button>
                                     </div>
                                 </div>
 
-                                <h3 className="text-lg font-black text-stone-900 tracking-tight">
-                                    {b.name}
-                                </h3>
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-lg font-black text-stone-900 tracking-tight group-hover:text-emerald-700 transition-colors">
+                                        {b.name}
+                                    </h3>
+                                    <ChevronRight size={18} className="text-stone-300 group-hover:text-emerald-600 group-hover:translate-x-0.5 transition-all" />
+                                </div>
 
                                 <div className="space-y-1.5 mt-3 text-xs text-stone-500">
                                     {b.address && (
@@ -210,6 +222,24 @@ const BranchesAdmin = () => {
                                         <div className="text-xl font-black text-emerald-600 mt-1">
                                             ₱{Number(b.todayRevenue || 0).toLocaleString()}
                                         </div>
+                                    </div>
+                                </div>
+
+                                {/* Dues & Outstanding Widget */}
+                                <div className="mt-3 p-3 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center justify-between text-xs">
+                                    <div className="flex items-center gap-1.5 text-amber-800 font-bold">
+                                        <CreditCard size={13} className="text-amber-600 shrink-0" />
+                                        <span>Dues to Admin:</span>
+                                    </div>
+                                    <div className="text-right">
+                                        <span className="font-black text-amber-900">
+                                            ₱{Number(b.totalDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                        {Number(b.overdueCount || 0) > 0 && (
+                                            <span className="block text-[10px] font-black text-rose-600 uppercase tracking-wider">
+                                                {b.overdueCount} Overdue
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             </div>

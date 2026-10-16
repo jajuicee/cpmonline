@@ -66,6 +66,7 @@ public class BatchActionController {
 
     @PostMapping("/receive")
     @Transactional
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> receiveBatch(
             @RequestBody BatchAddRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {

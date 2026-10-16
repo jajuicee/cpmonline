@@ -30,6 +30,7 @@ public class ProductService {
     private final TransactionRepository transactionRepository;
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final BranchRepository branchRepository;
+    private final pb.market.repository.BranchSellingPriceRepository branchSellingPriceRepository;
     private final EntityManager entityManager;
 
 /*
@@ -126,9 +127,18 @@ public class ProductService {
         // Total units removed via manual adjustments
         Map<Long, Long> adjustedMap = stockAdjustmentRepository.sumQuantityByVariantIdAndBranch(branchId).stream()
                 .collect(Collectors.toMap(
-                    row -> ((Number) row[0]).longValue(),
+                    row -> ((Number) row[0]).longValue(), 
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
+
+        Map<Long, BigDecimal> branchPriceMap = branchId != null ?
+                branchSellingPriceRepository.findAllByBranchId(branchId).stream()
+                        .filter(bsp -> bsp.getVariant() != null && bsp.getVariant().getId() != null)
+                        .collect(Collectors.toMap(
+                                bsp -> bsp.getVariant().getId(),
+                                BranchSellingPrice::getSellingPrice,
+                                (p1, p2) -> p2
+                        )) : Map.of();
 
         // Populate all transient fields on each variant in one pass
         for (Product product : products) {
@@ -138,6 +148,12 @@ public class ProductService {
                     v.setTotalSold(soldMap.getOrDefault(v.getId(), 0L));
                     v.setTotalAdjusted(adjustedMap.getOrDefault(v.getId(), 0L));
                     v.setStockQuantity(stockMap.getOrDefault(v.getId(), 0L).intValue());
+                    if (branchId != null && branchPriceMap.containsKey(v.getId())) {
+                        BigDecimal bp = branchPriceMap.get(v.getId());
+                        v.setBranchSellingPrice(bp);
+                        v.setHasCustomPrice(true);
+                        v.setSellingPrice(bp);
+                    }
                 }
             }
         }

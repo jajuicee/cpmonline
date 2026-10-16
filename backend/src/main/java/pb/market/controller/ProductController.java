@@ -1,19 +1,26 @@
 package pb.market.controller;
 
+import pb.market.entity.Branch;
+import pb.market.entity.BranchSellingPrice;
 import pb.market.entity.Product;
 import pb.market.entity.ProductVariant;
 import pb.market.entity.StockAdjustment;
 import pb.market.config.StockWebSocketHandler;
+import pb.market.config.UserPrincipal;
+import pb.market.repository.BranchRepository;
+import pb.market.repository.BranchSellingPriceRepository;
 import pb.market.repository.VariantRepository;
 import pb.market.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -25,6 +32,9 @@ public class ProductController {
     private final ProductService productService;
     private final pb.market.repository.TransactionRepository transactionRepository;
     private final StockWebSocketHandler stockWebSocketHandler;
+    private final BranchSellingPriceRepository branchSellingPriceRepository;
+    private final BranchRepository branchRepository;
+    private final VariantRepository variantRepository;
 
     @GetMapping
     public List<Product> getAll(
@@ -249,6 +259,101 @@ public class ProductController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
+    }
+
+    // ===== Branch Selling Price Endpoints =====
+
+    /**
+     * Branch sets their own selling price for a specific variant.
+     * Body: { "sellingPrice": 1500 }
+     */
+    @PutMapping("/variants/{id}/branch-price")
+    @Transactional
+    public ResponseEntity<?> setBranchPrice(
+            @PathVariable("id") Long variantId,
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal UserPrincipal user) {
+
+        if (user == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Not authenticated."));
+        }
+        Long branchId = "BRANCH".equals(user.getRole()) ? user.getBranchId() :
+                (body.containsKey("branchId") ? Long.valueOf(body.get("branchId").toString()) : null);
+
+        if (branchId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "branchId is required."));
+        }
+
+        Object priceObj = body.get("sellingPrice");
+        if (priceObj == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "sellingPrice is required."));
+        }
+        BigDecimal price;
+        try {
+            price = new BigDecimal(priceObj.toString());
+        } catch (NumberFormatException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid sellingPrice value."));
+        }
+        if (price.compareTo(BigDecimal.ZERO) < 0) {
+            return ResponseEntity.badRequest().body(Map.of("error", "sellingPrice must be >= 0."));
+        }
+
+        if (!variantRepository.existsById(variantId)) {
+            return ResponseEntity.notFound().build();
+        }
+        Branch branch = branchRepository.findById(branchId).orElse(null);
+        if (branch == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Branch not found: " + branchId));
+        }
+        ProductVariant variant = variantRepository.findById(variantId).get();
+
+        BranchSellingPrice bsp = branchSellingPriceRepository
+                .findByBranchIdAndVariantId(branchId, variantId)
+                .orElseGet(() -> {
+                    BranchSellingPrice newBsp = new BranchSellingPrice();
+                    newBsp.setBranch(branch);
+                    newBsp.setVariant(variant);
+                    return newBsp;
+                });
+        bsp.setSellingPrice(price);
+        branchSellingPriceRepository.save(bsp);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("variantId", variantId);
+        resp.put("branchId", branchId);
+        resp.put("sellingPrice", price);
+        resp.put("message", "Branch selling price updated.");
+        return ResponseEntity.ok(resp);
+    }
+
+    /**
+     * Returns all branch selling price overrides for a branch.
+     * Branch users always see their own; admin can pass branchId param.
+     */
+    @GetMapping("/branch-prices")
+    public ResponseEntity<?> getBranchPrices(
+            @RequestParam(required = false) Long branchId,
+            @AuthenticationPrincipal UserPrincipal user) {
+
+        Long effectiveBranchId = (user != null && "BRANCH".equals(user.getRole()))
+                ? user.getBranchId() : branchId;
+
+        if (effectiveBranchId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "branchId is required."));
+        }
+
+        List<BranchSellingPrice> prices = branchSellingPriceRepository.findAllByBranchId(effectiveBranchId);
+        List<Map<String, Object>> result = prices.stream().map(bsp -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", bsp.getId());
+            m.put("variantId", bsp.getVariant() != null ? bsp.getVariant().getId() : null);
+            m.put("sku", bsp.getVariant() != null ? bsp.getVariant().getSku() : null);
+            m.put("sellingPrice", bsp.getSellingPrice());
+            m.put("updatedAt", bsp.getUpdatedAt() != null ? bsp.getUpdatedAt().toString() : null);
+            return m;
+        }).toList();
+
+        return ResponseEntity.ok(result);
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

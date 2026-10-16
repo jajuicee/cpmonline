@@ -5,13 +5,17 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import pb.market.entity.Branch;
+import pb.market.entity.BranchStockAllocation;
 import pb.market.entity.Role;
 import pb.market.entity.User;
 import pb.market.repository.BranchRepository;
+import pb.market.repository.BranchStockAllocationRepository;
 import pb.market.repository.StockBatchRepository;
 import pb.market.repository.TransactionRepository;
 import pb.market.repository.UserRepository;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,18 +30,21 @@ public class AdminController {
     private final PasswordEncoder passwordEncoder;
     private final TransactionRepository transactionRepository;
     private final StockBatchRepository stockBatchRepository;
+    private final BranchStockAllocationRepository allocationRepository;
 
     public AdminController(
             BranchRepository branchRepository,
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             TransactionRepository transactionRepository,
-            StockBatchRepository stockBatchRepository) {
+            StockBatchRepository stockBatchRepository,
+            BranchStockAllocationRepository allocationRepository) {
         this.branchRepository = branchRepository;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.transactionRepository = transactionRepository;
         this.stockBatchRepository = stockBatchRepository;
+        this.allocationRepository = allocationRepository;
     }
 
     // ─── BRANCH CRUD ──────────────────────────────────────────────
@@ -45,6 +52,39 @@ public class AdminController {
     @GetMapping("/branches")
     public List<Branch> getAllBranches() {
         return branchRepository.findAll();
+    }
+
+    @GetMapping("/branches/{id}")
+    public ResponseEntity<?> getBranchById(@PathVariable Long id) {
+        return branchRepository.findById(id).map(b -> {
+            Map<String, Object> map = new LinkedHashMap<>();
+            map.put("id", b.getId());
+            map.put("name", b.getName());
+            map.put("address", b.getAddress());
+            map.put("contactInfo", b.getContactInfo());
+            map.put("active", b.isActive());
+
+            java.time.LocalDateTime startOfToday = java.time.LocalDate.now().atStartOfDay();
+            java.time.LocalDateTime endOfToday = startOfToday.plusDays(1);
+            LocalDate today = LocalDate.now();
+
+            java.math.BigDecimal totalRev = transactionRepository.sumFinalPriceAllByBranch(b.getId());
+            java.math.BigDecimal todayRev = transactionRepository.sumFinalPriceInRangeAndBranch(startOfToday, endOfToday, b.getId());
+
+            List<Object[]> stockRows = stockBatchRepository.sumRemainingQuantityByVariantIdAndBranch(b.getId());
+            long totalStockUnits = stockRows.stream().mapToLong(r -> r[1] != null ? ((Number) r[1]).longValue() : 0L).sum();
+
+            BigDecimal outstanding = allocationRepository.sumOutstandingByBranchId(b.getId());
+            List<BranchStockAllocation> overdueList = allocationRepository.findOverdueByBranch(b.getId(), today);
+
+            map.put("totalRevenue", totalRev != null ? totalRev : BigDecimal.ZERO);
+            map.put("todayRevenue", todayRev != null ? todayRev : BigDecimal.ZERO);
+            map.put("totalStockUnits", totalStockUnits);
+            map.put("totalDue", outstanding != null ? outstanding : BigDecimal.ZERO);
+            map.put("overdueCount", overdueList != null ? overdueList.size() : 0);
+
+            return ResponseEntity.ok(map);
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/branches")
@@ -78,6 +118,18 @@ public class AdminController {
     public List<Map<String, Object>> getBranchesOverview() {
         java.time.LocalDateTime startOfToday = java.time.LocalDate.now().atStartOfDay();
         java.time.LocalDateTime endOfToday = startOfToday.plusDays(1);
+        LocalDate today = LocalDate.now();
+
+        // Pre-fetch dues data for all branches
+        Map<Long, BigDecimal> outstandingMap = new java.util.HashMap<>();
+        Map<Long, BigDecimal> paidMap = new java.util.HashMap<>();
+        Map<Long, Long> overdueMap = new java.util.HashMap<>();
+        try {
+            allocationRepository.sumOutstandingPerBranch().forEach(row ->
+                outstandingMap.put(((Number) row[0]).longValue(), (BigDecimal) row[1]));
+            allocationRepository.countOverdueByBranch(today).forEach(row ->
+                overdueMap.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue()));
+        } catch (Exception ignored) { /* table may not exist yet on first startup */ }
 
         return branchRepository.findAll().stream().map(b -> {
             Map<String, Object> map = new LinkedHashMap<>();
@@ -90,7 +142,7 @@ public class AdminController {
             // Aggregates
             java.math.BigDecimal totalRev = transactionRepository.sumFinalPriceAllByBranch(b.getId());
             java.math.BigDecimal todayRev = transactionRepository.sumFinalPriceInRangeAndBranch(startOfToday, endOfToday, b.getId());
-            
+
             // Stock remaining units
             List<Object[]> stockRows = stockBatchRepository.sumRemainingQuantityByVariantIdAndBranch(b.getId());
             long totalStockUnits = stockRows.stream().mapToLong(r -> r[1] != null ? ((Number) r[1]).longValue() : 0L).sum();
@@ -98,6 +150,10 @@ public class AdminController {
             map.put("totalRevenue", totalRev != null ? totalRev : java.math.BigDecimal.ZERO);
             map.put("todayRevenue", todayRev != null ? todayRev : java.math.BigDecimal.ZERO);
             map.put("totalStockUnits", totalStockUnits);
+
+            // Dues data
+            map.put("totalDue", outstandingMap.getOrDefault(b.getId(), BigDecimal.ZERO));
+            map.put("overdueCount", overdueMap.getOrDefault(b.getId(), 0L));
 
             return map;
         }).toList();

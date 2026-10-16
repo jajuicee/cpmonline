@@ -3,7 +3,8 @@ import axios from 'axios';
 import {
     ClipboardList, Search, X, PlusCircle, MinusCircle, Layers,
     CheckCircle, AlertCircle, Loader2, Building2, PackagePlus, Trash2,
-    Pencil, AlertTriangle, PackageX, History, Save, Printer
+    Pencil, AlertTriangle, PackageX, History, Save, Printer,
+    CreditCard, Boxes, Clock, CheckCircle2
 } from 'lucide-react';
 import BatchAddModal from './BatchAddModal';
 import PasswordModal from './PasswordModal';
@@ -21,6 +22,31 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
     const [categoryFilter, setCategoryFilter] = useState('All'); // All, Paddles, Accessories, Shoes
     const [displayedCount, setDisplayedCount] = useState(20);
     const tableContainerRef = useRef(null);
+
+    // --- TAB STATE (Catalog vs Outgoing Branch Allocations Tracker) ---
+    const [inventoryTab, setInventoryTab] = useState('catalog'); // 'catalog' | 'allocations'
+    const [allocations, setAllocations] = useState([]);
+    const [loadingAllocations, setLoadingAllocations] = useState(false);
+    const [allocationSearch, setAllocationSearch] = useState('');
+    const [allocationStatusFilter, setAllocationStatusFilter] = useState('ALL');
+
+    const fetchAllocations = async () => {
+        setLoadingAllocations(true);
+        try {
+            const res = await axios.get('/api/admin/allocations');
+            setAllocations(Array.isArray(res.data) ? res.data : []);
+        } catch (err) {
+            console.error('Failed to load allocations:', err);
+        } finally {
+            setLoadingAllocations(false);
+        }
+    };
+
+    useEffect(() => {
+        if (inventoryTab === 'allocations') {
+            fetchAllocations();
+        }
+    }, [inventoryTab]);
 
     // --- ADD STOCK MODAL STATE ---
     const [addStockModal, setAddStockModal] = useState(null);
@@ -503,78 +529,165 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
         }
     };
 
+    const filteredAllocations = useMemo(() => {
+        return allocations.filter(a => {
+            const matchesStatus =
+                allocationStatusFilter === 'ALL' ||
+                (allocationStatusFilter === 'PAID' && (a.status === 'PAID' || parseFloat(a.amountPaid || 0) >= parseFloat(a.totalCost || 0))) ||
+                (allocationStatusFilter === 'PARTIAL' && a.status === 'PARTIAL') ||
+                (allocationStatusFilter === 'PENDING' && (a.status === 'PENDING' || !a.status)) ||
+                (allocationStatusFilter === 'OVERDUE' && a.deadline && new Date(a.deadline) < new Date() && parseFloat(a.amountPaid || 0) < parseFloat(a.totalCost || 0));
+
+            const q = allocationSearch.toLowerCase();
+            const matchesSearch = !q ||
+                (a.branchName && a.branchName.toLowerCase().includes(q)) ||
+                (a.modelName && a.modelName.toLowerCase().includes(q)) ||
+                (a.sku && a.sku.toLowerCase().includes(q)) ||
+                (a.notes && a.notes.toLowerCase().includes(q));
+
+            return matchesStatus && matchesSearch;
+        });
+    }, [allocations, allocationStatusFilter, allocationSearch]);
+
+    const allocationStats = useMemo(() => {
+        let totalUnits = 0;
+        let totalCost = 0;
+        let totalPaid = 0;
+        let overdueCount = 0;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        allocations.forEach(a => {
+            const q = parseInt(a.quantity || 0, 10);
+            const c = parseFloat(a.totalCost || 0);
+            const p = parseFloat(a.amountPaid || 0);
+            totalUnits += q;
+            totalCost += c;
+            totalPaid += p;
+
+            const rem = c - p;
+            if (rem > 0 && a.deadline) {
+                const dl = new Date(a.deadline);
+                dl.setHours(0, 0, 0, 0);
+                if (dl < today) overdueCount++;
+            }
+        });
+
+        return {
+            totalUnits,
+            totalCost,
+            totalPaid,
+            outstanding: Math.max(0, totalCost - totalPaid),
+            overdueCount
+        };
+    }, [allocations]);
+
     return (
         <div className="flex flex-col h-full relative">
-            {/* HEADER */}
-            <div className="flex flex-wrap justify-between items-center gap-4 mb-4 shrink-0">
-                <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
-                    <ClipboardList className="text-zinc-500" /> Manage Inventory
-                    {!loading && (
-                        <span className="ml-2 text-sm font-normal text-zinc-400 hidden sm:inline">
-                            {tableFilter ? `${filteredInventory.length} of ${flattenedInventory.length}` : `${flattenedInventory.length} items`}
+            {/* TABS SWITCHER */}
+            <div className="flex items-center gap-2 mb-4 shrink-0 border-b border-stone-200 pb-2">
+                <button
+                    onClick={() => setInventoryTab('catalog')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        inventoryTab === 'catalog'
+                            ? 'bg-stone-900 text-white shadow-sm'
+                            : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                    }`}
+                >
+                    Master Catalog & Stocks
+                </button>
+                <button
+                    onClick={() => setInventoryTab('allocations')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        inventoryTab === 'allocations'
+                            ? 'bg-stone-900 text-white shadow-sm'
+                            : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                    }`}
+                >
+                    <Boxes size={14} />
+                    <span>Outgoing Allocation Tracker</span>
+                    {allocations.length > 0 && (
+                        <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                            inventoryTab === 'allocations' ? 'bg-emerald-500 text-white' : 'bg-stone-200 text-stone-700'
+                        }`}>
+                            {allocations.length}
                         </span>
                     )}
-                </h2>
-                <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
-                    <button
-                        onClick={handlePrint}
-                        title={`Print stock count sheet (${filteredInventory.length} items)`}
-                        className="flex items-center gap-2 px-4 py-2 bg-white border border-stone-300 hover:bg-stone-50 hover:border-stone-400 text-zinc-700 text-sm font-bold rounded-lg shadow-sm transition-colors"
-                    >
-                        <Printer size={15} /> Print Sheet
-                    </button>
-                    <button
-                        onClick={() => setShowBatchAdd(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm transition-colors"
-                    >
-                        <PackagePlus size={16} /> Batch Add
-                    </button>
-                    <div className="flex bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 mr-auto sm:mr-0 h-[38px] items-center">
-                        {['All', 'Paddles', 'Accessories', 'Shoes'].map(cat => (
-                            <button
-                                key={cat}
-                                onClick={() => { setCategoryFilter(cat); setDisplayedCount(20); }}
-                                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                                    categoryFilter === cat 
-                                        ? 'bg-white text-zinc-900 shadow-sm border border-stone-200' 
-                                        : 'text-zinc-500 hover:text-zinc-700'
-                                }`}
-                            >
-                                {cat}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="relative flex-1 sm:flex-none">
-                        <select
-                            value={sortOrder}
-                            onChange={(e) => setSortOrder(e.target.value)}
-                            className="pl-3 pr-8 py-2 text-sm border border-stone-300 rounded-lg focus:ring-2 focus:ring-zinc-900 outline-none bg-white font-bold text-zinc-600 h-[38px]"
-                        >
-                            <option value="name-asc">Name (A-Z)</option>
-                            <option value="name-desc">Name (Z-A)</option>
-                            <option value="stock-asc">Stock (Low to High)</option>
-                            <option value="stock-desc">Stock (High to Low)</option>
-                        </select>
-                    </div>
-                    <div className="relative flex-1 sm:flex-none">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search size={15} className="text-zinc-400" />
-                        </div>
-                        <input
-                            type="text"
-                            value={tableFilter}
-                            onChange={e => { setTableFilter(e.target.value); setDisplayedCount(20); }}
-                            placeholder="Filter by SKU, brand, supplier…"
-                            className="pl-9 pr-8 py-2 text-sm border border-stone-300 rounded-lg focus:ring-2 focus:ring-zinc-900 outline-none w-64 h-[38px]"
-                        />
-                        {tableFilter && (
-                            <button onClick={() => setTableFilter('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-700">
-                                <X size={14} />
-                            </button>
-                        )}
-                    </div>
-                </div>
+                </button>
             </div>
+
+            {inventoryTab === 'catalog' ? (
+                <>
+                    {/* HEADER */}
+                    <div className="flex flex-wrap justify-between items-center gap-4 mb-4 shrink-0">
+                        <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
+                            <ClipboardList className="text-zinc-500" /> Manage Inventory
+                            {!loading && (
+                                <span className="ml-2 text-sm font-normal text-zinc-400 hidden sm:inline">
+                                    {tableFilter ? `${filteredInventory.length} of ${flattenedInventory.length}` : `${flattenedInventory.length} items`}
+                                </span>
+                            )}
+                        </h2>
+                        <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+                            <button
+                                onClick={handlePrint}
+                                title={`Print stock count sheet (${filteredInventory.length} items)`}
+                                className="flex items-center gap-2 px-4 py-2 bg-white border border-stone-300 hover:bg-stone-50 hover:border-stone-400 text-zinc-700 text-sm font-bold rounded-lg shadow-sm transition-colors"
+                            >
+                                <Printer size={15} /> Print Sheet
+                            </button>
+                            <button
+                                onClick={() => setShowBatchAdd(true)}
+                                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow-sm transition-colors"
+                            >
+                                <PackagePlus size={16} /> Batch Add
+                            </button>
+                            <div className="flex bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 mr-auto sm:mr-0 h-[38px] items-center">
+                                {['All', 'Paddles', 'Accessories', 'Shoes'].map(cat => (
+                                    <button
+                                        key={cat}
+                                        onClick={() => { setCategoryFilter(cat); setDisplayedCount(20); }}
+                                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                                            categoryFilter === cat 
+                                                ? 'bg-white text-zinc-900 shadow-sm border border-stone-200' 
+                                                : 'text-zinc-500 hover:text-zinc-700'
+                                        }`}
+                                    >
+                                        {cat}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="relative flex-1 sm:flex-none">
+                                <select
+                                    value={sortOrder}
+                                    onChange={(e) => setSortOrder(e.target.value)}
+                                    className="pl-3 pr-8 py-2 text-sm border border-stone-300 rounded-lg focus:ring-2 focus:ring-zinc-900 outline-none bg-white font-bold text-zinc-600 h-[38px]"
+                                >
+                                    <option value="name-asc">Name (A-Z)</option>
+                                    <option value="name-desc">Name (Z-A)</option>
+                                    <option value="stock-asc">Stock (Low to High)</option>
+                                    <option value="stock-desc">Stock (High to Low)</option>
+                                </select>
+                            </div>
+                            <div className="relative flex-1 sm:flex-none">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Search size={15} className="text-zinc-400" />
+                                </div>
+                                <input
+                                    type="text"
+                                    value={tableFilter}
+                                    onChange={e => { setTableFilter(e.target.value); setDisplayedCount(20); }}
+                                    placeholder="Filter by SKU, brand, supplier…"
+                                    className="pl-9 pr-8 py-2 text-sm border border-stone-300 rounded-lg focus:ring-2 focus:ring-zinc-900 outline-none w-64 h-[38px]"
+                                />
+                                {tableFilter && (
+                                    <button onClick={() => setTableFilter('')} className="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-700">
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
             {/* TABLE */}
             <div
@@ -714,6 +827,186 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                     </tbody>
                 </table>
             </div>
+            </>
+            ) : (
+                /* OUTGOING ALLOCATION TRACKER VIEW */
+                <div className="flex-1 flex flex-col space-y-4 min-h-0 overflow-hidden">
+                    {/* KPI SUMMARY CARDS */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
+                            <span className="text-[10px] font-black uppercase text-stone-400 block">Total Units Dispatched</span>
+                            <div className="text-xl font-black text-stone-900 mt-1">
+                                {allocationStats.totalUnits} units
+                            </div>
+                            <span className="text-[11px] text-stone-400 font-medium">To all branch inventories</span>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
+                            <span className="text-[10px] font-black uppercase text-stone-400 block">Total Billed</span>
+                            <div className="text-xl font-black text-stone-900 mt-1">
+                                {formatPHP(allocationStats.totalCost)}
+                            </div>
+                            <span className="text-[11px] text-stone-400 font-medium">Gross allocation receivables</span>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
+                            <span className="text-[10px] font-black uppercase text-emerald-600 block">Total Remitted</span>
+                            <div className="text-xl font-black text-emerald-600 mt-1">
+                                {formatPHP(allocationStats.totalPaid)}
+                            </div>
+                            <span className="text-[11px] text-stone-400 font-medium">Collected payments</span>
+                        </div>
+
+                        <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-sm bg-gradient-to-br from-white to-amber-50/20">
+                            <span className="text-[10px] font-black uppercase text-amber-700 block">Outstanding Receivables</span>
+                            <div className="text-xl font-black text-amber-700 mt-1">
+                                {formatPHP(allocationStats.outstanding)}
+                            </div>
+                            <span className="text-[11px] text-stone-500 font-medium">
+                                {allocationStats.overdueCount > 0 ? (
+                                    <span className="text-rose-600 font-bold">{allocationStats.overdueCount} overdue batch(es)</span>
+                                ) : (
+                                    'All payments on schedule'
+                                )}
+                            </span>
+                        </div>
+                    </div>
+
+                    {/* FILTER & SEARCH */}
+                    <div className="bg-white p-3 rounded-xl border border-stone-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between shrink-0">
+                        <div className="relative w-full md:w-80">
+                            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                            <input
+                                type="text"
+                                value={allocationSearch}
+                                onChange={(e) => setAllocationSearch(e.target.value)}
+                                placeholder="Search branch, product, SKU..."
+                                className="w-full pl-9 pr-3 py-1.5 text-xs font-medium rounded-lg border border-stone-300 bg-stone-50 focus:bg-white focus:outline-none"
+                            />
+                        </div>
+
+                        <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto">
+                            {[
+                                { id: 'ALL', label: 'All Records' },
+                                { id: 'OVERDUE', label: `Overdue (${allocationStats.overdueCount})`, isAlert: allocationStats.overdueCount > 0 },
+                                { id: 'PENDING', label: 'Pending' },
+                                { id: 'PARTIAL', label: 'Partial' },
+                                { id: 'PAID', label: 'Settled' },
+                            ].map(tab => (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setAllocationStatusFilter(tab.id)}
+                                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                                        allocationStatusFilter === tab.id
+                                            ? 'bg-stone-900 text-white shadow-sm'
+                                            : tab.isAlert
+                                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                    }`}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* ALLOCATIONS TRACKER TABLE */}
+                    <div className="flex-1 overflow-auto bg-white border border-stone-200 rounded-xl shadow-sm">
+                        {loadingAllocations ? (
+                            <div className="p-16 flex flex-col items-center justify-center gap-2 text-stone-400">
+                                <Loader2 className="w-6 h-6 animate-spin text-stone-600" />
+                                <span className="text-xs font-bold">Loading stock allocation history...</span>
+                            </div>
+                        ) : filteredAllocations.length === 0 ? (
+                            <div className="p-16 text-center text-stone-400 text-xs">
+                                No stock allocations matching this criteria.
+                            </div>
+                        ) : (
+                            <table className="w-full text-left border-collapse text-xs">
+                                <thead className="sticky top-0 bg-stone-100 shadow-sm z-10 uppercase tracking-wider text-stone-500 font-bold border-b border-stone-200">
+                                    <tr>
+                                        <th className="px-4 py-3">Dispatched</th>
+                                        <th className="px-4 py-3">Destination Branch</th>
+                                        <th className="px-4 py-3">Product / SKU</th>
+                                        <th className="px-4 py-3">Units</th>
+                                        <th className="px-4 py-3">Cost / Unit</th>
+                                        <th className="px-4 py-3">Total Billed</th>
+                                        <th className="px-4 py-3">Paid / Remaining</th>
+                                        <th className="px-4 py-3">Deadline</th>
+                                        <th className="px-4 py-3 text-right">Payment Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-stone-100">
+                                    {filteredAllocations.map(a => {
+                                        const cost = parseFloat(a.totalCost || 0);
+                                        const paid = parseFloat(a.amountPaid || 0);
+                                        const rem = Math.max(0, cost - paid);
+                                        const isPaid = paid >= cost && cost > 0;
+
+                                        return (
+                                            <tr key={a.id} className="hover:bg-stone-50/70 transition-colors">
+                                                <td className="px-4 py-3 text-stone-500 font-mono">
+                                                    {a.allocatedAt ? a.allocatedAt.substring(0, 10) : '—'}
+                                                </td>
+
+                                                <td className="px-4 py-3">
+                                                    <span className="font-bold text-stone-900 flex items-center gap-1.5">
+                                                        <Building2 size={13} className="text-stone-400" />
+                                                        {a.branchName}
+                                                    </span>
+                                                </td>
+
+                                                <td className="px-4 py-3">
+                                                    <div className="font-bold text-stone-900">{a.modelName}</div>
+                                                    <div className="text-[10px] font-mono text-stone-400">{a.sku}</div>
+                                                    {a.notes && <div className="text-[10px] text-stone-400 italic">"{a.notes}"</div>}
+                                                </td>
+
+                                                <td className="px-4 py-3 font-black text-stone-900">
+                                                    {a.quantity} units
+                                                </td>
+
+                                                <td className="px-4 py-3 text-stone-600 font-semibold">
+                                                    {formatPHP(a.costPerUnit)}
+                                                </td>
+
+                                                <td className="px-4 py-3 font-black text-stone-900">
+                                                    {formatPHP(cost)}
+                                                </td>
+
+                                                <td className="px-4 py-3">
+                                                    <span className="font-bold text-emerald-700">{formatPHP(paid)}</span>
+                                                    {rem > 0 && (
+                                                        <div className="text-[10px] text-rose-600 font-bold">
+                                                            Due: {formatPHP(rem)}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                <td className="px-4 py-3 text-stone-600 font-semibold">
+                                                    {a.deadline || '—'}
+                                                </td>
+
+                                                <td className="px-4 py-3 text-right">
+                                                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                                        isPaid
+                                                            ? 'bg-emerald-100 text-emerald-800'
+                                                            : a.status === 'PARTIAL'
+                                                            ? 'bg-amber-100 text-amber-800'
+                                                            : 'bg-stone-100 text-stone-700'
+                                                    }`}>
+                                                        {isPaid ? 'Settled' : a.status}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* ===== ADD STOCK MODAL ===== */}
             {addStockModal && (

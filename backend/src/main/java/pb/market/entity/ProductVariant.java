@@ -31,6 +31,12 @@ public class ProductVariant {
     // Below this threshold the variant is flagged as "low stock" in the UI. null = use system default.
     private Integer lowStockThreshold;
 
+    @Transient
+    private BigDecimal branchSellingPrice;
+
+    @Transient
+    private Boolean hasCustomPrice = false;
+
     
     // Virtual fields using subqueries (formula) to count all-time additions and sales.
     // POPULATED MANUALLY IN ProductService

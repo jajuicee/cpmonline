@@ -1,6 +1,21 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
 
+// Immediately configure axios headers if token exists in localStorage
+const initialToken = localStorage.getItem('cpm_token');
+if (initialToken) {
+    axios.defaults.headers.common['Authorization'] = `Bearer ${initialToken}`;
+}
+
+// Request interceptor to always attach current token
+axios.interceptors.request.use((config) => {
+    const t = localStorage.getItem('cpm_token');
+    if (t) {
+        config.headers.Authorization = `Bearer ${t}`;
+    }
+    return config;
+}, (error) => Promise.reject(error));
+
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
@@ -32,7 +47,7 @@ export const AuthProvider = ({ children }) => {
             (response) => response,
             (error) => {
                 if (error.response && error.response.status === 401) {
-                    const isLoginReq = error.config && error.config.url && error.config.url.includes('/api/auth/login');
+                    const isLoginReq = error.config && error.config.url && (error.config.url.includes('/api/auth/login') || error.config.url.includes('/api/auth/me'));
                     if (!isLoginReq) {
                         logout();
                     }

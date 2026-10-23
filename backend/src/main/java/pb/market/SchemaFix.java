@@ -100,6 +100,25 @@ public class SchemaFix implements CommandLineRunner {
             log.info("Payment logs backfill skipped: " + e.getMessage());
         }
 
+        // Drop warehouse_id columns and constraints if they exist
+        safeExecute("ALTER TABLE stock_batches DROP COLUMN IF EXISTS warehouse_id CASCADE",
+                "Dropped warehouse_id from stock_batches.");
+
+        safeExecute("ALTER TABLE stock_adjustments DROP COLUMN IF EXISTS warehouse_id CASCADE",
+                "Dropped warehouse_id from stock_adjustments.");
+
+        // Drop warehouses table
+        safeExecute("DROP TABLE IF EXISTS warehouses CASCADE",
+                "Dropped warehouses table.");
+
+        // Ensure Cebu Main and other store branches are active
+        safeExecute("UPDATE branches SET active = true WHERE id = 1",
+                "Ensured Cebu Main branch is active.");
+
+        // Clear branch_id for ADMIN users (Admin holds unallocated stock)
+        safeExecute("UPDATE users SET branch_id = NULL WHERE role = 'ADMIN'",
+                "Cleared branch_id for admin users.");
+
         log.info("Schema check complete.");
     }
 

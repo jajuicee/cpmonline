@@ -49,6 +49,22 @@ public class ProductVariant {
     @Transient
     private Long totalAdjusted = 0L;
 
+    // Total units transferred/allocated to branches
+    @Transient
+    private Long totalTransferred = 0L;
+
+    // Remaining stock in Holding Pool (unallocated at CPM Main)
+    @Transient
+    private Integer mainStock = 0;
+
+    // Remaining stock currently distributed across branches (awaiting sale)
+    @Transient
+    private Integer branchStock = 0;
+
+    // Live breakdown of locations and remaining stock per location
+    @Transient
+    private java.util.List<java.util.Map<String, Object>> locationBreakdown;
+
     // Whether this variant is consigned (affects default for new batches)
     @Column(columnDefinition = "boolean default false")
     private boolean consigned = false;

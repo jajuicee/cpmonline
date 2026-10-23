@@ -30,6 +30,7 @@ public class StockAllocationController {
     private final StockBatchRepository stockBatchRepository;
     private final StockAdjustmentRepository stockAdjustmentRepository;
     private final StockWebSocketHandler stockWebSocketHandler;
+    private final BranchSellingPriceRepository branchSellingPriceRepository;
 
     public StockAllocationController(
             BranchStockAllocationRepository allocationRepo,
@@ -37,31 +38,19 @@ public class StockAllocationController {
             VariantRepository variantRepository,
             StockBatchRepository stockBatchRepository,
             StockAdjustmentRepository stockAdjustmentRepository,
-            StockWebSocketHandler stockWebSocketHandler) {
+            StockWebSocketHandler stockWebSocketHandler,
+            BranchSellingPriceRepository branchSellingPriceRepository) {
         this.allocationRepo = allocationRepo;
         this.branchRepository = branchRepository;
         this.variantRepository = variantRepository;
         this.stockBatchRepository = stockBatchRepository;
         this.stockAdjustmentRepository = stockAdjustmentRepository;
         this.stockWebSocketHandler = stockWebSocketHandler;
-    }
-
-    // ─── Helper: identify main/admin inventory branch ─────────────────────────
-
-    private Branch getAdminBranch() {
-        List<Branch> branches = branchRepository.findAll();
-        // Admin branch = "main" or first branch
-        return branches.stream()
-                .filter(b -> b.getName() != null && b.getName().toLowerCase().contains("main"))
-                .findFirst()
-                .orElseGet(() -> branches.stream()
-                        .filter(b -> b.getId() != null && b.getId() == 1L)
-                        .findFirst()
-                        .orElseGet(() -> branches.isEmpty() ? null : branches.get(0)));
+        this.branchSellingPriceRepository = branchSellingPriceRepository;
     }
 
     // ─── POST /api/admin/allocations ──────────────────────────────────────────
-    // Admin creates a stock allocation: moves stock from admin inventory → branch
+    // Admin creates a stock allocation: moves stock from Holding Pool → retail branch
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
@@ -82,10 +71,7 @@ public class StockAllocationController {
             return ResponseEntity.badRequest().body(Map.of("error", "Branch not found: " + request.getBranchId()));
         }
 
-        Branch adminBranch = getAdminBranch();
-        Long adminBranchId = adminBranch != null ? adminBranch.getId() : null;
-
-        // --- Validate all variants & admin stock upfront ---
+        // --- Validate all variants & holding stock upfront ---
         for (StockAllocationRequest.AllocationItem item : request.getItems()) {
             if (!variantRepository.existsById(item.getVariantId())) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Variant not found: " + item.getVariantId()));
@@ -97,20 +83,15 @@ public class StockAllocationController {
                 return ResponseEntity.badRequest().body(Map.of("error", "costPerUnit must be >= 0 for variant: " + item.getVariantId()));
             }
 
-            // Check admin inventory has enough stock
-            long available;
-            if (adminBranchId != null) {
-                available = stockBatchRepository.sumRemainingQuantityForMain(item.getVariantId(), adminBranchId);
-            } else {
-                available = stockBatchRepository.sumRemainingQuantityForVariant(item.getVariantId());
-            }
+            // Check holding pool inventory has enough stock
+            long available = stockBatchRepository.sumRemainingQuantityForHolding(item.getVariantId());
             if (item.getQuantity() > available) {
                 ProductVariant v = variantRepository.findById(item.getVariantId()).orElse(null);
                 String name = (v != null && v.getProduct() != null)
                         ? v.getProduct().getBrandName() + " " + v.getProduct().getModelName() + " (" + v.getSku() + ")"
                         : "Variant #" + item.getVariantId();
                 return ResponseEntity.badRequest().body(Map.of(
-                        "error", "Insufficient admin stock for " + name + ". Available: " + available + ", requested: " + item.getQuantity()
+                        "error", "Insufficient holding stock for " + name + ". Available in holding pool: " + available + ", requested: " + item.getQuantity()
                 ));
             }
         }
@@ -125,35 +106,30 @@ public class StockAllocationController {
             BigDecimal costPerUnit = item.getCostPerUnit();
             BigDecimal totalCost = costPerUnit.multiply(BigDecimal.valueOf(qty));
 
-            // 1. Deduct from admin inventory (FIFO)
-            List<StockBatch> adminBatches;
-            if (adminBranchId != null) {
-                adminBatches = stockBatchRepository.findReceivableForMainForUpdate(item.getVariantId(), adminBranchId);
-            } else {
-                adminBatches = stockBatchRepository.findReceivableByVariantIdForUpdate(item.getVariantId());
-            }
+            // 1. Deduct from holding inventory (FIFO)
+            List<StockBatch> holdingBatches = stockBatchRepository.findReceivableForHoldingForUpdate(item.getVariantId());
 
             int remaining = qty;
-            for (StockBatch adminBatch : adminBatches) {
+            for (StockBatch hBatch : holdingBatches) {
                 if (remaining <= 0) break;
-                int avail = adminBatch.getRemainingQuantity() != null ? adminBatch.getRemainingQuantity() : 0;
+                int avail = hBatch.getRemainingQuantity() != null ? hBatch.getRemainingQuantity() : 0;
                 if (avail >= remaining) {
-                    adminBatch.setRemainingQuantity(avail - remaining);
+                    hBatch.setRemainingQuantity(avail - remaining);
                     remaining = 0;
                 } else {
-                    adminBatch.setRemainingQuantity(0);
+                    hBatch.setRemainingQuantity(0);
                     remaining -= avail;
                 }
-                stockBatchRepository.save(adminBatch);
+                stockBatchRepository.save(hBatch);
             }
 
-            // 2. Record stock adjustment on admin side
+            // 2. Record stock adjustment (from holding)
             StockAdjustment adj = new StockAdjustment();
             adj.setVariant(variant);
             adj.setQuantity(qty);
             adj.setReason("Allocated to Branch: " + targetBranch.getName());
             adj.setNote("Branch allocation batch: " + adminBatchId);
-            adj.setBranch(adminBranch);
+            adj.setBranch(null);
             stockAdjustmentRepository.save(adj);
 
             // 3. Create a new StockBatch at the target branch
@@ -183,11 +159,28 @@ public class StockAllocationController {
             allocation.setStockBatchId(savedBatch.getId());
             allocationRepo.save(allocation);
 
+            // 5. Update branch retail selling price if provided
+            if (item.getSellingPrice() != null && item.getSellingPrice().compareTo(BigDecimal.ZERO) >= 0) {
+                BranchSellingPrice bsp = branchSellingPriceRepository
+                        .findByBranchIdAndVariantId(targetBranch.getId(), variant.getId())
+                        .orElseGet(() -> {
+                            BranchSellingPrice newBsp = new BranchSellingPrice();
+                            newBsp.setBranch(targetBranch);
+                            newBsp.setVariant(variant);
+                            return newBsp;
+                        });
+                bsp.setSellingPrice(item.getSellingPrice());
+                branchSellingPriceRepository.save(bsp);
+            }
+
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("variantId", variant.getId());
             entry.put("sku", variant.getSku());
             entry.put("quantity", qty);
             entry.put("costPerUnit", costPerUnit);
+            if (item.getSellingPrice() != null) {
+                entry.put("sellingPrice", item.getSellingPrice());
+            }
             entry.put("totalCost", totalCost);
             created.add(entry);
         }
@@ -233,7 +226,9 @@ public class StockAllocationController {
             overdueByBranch.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
         }
 
-        List<Map<String, Object>> result = branchRepository.findAll().stream().map(b -> {
+        List<Map<String, Object>> result = branchRepository.findAll().stream()
+                .filter(b -> b.isActive() && (b.getName() == null || !b.getName().toLowerCase().contains("warehouse")))
+                .map(b -> {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("branchId", b.getId());
             m.put("branchName", b.getName());
@@ -334,6 +329,86 @@ public class StockAllocationController {
         ));
     }
 
+    // ─── PUT /api/admin/allocations/batch/{batchId}/payment ───────────────────
+    // Admin records a payment toward an entire batch, auto-applying across unpaid items
+
+    @PutMapping("/batch/{batchId}/payment")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Transactional
+    public ResponseEntity<?> recordBatchPayment(
+            @PathVariable String batchId,
+            @RequestBody Map<String, Object> body) {
+
+        List<BranchStockAllocation> list = allocationRepo.findByAdminBatchId(batchId);
+        if (list.isEmpty()) {
+            try {
+                Long singleId = Long.parseLong(batchId.replace("batch_", ""));
+                BranchStockAllocation single = allocationRepo.findById(singleId).orElse(null);
+                if (single != null) list = List.of(single);
+            } catch (Exception ignored) {}
+        }
+
+        if (list.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        BigDecimal amount;
+        try {
+            amount = new BigDecimal(body.get("amount").toString());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid payment amount."));
+        }
+
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Payment amount must be positive."));
+        }
+
+        BigDecimal totalRemaining = BigDecimal.ZERO;
+        for (BranchStockAllocation a : list) {
+            BigDecimal cost = a.getTotalCost() != null ? a.getTotalCost() : BigDecimal.ZERO;
+            BigDecimal paid = a.getAmountPaid() != null ? a.getAmountPaid() : BigDecimal.ZERO;
+            BigDecimal rem = cost.subtract(paid);
+            if (rem.compareTo(BigDecimal.ZERO) > 0) {
+                totalRemaining = totalRemaining.add(rem);
+            }
+        }
+
+        if (amount.compareTo(totalRemaining) > 0) {
+            return ResponseEntity.badRequest().body(Map.of("error",
+                    "Payment ₱" + amount + " exceeds batch balance of ₱" + totalRemaining));
+        }
+
+        BigDecimal remainingToApply = amount;
+        for (BranchStockAllocation a : list) {
+            if (remainingToApply.compareTo(BigDecimal.ZERO) <= 0) break;
+
+            BigDecimal cost = a.getTotalCost() != null ? a.getTotalCost() : BigDecimal.ZERO;
+            BigDecimal paid = a.getAmountPaid() != null ? a.getAmountPaid() : BigDecimal.ZERO;
+            BigDecimal itemRemaining = cost.subtract(paid);
+            if (itemRemaining.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+            BigDecimal toApply = remainingToApply.min(itemRemaining);
+            BigDecimal newPaid = paid.add(toApply);
+            a.setAmountPaid(newPaid);
+
+            if (newPaid.compareTo(cost) >= 0) {
+                a.setStatus("PAID");
+            } else if (newPaid.compareTo(BigDecimal.ZERO) > 0) {
+                a.setStatus("PARTIAL");
+            }
+
+            allocationRepo.save(a);
+            remainingToApply = remainingToApply.subtract(toApply);
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Payment of ₱" + amount + " recorded for batch " + batchId,
+                "batchId", batchId,
+                "amountPaid", amount,
+                "remainingBatchBalance", totalRemaining.subtract(amount)
+        ));
+    }
+
     // ─── Helper: serialize allocation to map ──────────────────────────────────
 
     private Map<String, Object> toMap(BranchStockAllocation a) {
@@ -375,6 +450,16 @@ public class StockAllocationController {
         m.put("adminBatchId", a.getAdminBatchId());
         m.put("stockBatchId", a.getStockBatchId());
         m.put("allocatedAt", a.getAllocatedAt() != null ? a.getAllocatedAt().toString() : null);
+
+        // Live item tracking at the destination branch
+        StockBatch sb = a.getStockBatchId() != null ? stockBatchRepository.findById(a.getStockBatchId()).orElse(null) : null;
+        int remainingUnits = (sb != null && sb.getRemainingQuantity() != null) ? sb.getRemainingQuantity() : 0;
+        int totalUnits = a.getQuantity() != null ? a.getQuantity() : 0;
+        int soldUnits = Math.max(0, totalUnits - remainingUnits);
+        m.put("remainingQuantity", remainingUnits);
+        m.put("soldQuantity", soldUnits);
+        m.put("isAllSold", remainingUnits <= 0 && totalUnits > 0);
+        m.put("stockStatus", remainingUnits <= 0 ? "ALL_SOLD" : (soldUnits > 0 ? "PARTIALLY_SOLD" : "IN_STOCK"));
 
         // Flag overdue status
         if (a.getDeadline() != null && !"PAID".equals(a.getStatus())) {

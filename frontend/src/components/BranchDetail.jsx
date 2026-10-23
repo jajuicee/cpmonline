@@ -30,7 +30,15 @@ import {
     CheckSquare,
     Square,
     Layers,
-    ListFilter
+    ListFilter,
+    Table,
+    LayoutGrid,
+    Maximize2,
+    Percent,
+    Pencil,
+    SlidersHorizontal,
+    ChevronDown,
+    AlertCircle
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
@@ -75,7 +83,19 @@ const BranchDetail = () => {
     const [selectedVariantIds, setSelectedVariantIds] = useState(new Set());
     const [bulkDefaultQty, setBulkDefaultQty] = useState(1);
 
-    const [manifest, setManifest] = useState([]); // Array of { variantId, sku, brandName, modelName, maxStock, quantity, costPerUnit }
+    const [manifest, setManifest] = useState([]); // Array of { variantId, sku, brandName, modelName, maxStock, quantity, costPerUnit, acquisitionPrice }
+    const [manifestViewMode, setManifestViewMode] = useState('table'); // 'table' | 'cards'
+    const [priceReviewModalOpen, setPriceReviewModalOpen] = useState(false);
+
+    // Batch Accordion & Payment State (Consignment style)
+    const [expandedBatches, setExpandedBatches] = useState(() => new Set());
+    const [selectedBatch, setSelectedBatch] = useState(null);
+
+    // Inline branch price editing in Tab 4 (Branch Inventory Tracker)
+    const [editingPriceVariantId, setEditingPriceVariantId] = useState(null);
+    const [editingPriceValue, setEditingPriceValue] = useState('');
+    const [savingInlinePrice, setSavingInlinePrice] = useState(false);
+
     const [allocationDeadline, setAllocationDeadline] = useState(() => {
         // Default deadline: 30 days from now
         const d = new Date();
@@ -168,7 +188,7 @@ const BranchDetail = () => {
         const rows = [];
         adminProducts.forEach(p => {
             (p.variants || []).forEach(v => {
-                const stock = v.stockQuantity ?? 0;
+                const stock = v.mainStock != null ? v.mainStock : (v.stockQuantity ?? 0);
                 rows.push({
                     productId: p.id,
                     brandName: p.brandName,
@@ -181,7 +201,9 @@ const BranchDetail = () => {
                     thicknessMm: v.thicknessMm,
                     acquisitionPrice: v.acquisitionPrice ?? 0,
                     sellingPrice: v.sellingPrice ?? 0,
-                    adminStock: stock
+                    adminStock: stock,
+                    totalCompanyStock: v.stockQuantity ?? 0,
+                    branchStock: v.branchStock || 0
                 });
             });
         });
@@ -223,10 +245,15 @@ const BranchDetail = () => {
                     sku: v.sku,
                     brandName: v.brandName,
                     modelName: v.modelName,
+                    color: v.color || '',
+                    shape: v.shape || '',
+                    thicknessMm: v.thicknessMm || '',
+                    category: v.category || 'General',
                     maxStock: v.adminStock,
                     quantity: 1,
-                    // Default cost per unit: acquisition price or default selling price
-                    costPerUnit: v.acquisitionPrice > 0 ? v.acquisitionPrice : v.sellingPrice
+                    // Default transfer cost per unit: acquisition price or holding cost
+                    costPerUnit: v.acquisitionPrice > 0 ? v.acquisitionPrice : (v.sellingPrice || 0),
+                    acquisitionPrice: v.acquisitionPrice || 0
                 }
             ]);
         }
@@ -293,7 +320,7 @@ const BranchDetail = () => {
             variantsToAdd.forEach(v => {
                 const existingIdx = next.findIndex(m => m.variantId === v.variantId);
                 const targetQty = Math.min(v.adminStock, qty);
-                const defaultCost = v.acquisitionPrice > 0 ? v.acquisitionPrice : v.sellingPrice;
+                const defaultCost = v.acquisitionPrice > 0 ? v.acquisitionPrice : (v.sellingPrice || 0);
 
                 if (existingIdx >= 0) {
                     next[existingIdx] = {
@@ -306,9 +333,14 @@ const BranchDetail = () => {
                         sku: v.sku,
                         brandName: v.brandName,
                         modelName: v.modelName,
+                        color: v.color || '',
+                        shape: v.shape || '',
+                        thicknessMm: v.thicknessMm || '',
+                        category: v.category || 'General',
                         maxStock: v.adminStock,
                         quantity: targetQty,
-                        costPerUnit: defaultCost
+                        costPerUnit: defaultCost,
+                        acquisitionPrice: v.acquisitionPrice || 0
                     });
                 }
             });
@@ -333,11 +365,16 @@ const BranchDetail = () => {
     const applyBulkPricingToManifest = (type) => {
         setManifest(prev => prev.map(m => {
             const v = availableAdminVariants.find(x => x.variantId === m.variantId);
-            if (!v) return m;
+            const acq = v?.acquisitionPrice > 0 ? v.acquisitionPrice : (m.acquisitionPrice || 0);
+
             if (type === 'acquisition') {
-                return { ...m, costPerUnit: v.acquisitionPrice > 0 ? v.acquisitionPrice : m.costPerUnit };
-            } else if (type === 'retail') {
-                return { ...m, costPerUnit: v.sellingPrice > 0 ? v.sellingPrice : m.costPerUnit };
+                return { ...m, costPerUnit: acq > 0 ? acq : m.costPerUnit };
+            } else if (type === 'markup15') {
+                const base = acq > 0 ? acq : m.costPerUnit;
+                return { ...m, costPerUnit: Math.round(base * 1.15) };
+            } else if (type === 'markup25') {
+                const base = acq > 0 ? acq : m.costPerUnit;
+                return { ...m, costPerUnit: Math.round(base * 1.25) };
             }
             return m;
         }));
@@ -422,6 +459,7 @@ const BranchDetail = () => {
             setManifest([]);
             setAllocationNotes('');
             setConfirmModalOpen(false);
+            setPriceReviewModalOpen(false);
             // Refresh data
             fetchBranch();
             fetchAdminProducts();
@@ -436,18 +474,69 @@ const BranchDetail = () => {
         }
     };
 
-    // Open Payment Record Modal
+    // Tab 4 (Branch Inventory Tracker) inline price editor helper
+    const startEditingBranchPrice = (variantId, currentPrice) => {
+        setEditingPriceVariantId(variantId);
+        setEditingPriceValue(currentPrice != null ? currentPrice.toString() : '');
+    };
+
+    const handleSaveInlineBranchPrice = async (variantId) => {
+        const priceNum = parseFloat(editingPriceValue);
+        if (isNaN(priceNum) || priceNum < 0) {
+            showFeedback('error', 'Please enter a valid price >= 0.');
+            return;
+        }
+        setSavingInlinePrice(true);
+        try {
+            await axios.put(`/api/products/variants/${variantId}/branch-price`, {
+                branchId: parseInt(branchId, 10),
+                sellingPrice: priceNum
+            });
+            showFeedback('success', `Branch selling price updated to ${formatCurrency(priceNum)}`);
+            setEditingPriceVariantId(null);
+            fetchBranchProducts();
+        } catch (err) {
+            console.error('Failed to update branch price:', err);
+            showFeedback('error', err.response?.data?.error || 'Failed to update branch selling price.');
+        } finally {
+            setSavingInlinePrice(false);
+        }
+    };
+
+    // Batch Accordion Expand Toggle
+    const toggleBatchExpand = (batchId) => {
+        setExpandedBatches(prev => {
+            const next = new Set(prev);
+            if (next.has(batchId)) {
+                next.delete(batchId);
+            } else {
+                next.add(batchId);
+            }
+            return next;
+        });
+    };
+
+    // Open Payment Record Modal for single item
     const openPaymentModal = (alloc) => {
         setSelectedAllocation(alloc);
+        setSelectedBatch(null);
         const rem = parseFloat(alloc.totalCost || 0) - parseFloat(alloc.amountPaid || 0);
         setPaymentAmount(rem > 0 ? rem.toString() : '');
         setPaymentModalOpen(true);
     };
 
-    // Submit Payment Record
+    // Open Payment Record Modal for entire batch (Consignment style)
+    const openBatchPaymentModal = (batch) => {
+        setSelectedBatch(batch);
+        setSelectedAllocation(null);
+        setPaymentAmount(batch.totalUnpaid > 0 ? batch.totalUnpaid.toString() : '');
+        setPaymentModalOpen(true);
+    };
+
+    // Submit Payment Record (Handles both batch and single item)
     const handleRecordPayment = async (e) => {
         e.preventDefault();
-        if (!selectedAllocation) return;
+        if (!selectedAllocation && !selectedBatch) return;
 
         const amt = parseFloat(paymentAmount);
         if (isNaN(amt) || amt <= 0) {
@@ -457,11 +546,20 @@ const BranchDetail = () => {
 
         setRecordingPayment(true);
         try {
-            await axios.put(`/api/admin/allocations/${selectedAllocation.id}/payment`, {
-                amount: amt
-            });
-            showFeedback('success', `Payment of ${formatCurrency(amt)} recorded.`);
+            if (selectedBatch) {
+                await axios.put(`/api/admin/allocations/batch/${selectedBatch.rawBatchId}/payment`, {
+                    amount: amt
+                });
+                showFeedback('success', `Payment of ${formatCurrency(amt)} recorded for batch #${selectedBatch.shortId}.`);
+            } else {
+                await axios.put(`/api/admin/allocations/${selectedAllocation.id}/payment`, {
+                    amount: amt
+                });
+                showFeedback('success', `Payment of ${formatCurrency(amt)} recorded.`);
+            }
             setPaymentModalOpen(false);
+            setSelectedBatch(null);
+            setSelectedAllocation(null);
             fetchAllocations();
             fetchBranch();
         } catch (err) {
@@ -501,6 +599,360 @@ const BranchDetail = () => {
             overdueCount
         };
     }, [allocations]);
+
+    // Group Allocations by Batch (Consignment Accordion Style)
+    const groupedAllocations = useMemo(() => {
+        const map = new Map();
+
+        allocations.forEach(a => {
+            const batchKey = a.adminBatchId || `batch_${a.allocatedAt || a.id}`;
+            if (!map.has(batchKey)) {
+                const rawId = a.adminBatchId || String(a.id);
+                const shortId = rawId.startsWith('BATCH-')
+                    ? rawId.replace('BATCH-', '')
+                    : String(rawId).slice(-6).toUpperCase();
+
+                map.set(batchKey, {
+                    batchId: batchKey,
+                    rawBatchId: rawId,
+                    shortId,
+                    allocatedAt: a.allocatedAt ? new Date(a.allocatedAt) : null,
+                    deadline: a.deadline,
+                    notes: a.notes,
+                    items: [],
+                    totalUnits: 0,
+                    totalSold: 0,
+                    totalRemaining: 0,
+                    totalCost: 0,
+                    totalPaid: 0,
+                    hasOverdue: false
+                });
+            }
+
+            const group = map.get(batchKey);
+            group.items.push(a);
+            const qty = parseInt(a.quantity, 10) || 0;
+            const sold = parseInt(a.soldQuantity, 10) || 0;
+            const remUnits = parseInt(a.remainingQuantity, 10) || 0;
+            const cost = parseFloat(a.totalCost || 0);
+            const paid = parseFloat(a.amountPaid || 0);
+
+            group.totalUnits += qty;
+            group.totalSold += sold;
+            group.totalRemaining += remUnits;
+            group.totalCost += cost;
+            group.totalPaid += paid;
+            if (a.overdue) group.hasOverdue = true;
+        });
+
+        return Array.from(map.values()).map(g => {
+            const totalUnpaid = Math.max(0, g.totalCost - g.totalPaid);
+            const isPaid = totalUnpaid <= 0 && g.totalCost > 0;
+            let status = 'PENDING';
+            if (isPaid) {
+                status = 'PAID';
+            } else if (g.totalPaid > 0) {
+                status = 'PARTIAL';
+            }
+
+            return {
+                ...g,
+                totalUnpaid,
+                isPaid,
+                status
+            };
+        }).sort((a, b) => {
+            const timeA = a.allocatedAt ? a.allocatedAt.getTime() : 0;
+            const timeB = b.allocatedAt ? b.allocatedAt.getTime() : 0;
+            return timeB - timeA;
+        });
+    }, [allocations]);
+
+    // Consignment-Style Batch Accordion History Renderer
+    const renderAllocationBatchHistory = (
+        title = "Stock Allocation & Batch History",
+        subtitle = "Batch records of dispatched inventory with live sales tracking and payments"
+    ) => {
+        return (
+            <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden space-y-0">
+                {/* Section Header */}
+                <div className="p-5 border-b border-stone-200 flex flex-wrap items-center justify-between gap-3 bg-stone-50/70">
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <h4 className="font-black text-stone-900 text-base">{title}</h4>
+                            <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-stone-200/80 text-stone-700">
+                                {groupedAllocations.length} {groupedAllocations.length === 1 ? 'batch' : 'batches'}
+                            </span>
+                        </div>
+                        <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        {groupedAllocations.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (expandedBatches.size === groupedAllocations.length) {
+                                        setExpandedBatches(new Set());
+                                    } else {
+                                        setExpandedBatches(new Set(groupedAllocations.map(g => g.batchId)));
+                                    }
+                                }}
+                                className="px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-xs font-bold text-stone-700 transition-colors shadow-2xs cursor-pointer"
+                            >
+                                {expandedBatches.size === groupedAllocations.length ? 'Collapse All' : 'Expand All'}
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Batch List */}
+                <div className="p-5 space-y-3.5 bg-stone-50/30">
+                    {groupedAllocations.length === 0 ? (
+                        <div className="p-16 text-center text-stone-400 bg-white rounded-2xl border border-dashed border-stone-200">
+                            <PackagePlus size={28} className="mx-auto mb-2 opacity-30 text-stone-400" />
+                            <p className="text-xs font-bold text-stone-600">No stock allocations on record</p>
+                            <p className="text-[11px] text-stone-400 mt-0.5">Use the manifest above to dispatch stock to this branch</p>
+                        </div>
+                    ) : (
+                        groupedAllocations.map(group => {
+                            const isExpanded = expandedBatches.has(group.batchId);
+                            const isUnfinished = !group.isPaid;
+
+                            return (
+                                <div
+                                    key={group.batchId}
+                                    className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-sm hover:border-stone-300 transition-all"
+                                >
+                                    {/* Group Header (Consignment style) */}
+                                    <div
+                                        className="px-5 py-4 flex flex-wrap items-center justify-between gap-4 cursor-pointer select-none hover:bg-stone-50/80 transition-colors"
+                                        onClick={() => toggleBatchExpand(group.batchId)}
+                                    >
+                                        <div className="flex items-center gap-3.5 min-w-0">
+                                            <div className={`p-1.5 rounded-lg bg-stone-100 transition-transform duration-200 ${isExpanded ? 'rotate-0' : '-rotate-90'}`}>
+                                                <ChevronDown size={16} className="text-stone-500" />
+                                            </div>
+
+                                            <div className="min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-mono font-black text-xs text-stone-500">
+                                                        #{group.shortId}
+                                                    </span>
+                                                    {group.hasOverdue && (
+                                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 flex items-center gap-1">
+                                                            <AlertCircle size={10} /> Overdue
+                                                        </span>
+                                                    )}
+                                                    {group.deadline && (
+                                                        <span className="text-[10px] text-stone-400 font-medium">
+                                                            Deadline: {group.deadline}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                <div className="font-black text-stone-900 text-sm truncate mt-0.5">
+                                                    {group.allocatedAt
+                                                        ? group.allocatedAt.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+                                                        : 'Recent Batch'}
+                                                </div>
+
+                                                <div className="text-xs text-stone-500 mt-0.5 flex flex-wrap items-center gap-1.5">
+                                                    <span className="font-bold text-stone-700">
+                                                        {group.items.length} {group.items.length === 1 ? 'product' : 'products'}
+                                                    </span>
+                                                    <span className="text-stone-300">•</span>
+                                                    <span className="font-bold text-stone-700">
+                                                        {group.totalUnits} units dispatched
+                                                    </span>
+                                                    {group.totalSold > 0 && (
+                                                        <>
+                                                            <span className="text-stone-300">•</span>
+                                                            <span className="text-emerald-700 font-bold">
+                                                                {group.totalSold} sold
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                    <span className="text-stone-300">•</span>
+                                                    <span className="font-mono font-bold text-stone-800">
+                                                        Billed: {formatCurrency(group.totalCost)}
+                                                    </span>
+                                                    {group.notes && (
+                                                        <>
+                                                            <span className="text-stone-300">•</span>
+                                                            <span className="italic text-stone-400 truncate max-w-xs">
+                                                                "{group.notes}"
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 shrink-0 ml-auto" onClick={e => e.stopPropagation()}>
+                                            {isUnfinished ? (
+                                                <>
+                                                    <div className="text-right">
+                                                        <div className="text-[10px] text-stone-400 font-bold uppercase tracking-wider">
+                                                            Balance Due
+                                                        </div>
+                                                        <div className="text-base font-black text-amber-600 font-mono">
+                                                            {formatCurrency(group.totalUnpaid)}
+                                                        </div>
+                                                        {group.totalPaid > 0 && (
+                                                            <div className="text-[10px] text-emerald-600 font-semibold">
+                                                                Paid: {formatCurrency(group.totalPaid)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openBatchPaymentModal(group)}
+                                                        className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-sm cursor-pointer active:scale-95"
+                                                    >
+                                                        <CreditCard size={13} />
+                                                        <span>Record Payment</span>
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <div className="text-right">
+                                                    <span className="text-xs font-black text-emerald-700 bg-emerald-100 px-3.5 py-1.5 rounded-xl inline-flex items-center gap-1.5">
+                                                        <CheckCircle2 size={13} /> FULLY SETTLED ✓
+                                                    </span>
+                                                    <div className="text-[10px] text-stone-400 font-mono mt-0.5">
+                                                        {formatCurrency(group.totalCost)} paid
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Expanded Itemized Details (Consignment style dropdown) */}
+                                    {isExpanded && (
+                                        <div className="border-t border-stone-100 bg-stone-50/50">
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-left text-xs">
+                                                    <thead className="bg-stone-100/70 text-[10px] font-black uppercase tracking-wider text-stone-500 border-b border-stone-200">
+                                                        <tr>
+                                                            <th className="py-2.5 px-5">Product & Specs</th>
+                                                            <th className="py-2.5 px-4 text-center">Dispatched Qty</th>
+                                                            <th className="py-2.5 px-4 text-center">Branch Stock Status</th>
+                                                            <th className="py-2.5 px-4">Transfer Cost / Unit</th>
+                                                            <th className="py-2.5 px-4">Total Billed</th>
+                                                            <th className="py-2.5 px-4">Paid / Balance</th>
+                                                            <th className="py-2.5 px-4">Status</th>
+                                                            <th className="py-2.5 px-5 text-right">Action</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-stone-100 bg-white">
+                                                        {group.items.map(item => {
+                                                            const totalCost = parseFloat(item.totalCost || 0);
+                                                            const amountPaid = parseFloat(item.amountPaid || 0);
+                                                            const remaining = Math.max(0, totalCost - amountPaid);
+                                                            const isItemPaid = amountPaid >= totalCost && totalCost > 0;
+
+                                                            return (
+                                                                <tr key={item.id} className="hover:bg-stone-50 transition-colors">
+                                                                    <td className="py-3 px-5">
+                                                                        <div className="font-black text-stone-900 text-xs">
+                                                                            {item.modelName}
+                                                                        </div>
+                                                                        <div className="text-[11px] text-stone-500 font-semibold">
+                                                                            {item.brandName} • {item.category || 'General'}
+                                                                        </div>
+                                                                        <div className="flex items-center gap-2 text-[10px] font-mono text-stone-400 mt-0.5">
+                                                                            <span>{item.sku}</span>
+                                                                            {item.variant?.color && <span>• {item.variant.color}</span>}
+                                                                            {item.variant?.thicknessMm && <span>• {item.variant.thicknessMm}mm</span>}
+                                                                        </div>
+                                                                    </td>
+
+                                                                    <td className="py-3 px-4 text-center font-black text-stone-900 text-xs">
+                                                                        {item.quantity} units
+                                                                    </td>
+
+                                                                    <td className="py-3 px-4 text-center text-xs">
+                                                                        {item.soldQuantity != null ? (
+                                                                            <div className="inline-flex flex-col items-center">
+                                                                                <div className="flex items-center gap-1 text-[11px] font-bold">
+                                                                                    <span className="text-emerald-700">{item.soldQuantity || 0} sold</span>
+                                                                                    <span className="text-stone-300">•</span>
+                                                                                    <span className="text-indigo-700">
+                                                                                        {item.remainingQuantity != null ? item.remainingQuantity : item.quantity} in branch
+                                                                                    </span>
+                                                                                </div>
+                                                                                {item.isAllSold && (
+                                                                                    <span className="text-[9px] font-black uppercase text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded mt-0.5">
+                                                                                        100% Sold Out
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-stone-400 text-[11px]">—</span>
+                                                                        )}
+                                                                    </td>
+
+                                                                    <td className="py-3 px-4 font-semibold text-stone-700 text-xs">
+                                                                        {formatCurrency(item.costPerUnit)}
+                                                                    </td>
+
+                                                                    <td className="py-3 px-4 font-black text-stone-900 text-xs">
+                                                                        {formatCurrency(totalCost)}
+                                                                    </td>
+
+                                                                    <td className="py-3 px-4 text-xs">
+                                                                        <div className="font-bold text-stone-800">
+                                                                            {formatCurrency(amountPaid)}
+                                                                        </div>
+                                                                        {remaining > 0 && (
+                                                                            <div className="text-[10px] text-amber-600 font-bold">
+                                                                                Due: {formatCurrency(remaining)}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+
+                                                                    <td className="py-3 px-4">
+                                                                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                                                            isItemPaid
+                                                                                ? 'bg-emerald-100 text-emerald-800'
+                                                                                : item.status === 'PARTIAL'
+                                                                                ? 'bg-amber-100 text-amber-800'
+                                                                                : 'bg-stone-100 text-stone-700'
+                                                                        }`}>
+                                                                            {isItemPaid ? 'Settled' : item.status}
+                                                                        </span>
+                                                                    </td>
+
+                                                                    <td className="py-3 px-5 text-right">
+                                                                        {!isItemPaid ? (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => openPaymentModal(item)}
+                                                                                className="px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+                                                                            >
+                                                                                Pay Item
+                                                                            </button>
+                                                                        ) : (
+                                                                            <span className="text-[11px] font-bold text-emerald-600">✓ Done</span>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            </div>
+        );
+    };
 
     if (loadingBranch) {
         return (
@@ -720,7 +1172,8 @@ const BranchDetail = () => {
 
             {/* TAB 2: ALLOCATE STOCK (MULTI-PRODUCT SUPPORT) */}
             {activeTab === 'allocate' && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="space-y-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* Left: Master Catalog Selection (7 cols) */}
                     <div className="lg:col-span-7 space-y-4">
                         {/* Search & Categories */}
@@ -869,8 +1322,13 @@ const BranchDetail = () => {
                                                 <div className="flex items-center gap-4">
                                                     <div className="text-right">
                                                         <div className="text-xs font-black text-stone-900">
-                                                            {v.adminStock} in stock
+                                                            {v.adminStock} in holding pool
                                                         </div>
+                                                        {v.branchStock > 0 && (
+                                                            <div className="text-[10px] text-indigo-600 font-bold">
+                                                                +{v.branchStock} in branches
+                                                            </div>
+                                                        )}
                                                         <div className="text-[10px] text-stone-400 font-semibold">
                                                             Cost: {formatCurrency(v.acquisitionPrice || v.sellingPrice)}
                                                         </div>
@@ -902,14 +1360,58 @@ const BranchDetail = () => {
                     {/* Right: Allocation Manifest (5 cols) */}
                     <div className="lg:col-span-5 space-y-4">
                         <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm space-y-4">
-                            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-100 pb-3">
                                 <div>
                                     <h4 className="font-black text-stone-900 text-sm">Allocation Manifest</h4>
-                                    <p className="text-[11px] text-stone-400">Multiple items dispatched together to {branch.name}</p>
+                                    <p className="text-[11px] text-stone-400">Review & allocate products to {branch.name}</p>
                                 </div>
-                                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-100">
-                                    {manifest.length} {manifest.length === 1 ? 'item' : 'items'}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                    {/* View Toggle */}
+                                    <div className="flex items-center bg-stone-100 p-0.5 rounded-lg border border-stone-200">
+                                        <button
+                                            type="button"
+                                            onClick={() => setManifestViewMode('table')}
+                                            className={`p-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                                manifestViewMode === 'table'
+                                                    ? 'bg-white text-stone-900 shadow-xs'
+                                                    : 'text-stone-500 hover:text-stone-900'
+                                            }`}
+                                            title="Table Form (Review and edit prices easily)"
+                                        >
+                                            <Table size={13} />
+                                            <span className="hidden sm:inline">Table</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setManifestViewMode('cards')}
+                                            className={`p-1.5 rounded-md text-[10px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                                manifestViewMode === 'cards'
+                                                    ? 'bg-white text-stone-900 shadow-xs'
+                                                    : 'text-stone-500 hover:text-stone-900'
+                                            }`}
+                                            title="Cards Form"
+                                        >
+                                            <LayoutGrid size={13} />
+                                            <span className="hidden sm:inline">Cards</span>
+                                        </button>
+                                    </div>
+
+                                    {manifest.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setPriceReviewModalOpen(true)}
+                                            className="px-2 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black flex items-center gap-1 transition-all cursor-pointer shadow-2xs"
+                                            title="Open full table to review and change all prices"
+                                        >
+                                            <Maximize2 size={11} />
+                                            <span>Full Table</span>
+                                        </button>
+                                    )}
+
+                                    <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-100">
+                                        {manifest.length}
+                                    </span>
+                                </div>
                             </div>
 
                             {/* Batch Actions Toolbar for Manifest */}
@@ -951,37 +1453,131 @@ const BranchDetail = () => {
                                         </button>
                                     </div>
 
-                                    {/* Set All Cost */}
+                                    {/* Set All Cost / Pricing */}
                                     <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-stone-200/60 text-xs">
                                         <span className="text-[10px] font-bold text-stone-400">Apply unit cost:</span>
                                         <button
                                             type="button"
                                             onClick={() => applyBulkPricingToManifest('acquisition')}
                                             className="px-2 py-0.5 bg-white border border-stone-200 hover:border-stone-400 rounded-md text-[10px] font-bold text-stone-700 shadow-xs cursor-pointer"
+                                            title="Set transfer cost to holding acquisition cost"
                                         >
-                                            Acquisition Cost
+                                            Base Cost
                                         </button>
                                         <button
                                             type="button"
-                                            onClick={() => applyBulkPricingToManifest('retail')}
-                                            className="px-2 py-0.5 bg-white border border-stone-200 hover:border-stone-400 rounded-md text-[10px] font-bold text-stone-700 shadow-xs cursor-pointer"
+                                            onClick={() => applyBulkPricingToManifest('markup15')}
+                                            className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md text-[10px] font-bold text-emerald-800 shadow-xs cursor-pointer"
+                                            title="Cost + 15%"
                                         >
-                                            Retail Price
+                                            +15%
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => applyBulkPricingToManifest('markup25')}
+                                            className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md text-[10px] font-bold text-emerald-800 shadow-xs cursor-pointer"
+                                            title="Cost + 25%"
+                                        >
+                                            +25%
                                         </button>
                                     </div>
                                 </div>
                             )}
 
-                            {/* Manifest Items List */}
-                            <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-1">
-                                {manifest.length === 0 ? (
-                                    <div className="p-8 text-center text-stone-400 border border-dashed border-stone-200 rounded-xl">
-                                        <PackagePlus size={24} className="mx-auto mb-2 opacity-30" />
-                                        <p className="text-xs font-bold text-stone-600">Manifest is empty</p>
-                                        <p className="text-[11px] text-stone-400 mt-0.5">Select multiple products from the master catalog to allocate at once</p>
+                            {/* Manifest Items: Table View vs. Card View */}
+                            {manifest.length === 0 ? (
+                                <div className="p-8 text-center text-stone-400 border border-dashed border-stone-200 rounded-xl">
+                                    <PackagePlus size={24} className="mx-auto mb-2 opacity-30" />
+                                    <p className="text-xs font-bold text-stone-600">Manifest is empty</p>
+                                    <p className="text-[11px] text-stone-400 mt-0.5">Select products from the master catalog to allocate at once</p>
+                                </div>
+                            ) : manifestViewMode === 'table' ? (
+                                /* Table Form View */
+                                <div className="border border-stone-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                                    <div className="overflow-x-auto max-h-[350px] custom-scrollbar">
+                                        <table className="w-full text-left text-xs">
+                                            <thead className="bg-stone-50 text-[10px] font-black uppercase tracking-wider text-stone-500 border-b border-stone-200 sticky top-0 z-10">
+                                                <tr>
+                                                    <th className="py-2.5 px-3">Product / SKU</th>
+                                                    <th className="py-2.5 px-2 text-center">Qty</th>
+                                                    <th className="py-2.5 px-2">Cost/Unit (₱)</th>
+                                                    <th className="py-2.5 px-2 text-right">Subtotal</th>
+                                                    <th className="py-2.5 px-1.5 text-center"></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-stone-100">
+                                                {manifest.map(item => {
+                                                    const lineTotal = (parseInt(item.quantity, 10) || 0) * (parseFloat(item.costPerUnit) || 0);
+                                                    return (
+                                                        <tr key={item.variantId} className="hover:bg-stone-50/70 transition-colors">
+                                                            <td className="py-2 px-3 align-top">
+                                                                <div className="font-black text-stone-900 text-xs truncate max-w-[150px]" title={item.modelName}>
+                                                                    {item.modelName}
+                                                                </div>
+                                                                <div className="text-[10px] font-mono text-stone-400 truncate max-w-[150px]">
+                                                                    {item.sku}
+                                                                </div>
+                                                                {(item.color || item.thicknessMm) && (
+                                                                    <div className="text-[9px] text-stone-400">
+                                                                        {item.color} {item.thicknessMm ? `• ${item.thicknessMm}mm` : ''}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+
+                                                            <td className="py-2 px-2 text-center align-top">
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    max={item.maxStock}
+                                                                    value={item.quantity}
+                                                                    onChange={(e) => updateManifestItem(item.variantId, 'quantity', e.target.value)}
+                                                                    className="w-13 px-1 py-1 text-xs text-center font-black rounded-lg border border-stone-300 bg-stone-50 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                                                                />
+                                                                <div className="text-[9px] text-stone-400 mt-0.5">max {item.maxStock}</div>
+                                                            </td>
+
+                                                            <td className="py-2 px-2 align-top">
+                                                                <input
+                                                                    type="number"
+                                                                    step="0.01"
+                                                                    min="0"
+                                                                    value={item.costPerUnit}
+                                                                    onChange={(e) => updateManifestItem(item.variantId, 'costPerUnit', e.target.value)}
+                                                                    className="w-24 px-2 py-1 text-xs font-black rounded-lg border border-emerald-300 bg-emerald-50/40 text-emerald-900 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                                                                    title="Transfer cost charged to branch (Admin Due)"
+                                                                />
+                                                                {item.acquisitionPrice > 0 && (
+                                                                    <div className="text-[9px] text-stone-400 mt-0.5" title="Acquisition Cost">
+                                                                        cost: {formatCurrency(item.acquisitionPrice)}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+
+                                                            <td className="py-2 px-2 text-right align-top font-black text-stone-900 text-xs whitespace-nowrap">
+                                                                {formatCurrency(lineTotal)}
+                                                            </td>
+
+                                                            <td className="py-2 px-1.5 text-center align-top">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeFromManifest(item.variantId)}
+                                                                    className="text-stone-300 hover:text-rose-600 p-1 rounded transition-colors cursor-pointer"
+                                                                    title="Remove item"
+                                                                >
+                                                                    <Trash2 size={12} />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
                                     </div>
-                                ) : (
-                                    manifest.map(item => (
+                                </div>
+                            ) : (
+                                /* Cards View */
+                                <div className="space-y-3 max-h-[350px] overflow-y-auto custom-scrollbar pr-1">
+                                    {manifest.map(item => (
                                         <div key={item.variantId} className="p-3 rounded-xl border border-stone-200 bg-stone-50/50 space-y-2">
                                             <div className="flex items-center justify-between">
                                                 <div>
@@ -990,7 +1586,7 @@ const BranchDetail = () => {
                                                 </div>
                                                 <button
                                                     onClick={() => removeFromManifest(item.variantId)}
-                                                    className="text-stone-400 hover:text-rose-600 p-1 rounded transition-colors"
+                                                    className="text-stone-400 hover:text-rose-600 p-1 rounded transition-colors cursor-pointer"
                                                     title="Remove item"
                                                 >
                                                     <Trash2 size={13} />
@@ -1009,7 +1605,7 @@ const BranchDetail = () => {
                                                         max={item.maxStock}
                                                         value={item.quantity}
                                                         onChange={(e) => updateManifestItem(item.variantId, 'quantity', e.target.value)}
-                                                        className="w-full px-2.5 py-1.5 text-xs font-black rounded-lg border border-stone-300 bg-white"
+                                                        className="w-full px-2 py-1 text-xs font-black rounded-lg border border-stone-300 bg-white"
                                                     />
                                                 </div>
 
@@ -1024,7 +1620,7 @@ const BranchDetail = () => {
                                                         min="0"
                                                         value={item.costPerUnit}
                                                         onChange={(e) => updateManifestItem(item.variantId, 'costPerUnit', e.target.value)}
-                                                        className="w-full px-2.5 py-1.5 text-xs font-black rounded-lg border border-stone-300 bg-white"
+                                                        className="w-full px-2 py-1 text-xs font-black rounded-lg border border-emerald-300 bg-white text-emerald-800"
                                                     />
                                                 </div>
                                             </div>
@@ -1033,9 +1629,9 @@ const BranchDetail = () => {
                                                 Subtotal: {formatCurrency((parseInt(item.quantity, 10) || 0) * (parseFloat(item.costPerUnit) || 0))}
                                             </div>
                                         </div>
-                                    ))
-                                )}
-                            </div>
+                                    ))}
+                                </div>
+                            )}
 
                             {/* Terms: Deadline Presets & Notes */}
                             <div className="pt-3 border-t border-stone-100 space-y-3">
@@ -1097,32 +1693,62 @@ const BranchDetail = () => {
                             </div>
 
                             {/* Summary & Submit */}
-                            <div className="bg-stone-50 p-4 rounded-xl border border-stone-200 space-y-1.5">
-                                <div className="flex justify-between text-xs text-stone-500 font-semibold">
+                            <div className="bg-stone-50 p-4 rounded-xl border border-stone-200 space-y-1.5 text-xs">
+                                <div className="flex justify-between text-stone-500 font-semibold">
+                                    <span>Total Items in Manifest:</span>
+                                    <span className="font-black text-stone-900">{manifest.length} products</span>
+                                </div>
+                                <div className="flex justify-between text-stone-500 font-semibold">
                                     <span>Total Units to Dispatch:</span>
                                     <span className="font-black text-stone-900">{manifestTotalUnits} units</span>
                                 </div>
-                                <div className="flex justify-between text-sm font-black text-stone-900 pt-1 border-t border-stone-200">
-                                    <span>Total Amount to Charge:</span>
-                                    <span className="text-emerald-700">{formatCurrency(manifestTotalCost)}</span>
+                                <div className="flex justify-between text-stone-500 font-semibold pt-1 border-t border-stone-200">
+                                    <span>Total Transfer Cost (Dues):</span>
+                                    <span className="font-black text-emerald-700 text-sm">{formatCurrency(manifestTotalCost)}</span>
                                 </div>
                             </div>
 
-                            <button
-                                onClick={() => setConfirmModalOpen(true)}
-                                disabled={manifest.length === 0 || allocating}
-                                className={`w-full py-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-2 ${
-                                    manifest.length === 0
-                                        ? 'bg-stone-200 text-stone-400 cursor-not-allowed'
-                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                                }`}
-                            >
-                                <PackagePlus size={16} />
-                                Review & Confirm Stock Transfer
-                            </button>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setPriceReviewModalOpen(true)}
+                                    disabled={manifest.length === 0}
+                                    className={`py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer border ${
+                                        manifest.length === 0
+                                            ? 'bg-stone-100 text-stone-400 border-stone-200 cursor-not-allowed'
+                                            : 'bg-white text-stone-800 hover:bg-stone-50 border-stone-300 shadow-2xs hover:border-stone-400'
+                                    }`}
+                                >
+                                    <Table size={14} className="text-emerald-600" />
+                                    <span>Review Manifest Table</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setPriceReviewModalOpen(true)}
+                                    disabled={manifest.length === 0 || allocating}
+                                    className={`py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-2 ${
+                                        manifest.length === 0
+                                            ? 'bg-stone-200 text-stone-400 cursor-not-allowed'
+                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                    }`}
+                                >
+                                    <PackagePlus size={15} />
+                                    <span>Confirm Transfer</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                {/* Consignment-Style Batch Accordion History in Allocate Area */}
+                <div className="pt-2">
+                    {renderAllocationBatchHistory(
+                        "Stock Allocation & Dispatch History",
+                        "Batch records of dispatched inventory with live branch sales tracking and remittance history"
+                    )}
+                </div>
+            </div>
             )}
 
             {/* TAB 3: DUES & PAYMENTS */}
@@ -1148,102 +1774,11 @@ const BranchDetail = () => {
                         </div>
                     </div>
 
-                    {/* Allocations Table */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-                        <div className="p-4 border-b border-stone-100 flex items-center justify-between">
-                            <h4 className="font-black text-stone-900 text-sm">Stock Allocation & Payment Records</h4>
-                            <span className="text-xs text-stone-400">{allocations.length} total records</span>
-                        </div>
-
-                        {allocations.length === 0 ? (
-                            <div className="p-16 text-center text-stone-400 text-xs">
-                                No stock allocations have been made to this branch yet.
-                            </div>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left text-sm">
-                                    <thead className="bg-stone-50 text-[11px] font-black uppercase tracking-wider text-stone-400 border-b border-stone-100">
-                                        <tr>
-                                            <th className="py-3 px-4">Allocated Product</th>
-                                            <th className="py-3 px-4">Qty</th>
-                                            <th className="py-3 px-4">Cost / Unit</th>
-                                            <th className="py-3 px-4">Total Billed</th>
-                                            <th className="py-3 px-4">Paid / Balance</th>
-                                            <th className="py-3 px-4">Deadline</th>
-                                            <th className="py-3 px-4">Status</th>
-                                            <th className="py-3 px-4 text-right">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-stone-100">
-                                        {allocations.map(a => {
-                                            const totalCost = parseFloat(a.totalCost || 0);
-                                            const amountPaid = parseFloat(a.amountPaid || 0);
-                                            const remaining = Math.max(0, totalCost - amountPaid);
-                                            const isPaid = amountPaid >= totalCost && totalCost > 0;
-
-                                            return (
-                                                <tr key={a.id} className="hover:bg-stone-50/70 transition-colors">
-                                                    <td className="py-3 px-4">
-                                                        <div className="font-black text-stone-900 text-xs">{a.modelName}</div>
-                                                        <div className="text-[11px] font-mono text-stone-400">{a.sku}</div>
-                                                        {a.notes && <div className="text-[10px] text-stone-400 italic">"{a.notes}"</div>}
-                                                    </td>
-
-                                                    <td className="py-3 px-4 font-bold text-stone-900 text-xs">
-                                                        {a.quantity}
-                                                    </td>
-
-                                                    <td className="py-3 px-4 font-semibold text-stone-700 text-xs">
-                                                        {formatCurrency(a.costPerUnit)}
-                                                    </td>
-
-                                                    <td className="py-3 px-4 font-black text-stone-900 text-xs">
-                                                        {formatCurrency(totalCost)}
-                                                    </td>
-
-                                                    <td className="py-3 px-4 text-xs">
-                                                        <span className="font-black text-stone-900">{formatCurrency(amountPaid)}</span>
-                                                        {remaining > 0 && (
-                                                            <div className="text-[10px] text-rose-600 font-bold">
-                                                                Due: {formatCurrency(remaining)}
-                                                            </div>
-                                                        )}
-                                                    </td>
-
-                                                    <td className="py-3 px-4 text-xs font-semibold text-stone-700">
-                                                        {a.deadline || '—'}
-                                                    </td>
-
-                                                    <td className="py-3 px-4">
-                                                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                                            isPaid
-                                                                ? 'bg-emerald-100 text-emerald-800'
-                                                                : a.status === 'PARTIAL'
-                                                                ? 'bg-amber-100 text-amber-800'
-                                                                : 'bg-stone-100 text-stone-700'
-                                                        }`}>
-                                                            {isPaid ? 'Settled' : a.status}
-                                                        </span>
-                                                    </td>
-
-                                                    <td className="py-3 px-4 text-right">
-                                                        {!isPaid && (
-                                                            <button
-                                                                onClick={() => openPaymentModal(a)}
-                                                                className="px-3 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
-                                                            >
-                                                                Record Payment
-                                                            </button>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                    </div>
+                    {/* Consignment-Style Batch Accordion Records in Dues Tab */}
+                    {renderAllocationBatchHistory(
+                        "Stock Allocation & Payment Records",
+                        "Grouped by batch with itemized drop-down details and remittance actions"
+                    )}
                 </div>
             )}
 
@@ -1305,15 +1840,57 @@ const BranchDetail = () => {
                                             </td>
 
                                             <td className="py-3.5 px-6 font-black text-stone-900 text-xs">
-                                                {v.hasCustomPrice ? (
-                                                    <div className="flex items-center gap-1.5 text-emerald-700">
-                                                        <span>{formatCurrency(v.branchSellingPrice)}</span>
-                                                        <span className="px-1.5 py-0.5 rounded text-[9px] uppercase bg-emerald-100 font-black">
-                                                            Custom
-                                                        </span>
+                                                {editingPriceVariantId === v.id ? (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-stone-400 text-xs">₱</span>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={editingPriceValue}
+                                                            onChange={(e) => setEditingPriceValue(e.target.value)}
+                                                            className="w-24 px-2 py-1 text-xs font-black rounded-lg border border-indigo-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                            autoFocus
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSaveInlineBranchPrice(v.id)}
+                                                            disabled={savingInlinePrice}
+                                                            className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all cursor-pointer"
+                                                            title="Save Price"
+                                                        >
+                                                            {savingInlinePrice ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setEditingPriceVariantId(null)}
+                                                            className="p-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-all cursor-pointer"
+                                                            title="Cancel"
+                                                        >
+                                                            <X size={12} />
+                                                        </button>
                                                     </div>
                                                 ) : (
-                                                    <span className="text-stone-700">{formatCurrency(v.sellingPrice)}</span>
+                                                    <div className="flex items-center justify-between group/price">
+                                                        {v.hasCustomPrice ? (
+                                                            <div className="flex items-center gap-1.5 text-emerald-700">
+                                                                <span>{formatCurrency(v.branchSellingPrice)}</span>
+                                                                <span className="px-1.5 py-0.5 rounded text-[9px] uppercase bg-emerald-100 font-black">
+                                                                    Custom
+                                                                </span>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-stone-700">{formatCurrency(v.sellingPrice)}</span>
+                                                        )}
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => startEditingBranchPrice(v.id, v.hasCustomPrice ? v.branchSellingPrice : v.sellingPrice)}
+                                                            className="opacity-0 group-hover/price:opacity-100 p-1 rounded-md text-stone-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer"
+                                                            title="Edit Branch Selling Price"
+                                                        >
+                                                            <Pencil size={12} />
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </td>
                                         </tr>
@@ -1325,78 +1902,309 @@ const BranchDetail = () => {
                 </div>
             )}
 
-            {/* CONFIRMATION MODAL FOR STOCK ALLOCATION */}
-            {confirmModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                    <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-stone-200 space-y-4">
-                        <div className="flex items-center justify-between pb-3 border-b border-stone-100">
-                            <div>
-                                <h3 className="font-black text-lg text-stone-900">Confirm Stock Allocation</h3>
-                                <p className="text-xs text-stone-400 mt-0.5">Deduct from Admin → Transfer to {branch.name}</p>
-                            </div>
-                            <button
-                                onClick={() => setConfirmModalOpen(false)}
-                                className="p-1 rounded-lg text-stone-400 hover:text-stone-700"
-                            >
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200 space-y-2 text-xs">
-                            <div className="flex justify-between">
-                                <span className="text-stone-500 font-semibold">Total Transfer Quantity:</span>
-                                <span className="font-black text-stone-900">{manifestTotalUnits} units</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-stone-500 font-semibold">Total Amount Charged to Branch:</span>
-                                <span className="font-black text-emerald-700 text-sm">{formatCurrency(manifestTotalCost)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span className="text-stone-500 font-semibold">Settlement Deadline:</span>
-                                <span className="font-black text-stone-900">{allocationDeadline}</span>
-                            </div>
-                            {allocationNotes && (
-                                <div className="pt-2 border-t border-stone-200 text-stone-600 italic">
-                                    Notes: "{allocationNotes}"
+            {/* COMPREHENSIVE ALLOCATION REVIEW TABLE MODAL */}
+            {(priceReviewModalOpen || confirmModalOpen) && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+                    <div className="bg-white rounded-3xl max-w-5xl w-full p-6 sm:p-7 shadow-2xl border border-stone-200 space-y-5 my-8 max-h-[92vh] flex flex-col">
+                        {/* Header */}
+                        <div className="flex items-center justify-between pb-4 border-b border-stone-100 shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-black">
+                                    <Table size={20} />
                                 </div>
-                            )}
+                                <div>
+                                    <h3 className="font-black text-lg text-stone-900 flex items-center gap-2">
+                                        Review Transfer Manifest
+                                        <span className="px-2 py-0.5 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-100">
+                                            {manifest.length} {manifest.length === 1 ? 'item' : 'items'}
+                                        </span>
+                                    </h3>
+                                    <p className="text-xs text-stone-400 mt-0.5">
+                                        Review dispatch quantities and transfer costs before allocating to <strong className="text-stone-700">{branch.name}</strong>.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setPriceReviewModalOpen(false);
+                                    setConfirmModalOpen(false);
+                                }}
+                                className="p-2 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+                            >
+                                <X size={20} />
+                            </button>
                         </div>
 
-                        <p className="text-[11px] text-stone-500">
-                            By proceeding, {manifestTotalUnits} units will immediately be deducted from the main inventory and added to {branch.name}'s inventory. A due record will be created.
-                        </p>
+                        {/* Batch Controls Toolbar inside Modal */}
+                        <div className="bg-stone-50 p-3 rounded-2xl border border-stone-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                                <span className="text-[11px] font-black uppercase text-stone-500 tracking-wider">Transfer Cost:</span>
+                                <button
+                                    type="button"
+                                    onClick={() => applyBulkPricingToManifest('acquisition')}
+                                    className="px-2.5 py-1 bg-white border border-stone-200 hover:border-stone-400 rounded-lg text-xs font-bold text-stone-700 shadow-2xs transition-all cursor-pointer"
+                                    title="Set transfer cost to holding acquisition cost"
+                                >
+                                    Acquisition Cost
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => applyBulkPricingToManifest('markup15')}
+                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 shadow-2xs transition-all cursor-pointer"
+                                    title="Cost + 15%"
+                                >
+                                    Cost + 15%
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => applyBulkPricingToManifest('markup25')}
+                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold text-emerald-800 shadow-2xs transition-all cursor-pointer"
+                                    title="Cost + 25%"
+                                >
+                                    Cost + 25%
+                                </button>
+                            </div>
 
-                        <div className="flex items-center justify-end gap-3 pt-3">
+                            <div className="flex items-center gap-1.5 text-xs">
+                                <span className="text-[11px] font-black uppercase text-stone-500 tracking-wider">Set Qty:</span>
+                                {[1, 2, 5, 10].map(q => (
+                                    <button
+                                        key={q}
+                                        type="button"
+                                        onClick={() => applyBulkQtyToManifest(q)}
+                                        className="px-2 py-0.5 bg-white border border-stone-200 hover:border-stone-400 rounded-md text-xs font-black text-stone-700 shadow-2xs cursor-pointer"
+                                    >
+                                        {q}
+                                    </button>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={() => applyBulkQtyToManifest('max')}
+                                    className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-md text-xs font-black text-emerald-800 shadow-2xs cursor-pointer"
+                                >
+                                    Max
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Interactive Table */}
+                        <div className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-xs flex-1 min-h-[220px] overflow-y-auto custom-scrollbar">
+                            <table className="w-full text-left text-xs">
+                                <thead className="bg-stone-50 text-[10px] font-black uppercase tracking-wider text-stone-500 border-b border-stone-200 sticky top-0 z-10">
+                                    <tr>
+                                        <th className="py-3 px-3 w-8 text-center">#</th>
+                                        <th className="py-3 px-4">Product & Model</th>
+                                        <th className="py-3 px-3">Specs / SKU</th>
+                                        <th className="py-3 px-3 text-center">Holding Stock</th>
+                                        <th className="py-3 px-3 text-center">Transfer Qty</th>
+                                        <th className="py-3 px-3 text-right">Acquisition Cost</th>
+                                        <th className="py-3 px-4">Cost Charged to Branch (₱)</th>
+                                        <th className="py-3 px-4 text-right">Subtotal Due</th>
+                                        <th className="py-3 px-3 text-center"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-stone-100">
+                                    {manifest.map((item, idx) => {
+                                        const qty = parseInt(item.quantity, 10) || 0;
+                                        const cost = parseFloat(item.costPerUnit) || 0;
+                                        const lineTotal = qty * cost;
+
+                                        return (
+                                            <tr key={item.variantId} className="hover:bg-stone-50/70 transition-colors">
+                                                <td className="py-3 px-3 text-center font-bold text-stone-400">
+                                                    {idx + 1}
+                                                </td>
+
+                                                <td className="py-3 px-4">
+                                                    <div className="font-black text-stone-900 text-xs">{item.modelName}</div>
+                                                    <div className="text-[11px] text-stone-400 font-semibold">{item.brandName} • {item.category}</div>
+                                                </td>
+
+                                                <td className="py-3 px-3">
+                                                    <div className="font-mono text-stone-600 font-semibold">{item.sku}</div>
+                                                    {(item.color || item.thicknessMm) && (
+                                                        <div className="text-[10px] text-stone-400">
+                                                            {item.color} {item.thicknessMm ? `• ${item.thicknessMm}mm` : ''}
+                                                        </div>
+                                                    )}
+                                                </td>
+
+                                                <td className="py-3 px-3 text-center font-black text-stone-700">
+                                                    <span className="px-2 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[11px]">
+                                                        {item.maxStock} avail
+                                                    </span>
+                                                </td>
+
+                                                <td className="py-3 px-3 text-center">
+                                                    <div className="inline-flex items-center gap-1">
+                                                        <input
+                                                            type="number"
+                                                            min="1"
+                                                            max={item.maxStock}
+                                                            value={item.quantity}
+                                                            onChange={(e) => updateManifestItem(item.variantId, 'quantity', e.target.value)}
+                                                            className="w-16 px-2 py-1.5 text-xs text-center font-black rounded-xl border border-stone-300 bg-stone-50 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                                                        />
+                                                    </div>
+                                                </td>
+
+                                                <td className="py-3 px-3 text-right font-semibold text-stone-400">
+                                                    {formatCurrency(item.acquisitionPrice)}
+                                                </td>
+
+                                                <td className="py-3 px-4">
+                                                    <div className="relative">
+                                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-emerald-700 text-xs font-bold">₱</span>
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            min="0"
+                                                            value={item.costPerUnit}
+                                                            onChange={(e) => updateManifestItem(item.variantId, 'costPerUnit', e.target.value)}
+                                                            className="w-32 pl-6 pr-2 py-1.5 text-xs font-black rounded-xl border border-emerald-300 bg-emerald-50/30 text-emerald-900 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                                                            title="Transfer Price charged to branch (Admin Due)"
+                                                        />
+                                                    </div>
+                                                </td>
+
+                                                <td className="py-3 px-4 text-right font-black text-stone-900 text-xs whitespace-nowrap">
+                                                    {formatCurrency(lineTotal)}
+                                                </td>
+
+                                                <td className="py-3 px-3 text-center">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeFromManifest(item.variantId)}
+                                                        className="p-1.5 rounded-lg text-stone-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                                        title="Remove item"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Financial Totals Strip */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-stone-50 p-4 rounded-2xl border border-stone-200 shrink-0 text-xs">
+                            <div>
+                                <span className="text-[10px] font-black uppercase text-stone-400 block">Total Items in Manifest</span>
+                                <div className="text-lg font-black text-stone-900 mt-0.5">{manifest.length} products</div>
+                            </div>
+                            <div>
+                                <span className="text-[10px] font-black uppercase text-stone-400 block">Total Units to Dispatch</span>
+                                <div className="text-lg font-black text-stone-900 mt-0.5">{manifestTotalUnits} units</div>
+                            </div>
+                            <div>
+                                <span className="text-[10px] font-black uppercase text-emerald-700 block">Total Dues to Admin</span>
+                                <div className="text-lg font-black text-emerald-700 mt-0.5">{formatCurrency(manifestTotalCost)}</div>
+                            </div>
+                        </div>
+
+                        {/* Settlement Terms */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1 shrink-0">
+                            <div>
+                                <div className="flex items-center justify-between mb-1">
+                                    <label className="text-xs font-black text-stone-800 flex items-center gap-1.5">
+                                        <Calendar size={13} className="text-stone-500" />
+                                        Payment Settlement Deadline *
+                                    </label>
+                                    <div className="flex items-center gap-1">
+                                        {[
+                                            { label: '+7d', days: 7 },
+                                            { label: '+14d', days: 14 },
+                                            { label: '+30d', days: 30 }
+                                        ].map(preset => (
+                                            <button
+                                                key={preset.label}
+                                                type="button"
+                                                onClick={() => setDeadlinePreset(preset.days)}
+                                                className="px-2 py-0.5 rounded-md bg-stone-100 hover:bg-stone-200 text-stone-700 text-[10px] font-black transition-all cursor-pointer"
+                                            >
+                                                {preset.label}
+                                            </button>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={setDeadlineEndOfMonth}
+                                            className="px-2 py-0.5 rounded-md bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] font-black transition-all cursor-pointer"
+                                        >
+                                            End of Month
+                                        </button>
+                                    </div>
+                                </div>
+                                <input
+                                    type="date"
+                                    value={allocationDeadline}
+                                    onChange={(e) => setAllocationDeadline(e.target.value)}
+                                    className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-stone-300 bg-stone-50 focus:bg-white focus:outline-none"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-xs font-black text-stone-800 block mb-1">
+                                    Admin Dispatch Notes (Optional)
+                                </label>
+                                <input
+                                    type="text"
+                                    placeholder="e.g. Restock batch shipment..."
+                                    value={allocationNotes}
+                                    onChange={(e) => setAllocationNotes(e.target.value)}
+                                    className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-stone-300 bg-stone-50 focus:bg-white focus:outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Modal Action Buttons */}
+                        <div className="flex items-center justify-between pt-3 border-t border-stone-100 shrink-0">
                             <button
-                                onClick={() => setConfirmModalOpen(false)}
-                                className="px-4 py-2.5 rounded-xl text-xs font-bold text-stone-600 hover:bg-stone-100 cursor-pointer"
+                                type="button"
+                                onClick={() => {
+                                    setPriceReviewModalOpen(false);
+                                    setConfirmModalOpen(false);
+                                }}
+                                className="px-4 py-2.5 rounded-xl text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
                             >
-                                Cancel
+                                Back to Catalog
                             </button>
+
                             <button
                                 onClick={handleAllocateSubmit}
-                                disabled={allocating}
-                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer"
+                                disabled={allocating || manifest.length === 0}
+                                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black uppercase tracking-wider transition-all shadow-md active:scale-95 cursor-pointer disabled:bg-stone-200 disabled:text-stone-400 disabled:cursor-not-allowed"
                             >
-                                {allocating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                                <span>{allocating ? 'Allocating...' : 'Confirm Dispatch'}</span>
+                                {allocating ? <Loader2 size={15} className="animate-spin" /> : <PackagePlus size={15} />}
+                                <span>{allocating ? 'Allocating...' : `Confirm & Allocate ${manifestTotalUnits} Units`}</span>
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* RECORD PAYMENT MODAL */}
-            {paymentModalOpen && selectedAllocation && (
+            {/* RECORD PAYMENT MODAL (Supports both entire batch and individual item) */}
+            {paymentModalOpen && (selectedAllocation || selectedBatch) && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                     <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-stone-200 space-y-4">
                         <div className="flex items-center justify-between pb-3 border-b border-stone-100">
                             <div>
-                                <h3 className="font-black text-lg text-stone-900">Record Branch Payment</h3>
-                                <p className="text-xs text-stone-400 mt-0.5">{selectedAllocation.modelName} ({selectedAllocation.sku})</p>
+                                <h3 className="font-black text-lg text-stone-900">
+                                    {selectedBatch ? `Record Batch Payment` : 'Record Item Payment'}
+                                </h3>
+                                <p className="text-xs text-stone-400 mt-0.5">
+                                    {selectedBatch
+                                        ? `Batch #${selectedBatch.shortId} (${selectedBatch.items.length} products · ${selectedBatch.totalUnits} units)`
+                                        : `${selectedAllocation.modelName} (${selectedAllocation.sku})`}
+                                </p>
                             </div>
                             <button
-                                onClick={() => setPaymentModalOpen(false)}
+                                onClick={() => {
+                                    setPaymentModalOpen(false);
+                                    setSelectedBatch(null);
+                                    setSelectedAllocation(null);
+                                }}
                                 className="p-1 rounded-lg text-stone-400 hover:text-stone-700"
                             >
                                 <X size={18} />
@@ -1407,16 +2215,24 @@ const BranchDetail = () => {
                             <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200 text-xs space-y-1.5">
                                 <div className="flex justify-between">
                                     <span className="text-stone-500">Total Billed:</span>
-                                    <span className="font-black text-stone-900">{formatCurrency(selectedAllocation.totalCost)}</span>
+                                    <span className="font-black text-stone-900">
+                                        {formatCurrency(selectedBatch ? selectedBatch.totalCost : selectedAllocation.totalCost)}
+                                    </span>
                                 </div>
                                 <div className="flex justify-between">
                                     <span className="text-stone-500">Already Paid:</span>
-                                    <span className="font-bold text-emerald-700">{formatCurrency(selectedAllocation.amountPaid)}</span>
+                                    <span className="font-bold text-emerald-700">
+                                        {formatCurrency(selectedBatch ? selectedBatch.totalPaid : selectedAllocation.amountPaid)}
+                                    </span>
                                 </div>
                                 <div className="flex justify-between pt-1 border-t border-stone-200">
                                     <span className="text-stone-500">Remaining Balance:</span>
                                     <span className="font-black text-rose-600">
-                                        {formatCurrency(Math.max(0, parseFloat(selectedAllocation.totalCost || 0) - parseFloat(selectedAllocation.amountPaid || 0)))}
+                                        {formatCurrency(
+                                            selectedBatch
+                                                ? selectedBatch.totalUnpaid
+                                                : Math.max(0, parseFloat(selectedAllocation.totalCost || 0) - parseFloat(selectedAllocation.amountPaid || 0))
+                                        )}
                                     </span>
                                 </div>
                             </div>
@@ -1429,7 +2245,11 @@ const BranchDetail = () => {
                                     type="number"
                                     step="0.01"
                                     min="0.01"
-                                    max={Math.max(0, parseFloat(selectedAllocation.totalCost || 0) - parseFloat(selectedAllocation.amountPaid || 0))}
+                                    max={
+                                        selectedBatch
+                                            ? selectedBatch.totalUnpaid
+                                            : Math.max(0, parseFloat(selectedAllocation.totalCost || 0) - parseFloat(selectedAllocation.amountPaid || 0))
+                                    }
                                     value={paymentAmount}
                                     onChange={(e) => setPaymentAmount(e.target.value)}
                                     placeholder="Enter remittance amount"
@@ -1441,7 +2261,11 @@ const BranchDetail = () => {
                             <div className="flex items-center justify-end gap-3 pt-3">
                                 <button
                                     type="button"
-                                    onClick={() => setPaymentModalOpen(false)}
+                                    onClick={() => {
+                                        setPaymentModalOpen(false);
+                                        setSelectedBatch(null);
+                                        setSelectedAllocation(null);
+                                    }}
                                     className="px-4 py-2.5 rounded-xl text-xs font-bold text-stone-600 hover:bg-stone-100 cursor-pointer"
                                 >
                                     Cancel

@@ -51,6 +51,7 @@ public class StockBatch {
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private Branch branch;
 
+
     @PrePersist
     public void prePersist() {
         if (this.restockedAt == null) {

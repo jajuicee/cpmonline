@@ -47,11 +47,13 @@ public class AdminController {
         this.allocationRepository = allocationRepository;
     }
 
-    // ─── BRANCH CRUD ──────────────────────────────────────────────
+    // ─── BRANCH CRUD (Only Retail Branches) ─────────────────────────
 
     @GetMapping("/branches")
     public List<Branch> getAllBranches() {
-        return branchRepository.findAll();
+        return branchRepository.findAll().stream()
+                .filter(b -> b.isActive() && (b.getName() == null || !b.getName().toLowerCase().contains("warehouse")))
+                .toList();
     }
 
     @GetMapping("/branches/{id}")
@@ -107,11 +109,11 @@ public class AdminController {
 
     @DeleteMapping("/branches/{id}")
     public ResponseEntity<?> deleteBranch(@PathVariable Long id) {
-        if (!branchRepository.existsById(id)) {
-            return ResponseEntity.notFound().build();
-        }
-        branchRepository.deleteById(id);
-        return ResponseEntity.ok(Map.of("message", "Branch deleted"));
+        return branchRepository.findById(id).map(branch -> {
+            branch.setActive(false);
+            branchRepository.save(branch);
+            return ResponseEntity.ok(Map.of("message", "Branch deactivated"));
+        }).orElse(ResponseEntity.notFound().build());
     }
 
     @GetMapping("/branches/overview")
@@ -131,32 +133,33 @@ public class AdminController {
                 overdueMap.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue()));
         } catch (Exception ignored) { /* table may not exist yet on first startup */ }
 
-        return branchRepository.findAll().stream().map(b -> {
-            Map<String, Object> map = new LinkedHashMap<>();
-            map.put("id", b.getId());
-            map.put("name", b.getName());
-            map.put("address", b.getAddress());
-            map.put("contactInfo", b.getContactInfo());
-            map.put("active", b.isActive());
+        return branchRepository.findAll().stream()
+                .filter(b -> b.isActive() && (b.getName() == null || !b.getName().toLowerCase().contains("warehouse")))
+                .map(b -> {
+                    Map<String, Object> map = new LinkedHashMap<>();
+                    map.put("id", b.getId());
+                    map.put("name", b.getName());
+                    map.put("address", b.getAddress());
+                    map.put("contactInfo", b.getContactInfo());
+                    map.put("active", b.isActive());
 
-            // Aggregates
-            java.math.BigDecimal totalRev = transactionRepository.sumFinalPriceAllByBranch(b.getId());
-            java.math.BigDecimal todayRev = transactionRepository.sumFinalPriceInRangeAndBranch(startOfToday, endOfToday, b.getId());
+                    // Aggregates
+                    java.math.BigDecimal totalRev = transactionRepository.sumFinalPriceAllByBranch(b.getId());
+                    java.math.BigDecimal todayRev = transactionRepository.sumFinalPriceInRangeAndBranch(startOfToday, endOfToday, b.getId());
 
-            // Stock remaining units
-            List<Object[]> stockRows = stockBatchRepository.sumRemainingQuantityByVariantIdAndBranch(b.getId());
-            long totalStockUnits = stockRows.stream().mapToLong(r -> r[1] != null ? ((Number) r[1]).longValue() : 0L).sum();
+                    // Stock remaining units
+                    List<Object[]> stockRows = stockBatchRepository.sumRemainingQuantityByVariantIdAndBranch(b.getId());
+                    long totalStockUnits = stockRows.stream().mapToLong(r -> r[1] != null ? ((Number) r[1]).longValue() : 0L).sum();
 
-            map.put("totalRevenue", totalRev != null ? totalRev : java.math.BigDecimal.ZERO);
-            map.put("todayRevenue", todayRev != null ? todayRev : java.math.BigDecimal.ZERO);
-            map.put("totalStockUnits", totalStockUnits);
+                    map.put("totalRevenue", totalRev != null ? totalRev : java.math.BigDecimal.ZERO);
+                    map.put("todayRevenue", todayRev != null ? todayRev : java.math.BigDecimal.ZERO);
+                    map.put("totalStockUnits", totalStockUnits);
+                    map.put("isWarehouse", false);
+                    map.put("totalDue", outstandingMap.getOrDefault(b.getId(), BigDecimal.ZERO));
+                    map.put("overdueCount", overdueMap.getOrDefault(b.getId(), 0L));
 
-            // Dues data
-            map.put("totalDue", outstandingMap.getOrDefault(b.getId(), BigDecimal.ZERO));
-            map.put("overdueCount", overdueMap.getOrDefault(b.getId(), 0L));
-
-            return map;
-        }).toList();
+                    return map;
+                }).toList();
     }
 
     // ─── USER CRUD ────────────────────────────────────────────────

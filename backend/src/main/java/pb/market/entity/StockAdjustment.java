@@ -36,6 +36,7 @@ public class StockAdjustment {
     @JoinColumn(name = "branch_id")
     private Branch branch;
 
+
     @Column(nullable = false)
     private LocalDateTime adjustedAt;
 

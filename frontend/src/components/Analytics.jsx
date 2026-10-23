@@ -139,7 +139,7 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
         paymentLogs.forEach(pl => {
             if (pl.paymentMethod) set.add(pl.paymentMethod);
         });
-        set.add('Credit Card');
+        ['Cash', 'GCash', 'Maya', 'GoTyme', 'BDO', 'BPI', 'MBOS', 'Credit Card', 'QRPH'].forEach(m => set.add(m));
         return Array.from(set).sort();
     }, [transactions, paymentLogs]);
 

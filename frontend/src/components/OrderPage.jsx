@@ -5,7 +5,7 @@ import {
     AlertCircle, CheckCircle, Loader2, ClipboardList, Trash2,
     Printer, Receipt, Store, Layers, Plus, Minus, ArrowRight,
     RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split,
-    Pen, DollarSign, Calendar, Eye
+    Pen, DollarSign, Calendar, Eye, Landmark, Smartphone, Building2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -30,9 +30,13 @@ const CATEGORY_STYLES = {
 };
 
 const PAYMENT_METHODS = [
-    { id: 'GCash', label: 'GCash', icon: QrCode },
     { id: 'Cash', label: 'Cash', icon: Banknote },
+    { id: 'GCash', label: 'GCash', icon: QrCode },
     { id: 'Maya', label: 'Maya', icon: QrCode },
+    { id: 'GoTyme', label: 'GoTyme', icon: Smartphone },
+    { id: 'BDO', label: 'BDO', icon: Landmark },
+    { id: 'BPI', label: 'BPI', icon: Landmark },
+    { id: 'MBOS', label: 'MBOS', icon: Building2 },
     { id: 'Credit Card', label: 'Card', icon: CreditCard },
     { id: 'QRPH', label: 'QRPH', icon: QrCode },
     { id: 'Split Payment', label: 'Split', icon: Split }
@@ -1005,7 +1009,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 <span className="block text-[10px] font-black uppercase tracking-wider text-stone-400 mb-1.5">
                                     Payment Method:
                                 </span>
-                                <div className="grid grid-cols-3 gap-1.5">
+                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                                     {PAYMENT_METHODS.map(m => {
                                         const isSelected = formData.paymentMethod === m.id;
                                         const Icon = m.icon;
@@ -1051,9 +1055,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                                 }}
                                                 className="flex-1 bg-white border border-stone-200 rounded-lg px-2 py-1 text-xs font-bold"
                                             >
-                                                <option value="GCash">GCash</option>
                                                 <option value="Cash">Cash</option>
+                                                <option value="GCash">GCash</option>
                                                 <option value="Maya">Maya</option>
+                                                <option value="GoTyme">GoTyme</option>
+                                                <option value="BDO">BDO</option>
+                                                <option value="BPI">BPI</option>
+                                                <option value="MBOS">MBOS</option>
                                                 <option value="Credit Card">Card</option>
                                                 <option value="QRPH">QRPH</option>
                                             </select>

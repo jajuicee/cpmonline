@@ -34,5 +34,8 @@ public class StockAllocationRequest {
 
         /** Price per unit the branch will owe */
         private BigDecimal costPerUnit;
+
+        /** Optional retail selling price at this branch */
+        private BigDecimal sellingPrice;
     }
 }

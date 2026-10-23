@@ -29,6 +29,10 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                 const isShoe = product.category === 'Shoes';
                 const qty = variant.stockQuantity ?? 0;
                 const threshold = variant.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD;
+                const mainStock = variant.mainStock != null ? variant.mainStock : qty;
+                const branchStock = variant.branchStock || 0;
+                const locationBreakdown = variant.locationBreakdown || [];
+
                 return {
                     variantId: variant.id,
                     sku: variant.sku,
@@ -41,6 +45,9 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                             ? `Size ${variant.shape || '-'}`
                             : '-',
                     quantity: qty,
+                    mainStock,
+                    branchStock,
+                    locationBreakdown,
                     sellingPrice: variant.sellingPrice ?? 0,
                     acquisitionPrice: variant.acquisitionPrice ?? 0,
                     totalAdded: variant.totalAdded || 0,
@@ -65,18 +72,22 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
     const stats = useMemo(() => {
         let totalSkus = flattenedInventory.length;
         let totalUnits = 0;
+        let warehouseUnits = 0;
+        let branchUnits = 0;
         let value = 0;
         let lowStock = 0;
         let outOfStock = 0;
         let consignedUnits = 0;
         for (const row of flattenedInventory) {
             totalUnits += row.quantity;
+            warehouseUnits += (row.mainStock || 0);
+            branchUnits += (row.branchStock || 0);
             value += row.quantity * Number(row.sellingPrice || 0);
             if (row.isOutOfStock) outOfStock++;
             else if (row.isLowStock) lowStock++;
             if (row.consigned) consignedUnits += row.quantity;
         }
-        return { totalSkus, totalUnits, value, lowStock, outOfStock, consignedUnits };
+        return { totalSkus, totalUnits, warehouseUnits, branchUnits, value, lowStock, outOfStock, consignedUnits };
     }, [flattenedInventory]);
 
     const filteredInventory = useMemo(() => {
@@ -167,7 +178,13 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
 
             {/* STAT CARDS (Aesthetic 5-Card Grid) */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 shrink-0">
-                <StatCard Icon={Boxes} label="Total SKUs" primary={stats.totalSkus} secondary={`${stats.totalUnits} total units in stock`} loading={loading} />
+                <StatCard
+                    Icon={Boxes}
+                    label="Total Units"
+                    primary={stats.totalUnits}
+                    secondary={stats.branchUnits > 0 ? `${stats.warehouseUnits} unallocated (Admin) · ${stats.branchUnits} in branches` : `${stats.totalSkus} active SKUs`}
+                    loading={loading}
+                />
                 <StatCard Icon={Coins} label="Inventory Value" primary={loading ? '—' : formatPHP(stats.value)} secondary="valuation at selling price" accent="emerald" loading={loading} />
                 <StatCard Icon={AlertTriangle} label="Low Stock" primary={stats.lowStock} secondary={`≤ ${DEFAULT_LOW_STOCK_THRESHOLD} units (reorder warning)`} accent="amber" loading={loading}
                     active={stockFilter === 'low'} onClick={() => { setStockFilter(stockFilter === 'low' ? 'all' : 'low'); setDisplayedCount(15); }} />
@@ -310,6 +327,28 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                                                 {row.isOutOfStock && <PackageX size={14} className="text-red-500" />}
                                                 {row.quantity ?? 0} stock{(row.quantity ?? 0) !== 1 ? 's' : ''} left
                                             </span>
+
+                                            {/* Live Location Breakdown Pills (Warehouse vs Branches) */}
+                                            {row.locationBreakdown && row.locationBreakdown.length > 0 && (
+                                                <div className="flex items-center gap-1 flex-wrap justify-end max-w-[240px]">
+                                                    {row.locationBreakdown.map((loc, idx) => (
+                                                        <span
+                                                            key={idx}
+                                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                                                                loc.isMain
+                                                                    ? 'bg-stone-100 text-stone-700'
+                                                                    : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                                            }`}
+                                                            title={`${loc.branchName}: ${loc.quantity} unsold units`}
+                                                        >
+                                                            <Building2 size={9} className="opacity-60" />
+                                                            <span>{loc.isMain ? 'Admin (Unallocated)' : loc.branchName}:</span>
+                                                            <strong className="font-black">{loc.quantity}</strong>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+
                                             <div className="flex items-center gap-1.5">
                                                 <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
                                                     {row.totalSold} sold

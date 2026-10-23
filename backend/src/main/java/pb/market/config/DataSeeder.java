@@ -22,7 +22,8 @@ public class DataSeeder implements CommandLineRunner {
     private final BranchRepository branchRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public DataSeeder(UserRepository userRepository, BranchRepository branchRepository, PasswordEncoder passwordEncoder) {
+    public DataSeeder(UserRepository userRepository, BranchRepository branchRepository,
+                      PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.branchRepository = branchRepository;
         this.passwordEncoder = passwordEncoder;
@@ -33,13 +34,13 @@ public class DataSeeder implements CommandLineRunner {
         Branch mainBranch = null;
         if (branchRepository.count() == 0) {
             Branch b = new Branch();
-            b.setName("Cebu Main");
+            b.setName("Bayabas Branch");
             b.setAddress("Cebu City");
             b.setContactInfo("0917-123-4567");
             mainBranch = branchRepository.save(b);
-            System.out.println("Default branch 'Cebu Main' created.");
+            System.out.println("Default retail branch 'Bayabas Branch' created.");
         } else {
-            mainBranch = branchRepository.findAll().get(0);
+            mainBranch = branchRepository.findAll().stream().filter(Branch::isActive).findFirst().orElse(null);
         }
 
         if (userRepository.count() == 0) {

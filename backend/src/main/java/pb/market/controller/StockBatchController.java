@@ -40,6 +40,11 @@ public class StockBatchController {
             m.put("consigned", b.isConsigned());
             m.put("restockedAt", b.getRestockedAt());
             m.put("batchId", b.getBatchId());
+            if (b.getBranch() != null) {
+                m.put("branch", Map.of("id", b.getBranch().getId(), "name", b.getBranch().getName()));
+            } else {
+                m.put("branch", Map.of("id", 0L, "name", "Admin (Unallocated)"));
+            }
             if (b.getSupplier() != null) {
                 m.put("supplier", Map.of("id", b.getSupplier().getId(), "name", b.getSupplier().getName()));
             } else {

@@ -86,7 +86,7 @@ const TabletLayout = () => {
             { name: 'Consignees', path: `${basePath}/consignees`,       icon: Users },
             { name: 'Add',        path: `${basePath}/add-product`,      icon: PackagePlus },
             { name: 'Stock',      path: `${basePath}/inventory`,        icon: Boxes },
-            { name: 'Manage',     path: `${basePath}/manage-inventory`, icon: ClipboardList },
+            { name: 'Master Inv', path: `${basePath}/manage-inventory`, icon: ClipboardList },
             { name: 'Supplies',   path: `${basePath}/supplies`,         icon: Truck },
             { name: 'Suppliers',  path: `${basePath}/suppliers`,        icon: Building2 },
             { name: 'Branch Sales', path: `${basePath}/branch-sales`,   icon: TrendingUp },

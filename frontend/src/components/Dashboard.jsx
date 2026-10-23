@@ -131,7 +131,7 @@ const Dashboard = () => {
                 items: [
                     { name: 'Add Products',     path: '/add-product',      icon: PackagePlus },
                     { name: 'View Inventory',   path: '/inventory',        icon: Boxes },
-                    { name: 'Manage Inventory', path: '/manage-inventory', icon: ClipboardList },
+                    { name: 'Master Inventory', path: '/manage-inventory', icon: ClipboardList },
                     { name: 'Supplies',         path: '/supplies',         icon: Truck },
                     { name: 'Suppliers',        path: '/suppliers',        icon: Building2 },
                 ]
@@ -293,12 +293,14 @@ const Dashboard = () => {
                                     onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
                                     className="bg-transparent text-xs font-black text-stone-900 focus:outline-none cursor-pointer"
                                 >
-                                    <option value="">All Branches (Consolidated)</option>
-                                    {branchList.map((b) => (
-                                        <option key={b.id} value={b.id}>
-                                            {b.name}
-                                        </option>
-                                    ))}
+                                    <option value="">Consolidated View (All Branches)</option>
+                                    {branchList
+                                        .filter(b => b.active && (b.name == null || !b.name.toLowerCase().includes('warehouse')))
+                                        .map((b) => (
+                                            <option key={b.id} value={b.id}>
+                                                🏬 {b.name}
+                                            </option>
+                                        ))}
                                 </select>
                             </div>
                         )}

@@ -23,3 +23,8 @@ backend/target/
 # Temporary / dump files
 tx_dump.json
 Paddles_Export.csv
+migrate_*.py
+cookies.txt
+*.txt
+
+

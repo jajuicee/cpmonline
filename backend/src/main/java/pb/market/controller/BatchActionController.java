@@ -51,17 +51,12 @@ public class BatchActionController {
         return branches.stream()
                 .filter(b -> b.getName() != null && b.getName().toLowerCase().contains("main"))
                 .findFirst()
-                .orElseGet(() -> branches.stream()
-                        .filter(b -> b.getId() != null && b.getId() == 1L)
-                        .findFirst()
-                        .orElseGet(() -> branches.isEmpty() ? null : branches.get(0)));
+                .orElse(null);
     }
 
     private boolean isMainBranch(pb.market.entity.Branch b) {
-        if (b == null) return true;
-        if (b.getName() != null && b.getName().toLowerCase().contains("main")) return true;
-        pb.market.entity.Branch main = getMainBranch();
-        return main != null && b.getId() != null && b.getId().equals(main.getId());
+        if (b == null) return false;
+        return b.getName() != null && b.getName().toLowerCase().contains("main");
     }
 
     @PostMapping("/receive")
@@ -80,8 +75,7 @@ public class BatchActionController {
             branch = branchRepository.findById(bId).orElse(null);
         }
 
-        pb.market.entity.Branch mainBranch = getMainBranch();
-        boolean isTransferFromMain = (branch != null && !isMainBranch(branch));
+        boolean isTransferFromHolding = (branch != null);
 
         Supplier supplier = null;
         if (request.getSupplierId() != null) {
@@ -105,23 +99,22 @@ public class BatchActionController {
             }
         }
 
-        // If transferring to another branch, validate that Main Inventory has sufficient stock for ALL items
-        if (isTransferFromMain) {
-            Long mainBranchId = mainBranch != null ? mainBranch.getId() : 1L;
+        // If transferring to another branch, validate that Holding Pool has sufficient stock for ALL items
+        if (isTransferFromHolding) {
             for (BatchAddRequest.BatchItem item : request.getItems()) {
-                List<StockBatch> mainBatches = stockBatchRepository
-                        .findReceivableForMainForUpdate(item.getVariantId(), mainBranchId);
-                int availableInMain = mainBatches.stream()
+                List<StockBatch> holdingBatches = stockBatchRepository
+                        .findReceivableForHoldingForUpdate(item.getVariantId());
+                int availableInHolding = holdingBatches.stream()
                         .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
                         .sum();
-                if (item.getQuantity() > availableInMain) {
+                if (item.getQuantity() > availableInHolding) {
                     ProductVariant v = variantRepository.findById(item.getVariantId()).orElse(null);
                     String name = (v != null && v.getProduct() != null)
                             ? v.getProduct().getBrandName() + " " + v.getProduct().getModelName() + " (" + v.getSku() + ")"
                             : "Variant ID #" + item.getVariantId();
                     return ResponseEntity.badRequest().body(Map.of(
-                        "error", "Cannot add to " + branch.getName() + ": Insufficient stock in Main Inventory for " + name +
-                                ". Available in Main: " + availableInMain + ", requested: " + item.getQuantity() + "."
+                        "error", "Cannot add to " + branch.getName() + ": Insufficient stock in Holding Pool for " + name +
+                                ". Available in Holding Pool: " + availableInHolding + ", requested: " + item.getQuantity() + "."
                     ));
                 }
             }
@@ -137,40 +130,39 @@ public class BatchActionController {
             String status = request.getStatus() != null && request.getStatus().equals("INCOMING") ? "INCOMING"
                     : "RECEIVED";
 
-            // If transferring to another branch, subtract stock from Main Inventory (FIFO)
-            if (isTransferFromMain) {
-                Long mainBranchId = mainBranch != null ? mainBranch.getId() : 1L;
-                List<StockBatch> mainBatches = stockBatchRepository
-                        .findReceivableForMainForUpdate(item.getVariantId(), mainBranchId);
+            // If transferring to a branch, subtract stock from Holding Pool (FIFO)
+            if (isTransferFromHolding) {
+                List<StockBatch> holdingBatches = stockBatchRepository
+                        .findReceivableForHoldingForUpdate(item.getVariantId());
 
                 int remainingToDeduct = item.getQuantity();
-                for (StockBatch mainBatch : mainBatches) {
+                for (StockBatch hBatch : holdingBatches) {
                     if (remainingToDeduct <= 0) break;
-                    int available = mainBatch.getRemainingQuantity() != null ? mainBatch.getRemainingQuantity() : 0;
+                    int available = hBatch.getRemainingQuantity() != null ? hBatch.getRemainingQuantity() : 0;
                     if (available >= remainingToDeduct) {
-                        mainBatch.setRemainingQuantity(available - remainingToDeduct);
+                        hBatch.setRemainingQuantity(available - remainingToDeduct);
                         remainingToDeduct = 0;
                     } else {
-                        mainBatch.setRemainingQuantity(0);
+                        hBatch.setRemainingQuantity(0);
                         remainingToDeduct -= available;
                     }
-                    stockBatchRepository.save(mainBatch);
+                    stockBatchRepository.save(hBatch);
                 }
 
-                // Persist the stock adjustment record on Main Inventory
+                // Persist the stock adjustment record on Holding Pool
                 pb.market.entity.StockAdjustment adj = new pb.market.entity.StockAdjustment();
                 adj.setVariant(variant);
                 adj.setQuantity(item.getQuantity());
                 adj.setReason("Transfer to " + branch.getName());
                 adj.setNote("Stock transfer to branch: " + branch.getName() + " (Batch " + batchId + ")");
-                adj.setBranch(mainBranch);
+                adj.setBranch(null);
                 stockAdjustmentRepository.save(adj);
             }
 
-            // 2. Create StockBatch for target branch
+            // 2. Create StockBatch
             BigDecimal itemBaseCost = (item.getBaseCost() != null && item.getBaseCost().compareTo(BigDecimal.ZERO) > 0)
-                    ? item.getBaseCost()
-                    : (variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO);
+                ? item.getBaseCost()
+                : (variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO);
 
             Supplier itemSupplier = supplier != null ? supplier : variant.getDefaultSupplier();
             boolean isItemConsigned = item.getConsigned() != null ? item.getConsigned() : request.isConsigned();
@@ -191,7 +183,7 @@ public class BatchActionController {
         }
 
         // 3. Log Expense only if actual money was spent and it's not an internal branch transfer
-        if (!isTransferFromMain && grandTotal.compareTo(BigDecimal.ZERO) > 0) {
+        if (!isTransferFromHolding && grandTotal.compareTo(BigDecimal.ZERO) > 0) {
             Expense expense = new Expense();
             expense.setName(supplier != null ? "Paddles from " + supplier.getName() : "Paddles Batch Purchase");
             expense.setCategory("Business");
@@ -205,8 +197,8 @@ public class BatchActionController {
 
         stockWebSocketHandler.broadcastStockUpdate();
         return ResponseEntity.ok(Map.of(
-                "message", isTransferFromMain 
-                        ? "Successfully transferred and received stock at " + branch.getName() + " (deducted from Main Inventory)."
+                "message", isTransferFromHolding 
+                        ? "Successfully transferred and received stock at " + branch.getName() + " (deducted from Holding Pool)."
                         : "Batch received successfully",
                 "batchId", batchId,
                 "grandTotal", grandTotal));
@@ -245,22 +237,20 @@ public class BatchActionController {
             transactionRepository.save(tx);
         }
 
-        // 4. If this batch was transferred to a non-main branch, restore stock back to Main Inventory
+        // 4. If this batch was transferred to a non-main branch, restore stock back to Holding Pool
         for (StockBatch batch : batches) {
-            if (batch.getBranch() != null && !isMainBranch(batch.getBranch())) {
-                pb.market.entity.Branch mainBranch = getMainBranch();
-                Long mainBranchId = mainBranch != null ? mainBranch.getId() : 1L;
-                List<StockBatch> mainBatches = stockBatchRepository.findByVariantIdAndStatusOrderByRestockedAtDesc(
+            if (batch.getBranch() != null) {
+                List<StockBatch> holdingBatches = stockBatchRepository.findByVariantIdAndStatusOrderByRestockedAtDesc(
                         batch.getVariant().getId(), "RECEIVED");
-                StockBatch targetMainBatch = mainBatches.stream()
-                        .filter(b -> (b.getBranch() != null && b.getBranch().getId().equals(mainBranchId)) || b.getBranch() == null)
+                StockBatch targetHoldingBatch = holdingBatches.stream()
+                        .filter(b -> b.getBranch() == null)
                         .findFirst()
                         .orElse(null);
 
                 int qtyToRestore = batch.getQuantity() != null ? batch.getQuantity() : 0;
-                if (targetMainBatch != null) {
-                    targetMainBatch.setRemainingQuantity((targetMainBatch.getRemainingQuantity() != null ? targetMainBatch.getRemainingQuantity() : 0) + qtyToRestore);
-                    stockBatchRepository.save(targetMainBatch);
+                if (targetHoldingBatch != null) {
+                    targetHoldingBatch.setRemainingQuantity((targetHoldingBatch.getRemainingQuantity() != null ? targetHoldingBatch.getRemainingQuantity() : 0) + qtyToRestore);
+                    stockBatchRepository.save(targetHoldingBatch);
                 } else {
                     StockBatch restoredBatch = new StockBatch();
                     restoredBatch.setVariant(batch.getVariant());
@@ -270,7 +260,7 @@ public class BatchActionController {
                     restoredBatch.setSupplier(batch.getSupplier());
                     restoredBatch.setConsigned(batch.isConsigned());
                     restoredBatch.setStatus("RECEIVED");
-                    restoredBatch.setBranch(mainBranch);
+                    restoredBatch.setBranch(null);
                     restoredBatch.setBatchId("RESTORE-" + UUID.randomUUID().toString().substring(0, 8));
                     stockBatchRepository.save(restoredBatch);
                 }
@@ -280,8 +270,8 @@ public class BatchActionController {
                 adj.setVariant(batch.getVariant());
                 adj.setQuantity(qtyToRestore);
                 adj.setReason("Revert Transfer from " + batch.getBranch().getName());
-                adj.setNote("Restored stock to Main Inventory after reverting batch: " + batchId);
-                adj.setBranch(mainBranch);
+                adj.setNote("Restored stock to Holding Pool after reverting batch: " + batchId);
+                adj.setBranch(null);
                 stockAdjustmentRepository.save(adj);
             }
         }

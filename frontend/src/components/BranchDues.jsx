@@ -328,6 +328,13 @@ const BranchDues = () => {
                                                     <Boxes size={12} />
                                                     {a.quantity} units
                                                 </span>
+                                                {a.soldQuantity != null && (
+                                                    <div className="text-[10px] text-stone-500 mt-1 flex items-center gap-1 font-semibold">
+                                                        <span className="text-emerald-700 font-bold">{a.soldQuantity || 0} sold</span>
+                                                        <span className="text-stone-300">•</span>
+                                                        <span className="text-indigo-700 font-bold">{a.remainingQuantity != null ? a.remainingQuantity : a.quantity} in branch</span>
+                                                    </div>
+                                                )}
                                             </td>
 
                                             <td className="py-4 px-4 font-semibold text-stone-700">

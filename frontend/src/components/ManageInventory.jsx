@@ -4,7 +4,8 @@ import {
     ClipboardList, Search, X, PlusCircle, MinusCircle, Layers,
     CheckCircle, AlertCircle, Loader2, Building2, PackagePlus, Trash2,
     Pencil, AlertTriangle, PackageX, History, Save, Printer,
-    CreditCard, Boxes, Clock, CheckCircle2
+    CreditCard, Boxes, Clock, CheckCircle2, Store,
+    ChevronDown, ChevronUp, MapPin, Eye
 } from 'lucide-react';
 import BatchAddModal from './BatchAddModal';
 import PasswordModal from './PasswordModal';
@@ -17,11 +18,22 @@ const formatPHP = (n) =>
 
 const ManageInventory = ({ products = [], loading = false, refetchProducts }) => {
     const [suppliers, setSuppliers] = useState([]);
+    const [branches, setBranches] = useState([]);
     const [tableFilter, setTableFilter] = useState('');
     const [sortOrder, setSortOrder] = useState('name-asc');
     const [categoryFilter, setCategoryFilter] = useState('All'); // All, Paddles, Accessories, Shoes
+    const [locationFilter, setLocationFilter] = useState('ALL'); // ALL, MAIN, BRANCHES, or branch_ID
     const [displayedCount, setDisplayedCount] = useState(20);
+    const [expandedRows, setExpandedRows] = useState({});
+    const [locationModalVariant, setLocationModalVariant] = useState(null);
     const tableContainerRef = useRef(null);
+
+    const toggleExpandRow = (variantId) => {
+        setExpandedRows(prev => ({
+            ...prev,
+            [variantId]: !prev[variantId]
+        }));
+    };
 
     // --- TAB STATE (Catalog vs Outgoing Branch Allocations Tracker) ---
     const [inventoryTab, setInventoryTab] = useState('catalog'); // 'catalog' | 'allocations'
@@ -93,7 +105,8 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
     };
 
     useEffect(() => {
-        axios.get(`${BASE}/api/suppliers`).then(r => setSuppliers(r.data)).catch(() => {});
+        axios.get(`${BASE}/api/suppliers`).then(r => setSuppliers(Array.isArray(r.data) ? r.data : [])).catch(() => {});
+        axios.get(`${BASE}/api/admin/branches`).then(r => setBranches(Array.isArray(r.data) ? r.data : [])).catch(() => {});
     }, []);
 
     // ============ PRINT ============
@@ -324,6 +337,9 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                             ? `Size ${variant.shape || '-'}`
                             : '-',
                     quantity: qty,
+                    mainStock: variant.mainStock ?? qty,
+                    branchStock: variant.branchStock ?? 0,
+                    locationBreakdown: variant.locationBreakdown || [],
                     sellingPrice: variant.sellingPrice ?? 0,
                     acquisitionPrice: variant.acquisitionPrice ?? 0,
                     lowStockThreshold: threshold,
@@ -332,6 +348,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                     totalAdded: variant.totalAdded || 0,
                     totalSold: variant.totalSold || 0,
                     totalAdjusted: variant.totalAdjusted || 0,
+                    totalTransferred: variant.totalTransferred || 0,
                     consigned: variant.consigned,
                     defaultSupplier: variant.defaultSupplier,
                     dropdownName: isPaddle
@@ -351,6 +368,56 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
             result = result.filter(item => item.category === categoryFilter);
         }
 
+        if (locationFilter === 'MAIN') {
+            result = result.filter(item => (item.mainStock || 0) > 0).map(item => {
+                const q = item.mainStock || 0;
+                return {
+                    ...item,
+                    displayStock: q,
+                    stockLabel: 'admin unallocated',
+                    displayIsOutOfStock: q <= 0,
+                    displayIsLowStock: q > 0 && q <= item.lowStockThreshold
+                };
+            });
+        } else if (locationFilter === 'BRANCHES') {
+            result = result.filter(item => (item.branchStock || 0) > 0).map(item => {
+                const q = item.branchStock || 0;
+                return {
+                    ...item,
+                    displayStock: q,
+                    stockLabel: 'branches',
+                    displayIsOutOfStock: q <= 0,
+                    displayIsLowStock: q > 0 && q <= item.lowStockThreshold
+                };
+            });
+        } else if (locationFilter.startsWith('branch_')) {
+            const bId = Number(locationFilter.replace('branch_', ''));
+            const bObj = branches.find(b => Number(b.id) === bId);
+            const shortBranchName = bObj ? bObj.name.split(',')[0].trim() : 'branch';
+
+            result = result.map(item => {
+                const loc = (item.locationBreakdown || []).find(l => Number(l.branchId) === bId);
+                const q = loc ? (loc.quantity || 0) : 0;
+                return {
+                    ...item,
+                    displayStock: q,
+                    stockLabel: `${shortBranchName} stock`,
+                    displayIsOutOfStock: q <= 0,
+                    displayIsLowStock: q > 0 && q <= item.lowStockThreshold,
+                    hasBranchStock: q > 0
+                };
+            }).filter(item => item.hasBranchStock);
+        } else {
+            // Master Global Consolidated
+            result = result.map(item => ({
+                ...item,
+                displayStock: item.quantity,
+                stockLabel: 'master',
+                displayIsOutOfStock: item.isOutOfStock,
+                displayIsLowStock: item.isLowStock
+            }));
+        }
+
         if (tableFilter.trim()) {
             const q = tableFilter.toLowerCase();
             result = result.filter(item =>
@@ -363,15 +430,17 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
         }
 
         result.sort((a, b) => {
-            if (sortOrder === 'stock-asc') return a.quantity - b.quantity;
-            if (sortOrder === 'stock-desc') return b.quantity - a.quantity;
+            const aStock = a.displayStock ?? a.quantity ?? 0;
+            const bStock = b.displayStock ?? b.quantity ?? 0;
+            if (sortOrder === 'stock-asc') return aStock - bStock;
+            if (sortOrder === 'stock-desc') return bStock - aStock;
             if (sortOrder === 'name-asc') return a.dropdownName.localeCompare(b.dropdownName, undefined, { numeric: true });
             if (sortOrder === 'name-desc') return b.dropdownName.localeCompare(a.dropdownName, undefined, { numeric: true });
             return 0;
         });
 
         return result;
-    }, [tableFilter, sortOrder, categoryFilter, flattenedInventory]);
+    }, [tableFilter, sortOrder, categoryFilter, locationFilter, flattenedInventory, branches]);
 
     const visibleData = filteredInventory.slice(0, displayedCount);
 
@@ -551,6 +620,8 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
 
     const allocationStats = useMemo(() => {
         let totalUnits = 0;
+        let totalRemainingUnits = 0;
+        let totalSoldUnits = 0;
         let totalCost = 0;
         let totalPaid = 0;
         let overdueCount = 0;
@@ -559,14 +630,18 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
 
         allocations.forEach(a => {
             const q = parseInt(a.quantity || 0, 10);
+            const rem = parseInt(a.remainingQuantity != null ? a.remainingQuantity : a.quantity, 10) || 0;
+            const sold = parseInt(a.soldQuantity || 0, 10);
             const c = parseFloat(a.totalCost || 0);
             const p = parseFloat(a.amountPaid || 0);
             totalUnits += q;
+            totalRemainingUnits += rem;
+            totalSoldUnits += sold;
             totalCost += c;
             totalPaid += p;
 
-            const rem = c - p;
-            if (rem > 0 && a.deadline) {
+            const bal = c - p;
+            if (bal > 0 && a.deadline) {
                 const dl = new Date(a.deadline);
                 dl.setHours(0, 0, 0, 0);
                 if (dl < today) overdueCount++;
@@ -575,12 +650,29 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
 
         return {
             totalUnits,
+            totalRemainingUnits,
+            totalSoldUnits,
             totalCost,
             totalPaid,
             outstanding: Math.max(0, totalCost - totalPaid),
             overdueCount
         };
     }, [allocations]);
+
+    // Master Catalog Global Stock Tracking Stats
+    const masterStats = useMemo(() => {
+        let totalUnits = 0;
+        let warehouseUnits = 0;
+        let branchUnits = 0;
+        let totalSold = 0;
+        flattenedInventory.forEach(item => {
+            totalUnits += (item.quantity || 0);
+            warehouseUnits += (item.mainStock || 0);
+            branchUnits += (item.branchStock || 0);
+            totalSold += (item.totalSold || 0);
+        });
+        return { totalUnits, warehouseUnits, branchUnits, totalSold };
+    }, [flattenedInventory]);
 
     return (
         <div className="flex flex-col h-full relative">
@@ -620,14 +712,19 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                 <>
                     {/* HEADER */}
                     <div className="flex flex-wrap justify-between items-center gap-4 mb-4 shrink-0">
-                        <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
-                            <ClipboardList className="text-zinc-500" /> Manage Inventory
-                            {!loading && (
-                                <span className="ml-2 text-sm font-normal text-zinc-400 hidden sm:inline">
-                                    {tableFilter ? `${filteredInventory.length} of ${flattenedInventory.length}` : `${flattenedInventory.length} items`}
-                                </span>
-                            )}
-                        </h2>
+                        <div>
+                            <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
+                                <ClipboardList className="text-indigo-600" /> Master Inventory
+                                {!loading && (
+                                    <span className="ml-2 text-sm font-normal text-zinc-400 hidden sm:inline">
+                                        {tableFilter || locationFilter !== 'ALL' ? `${filteredInventory.length} of ${flattenedInventory.length}` : `${flattenedInventory.length} items`}
+                                    </span>
+                                )}
+                            </h2>
+                            <p className="text-xs text-zinc-500 font-medium mt-0.5">
+                                Central multi-branch catalog with live stock location tracking
+                            </p>
+                        </div>
                         <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
                             <button
                                 onClick={handlePrint}
@@ -642,6 +739,29 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                             >
                                 <PackagePlus size={16} /> Batch Add
                             </button>
+
+                            {/* LOCATION FILTER DROPDOWN */}
+                            <div className="relative flex-1 sm:flex-none">
+                                <select
+                                    value={locationFilter}
+                                    onChange={(e) => { setLocationFilter(e.target.value); setDisplayedCount(20); }}
+                                    className="pl-3 pr-8 py-2 text-sm border border-stone-300 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-white font-bold text-zinc-700 h-[38px] shadow-sm cursor-pointer"
+                                    title="Filter inventory by physical stock location"
+                                >
+                                    <option value="ALL">🌐 All Locations (Master Global View)</option>
+                                    <option value="MAIN">🏢 Admin (Unallocated Items)</option>
+                                    <optgroup label="Store Branches">
+                                        {branches
+                                            .filter(b => b.active !== false && !b.name?.toLowerCase().includes('warehouse'))
+                                            .map(b => (
+                                                <option key={b.id} value={`branch_${b.id}`}>
+                                                    🏬 {b.name}
+                                                </option>
+                                            ))}
+                                    </optgroup>
+                                </select>
+                            </div>
+
                             <div className="flex bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 mr-auto sm:mr-0 h-[38px] items-center">
                                 {['All', 'Paddles', 'Accessories', 'Shoes'].map(cat => (
                                     <button
@@ -689,6 +809,143 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                         </div>
                     </div>
 
+                    {/* LIVE INVENTORY TRACKER BANNER */}
+                    {locationFilter.startsWith('branch_') ? (() => {
+                        const bId = Number(locationFilter.replace('branch_', ''));
+                        const bObj = branches.find(b => Number(b.id) === bId);
+                        const branchUnits = filteredInventory.reduce((acc, row) => acc + (row.displayStock || 0), 0);
+                        const lowCount = filteredInventory.filter(row => row.displayIsLowStock).length;
+                        return (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 shrink-0">
+                                <div className="bg-gradient-to-br from-indigo-900 to-indigo-950 text-white p-3.5 rounded-xl border border-indigo-800 shadow-sm flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
+                                        <Store size={18} />
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-black uppercase text-indigo-300 block tracking-wider">Filtered Branch</span>
+                                        <div className="text-base font-black truncate max-w-[150px]">{bObj?.name || 'Store Branch'}</div>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                                        <Boxes size={18} />
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Stock at Branch</span>
+                                        <div className="text-lg font-black text-stone-900">{branchUnits} <span className="text-xs font-bold text-stone-500">units</span></div>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                    <div className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                                        <Layers size={18} />
+                                    </div>
+                                    <div>
+                                        <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Stocked Products</span>
+                                        <div className="text-lg font-black text-slate-800">{filteredInventory.length} <span className="text-xs font-bold text-stone-500">variants</span></div>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center justify-between gap-3">
+                                    <div>
+                                        <span className="text-[10px] font-black uppercase text-amber-600 block tracking-wider">Low Stock ({lowCount})</span>
+                                        <button
+                                            onClick={() => setLocationFilter('ALL')}
+                                            className="text-xs font-black text-indigo-600 hover:underline mt-0.5 cursor-pointer block"
+                                        >
+                                            ← View All Locations
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => setLocationFilter('ALL')}
+                                        className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })() : locationFilter === 'MAIN' ? (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 shrink-0">
+                            <div className="bg-stone-900 text-white p-3.5 rounded-xl border border-stone-800 shadow-sm flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
+                                    <Boxes size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Unallocated Storage</span>
+                                    <div className="text-base font-black truncate max-w-[150px]">Admin Holding</div>
+                                </div>
+                            </div>
+                            <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center shrink-0">
+                                    <Boxes size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Admin Stock</span>
+                                    <div className="text-lg font-black text-stone-900">{masterStats.warehouseUnits} <span className="text-xs font-bold text-stone-500">units</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                                    <Layers size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Catalog in Admin</span>
+                                    <div className="text-lg font-black text-slate-800">{filteredInventory.length} <span className="text-xs font-bold text-stone-500">items</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center justify-between gap-3">
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-emerald-600 block tracking-wider">Branch Stock</span>
+                                    <div className="text-lg font-black text-stone-900">{masterStats.branchUnits} <span className="text-xs font-bold text-stone-500">at branches</span></div>
+                                </div>
+                                <button
+                                    onClick={() => setLocationFilter('ALL')}
+                                    className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                                >
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 shrink-0">
+                            <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-stone-900 text-white flex items-center justify-center shrink-0">
+                                    <Boxes size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Total Central Stock</span>
+                                    <div className="text-lg font-black text-stone-900">{masterStats.totalUnits} <span className="text-xs font-bold text-stone-500">units</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                                    <Boxes size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Admin (Unallocated)</span>
+                                    <div className="text-lg font-black text-slate-800">{masterStats.warehouseUnits} <span className="text-xs font-bold text-stone-500">units</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-white p-3.5 rounded-xl border border-emerald-100 shadow-sm bg-gradient-to-br from-white to-emerald-50/20 flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                                    <Store size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-emerald-700 block tracking-wider">Branch Inventories</span>
+                                    <div className="text-lg font-black text-emerald-800">{masterStats.branchUnits} <span className="text-xs font-bold text-emerald-600">at branches</span></div>
+                                </div>
+                            </div>
+                            <div className="bg-white p-3.5 rounded-xl border border-stone-200 shadow-sm flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-stone-100 text-stone-600 flex items-center justify-center shrink-0">
+                                    <CheckCircle2 size={18} />
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black uppercase text-stone-400 block tracking-wider">Total Sold at POS</span>
+                                    <div className="text-lg font-black text-stone-900">{masterStats.totalSold} <span className="text-xs font-bold text-stone-500">units sold</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
             {/* TABLE */}
             <div
                 ref={tableContainerRef}
@@ -704,7 +961,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                             <th className="px-4 py-4">Supplier</th>
                             <th className="px-4 py-4">Type</th>
                             <th className="px-4 py-4 text-right">Price</th>
-                            <th className="px-4 py-4 text-right">Status / Tracking</th>
+                            <th className="px-4 py-4 text-right">Master Stock & Locations</th>
                             <th className="px-4 py-4 text-right">Actions</th>
                         </tr>
                     </thead>
@@ -719,9 +976,23 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                     ))}
                                 </tr>
                             ))
-                        ) : visibleData.length > 0 ? visibleData.map(row => (
-                            <tr key={row.variantId} className="hover:bg-stone-50 transition-colors group">
-                                <td className="px-4 py-4 font-mono font-medium text-zinc-600 text-xs">{row.sku}</td>
+                        ) : visibleData.length > 0 ? visibleData.map(row => {
+                            const isExpanded = Boolean(expandedRows[row.variantId]);
+                            return (
+                            <React.Fragment key={row.variantId}>
+                            <tr className={`hover:bg-stone-50 transition-colors group ${isExpanded ? 'bg-indigo-50/20' : ''}`}>
+                                <td className="px-4 py-4 font-mono font-medium text-zinc-600 text-xs">
+                                    <div className="flex items-center gap-1.5">
+                                        <button
+                                            onClick={() => toggleExpandRow(row.variantId)}
+                                            className="text-zinc-400 hover:text-indigo-600 transition-colors cursor-pointer"
+                                            title={isExpanded ? "Collapse branch breakdown" : "Expand branch breakdown"}
+                                        >
+                                            {isExpanded ? <ChevronUp size={14} className="text-indigo-600" /> : <ChevronDown size={14} />}
+                                        </button>
+                                        <span>{row.sku}</span>
+                                    </div>
+                                </td>
                                 <td className="px-4 py-4">
                                     <div className="font-bold text-zinc-900">{row.brand}</div>
                                     <div className="text-xs text-zinc-400">{row.name}</div>
@@ -743,7 +1014,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                 <td className="px-4 py-4">
                                     {row.category === 'Paddles' ? (
                                         row.consigned ? (
-                                            <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs font-bold">Consigned</span>
+                                             <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs font-bold">Consigned</span>
                                         ) : (
                                             <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold">Owned</span>
                                         )
@@ -756,17 +1027,70 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                 </td>
                                 <td className="px-4 py-4 text-right">
                                     <div className="flex flex-col items-end gap-1.5">
-                                        <span className={`text-base font-black leading-none flex items-center gap-2 ${row.isOutOfStock ? 'text-red-600' : row.isLowStock ? 'text-amber-600' : 'text-zinc-900'}`}>
-                                            {row.isLowStock && !row.isOutOfStock && <AlertTriangle size={14} className="text-amber-500" />}
-                                            {row.isOutOfStock && <PackageX size={14} className="text-red-500" />}
-                                            {row.quantity ?? 0} stock{(row.quantity ?? 0) !== 1 ? 's' : ''} left
-                                        </span>
-                                        <div className="flex items-center gap-1.5">
-                                            <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded" title="Total Sold">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`text-base font-black leading-none flex items-center gap-1.5 ${(row.displayIsOutOfStock ?? row.isOutOfStock) ? 'text-red-600' : (row.displayIsLowStock ?? row.isLowStock) ? 'text-amber-600' : 'text-zinc-900'}`}>
+                                                {(row.displayIsLowStock ?? row.isLowStock) && !(row.displayIsOutOfStock ?? row.isOutOfStock) && <AlertTriangle size={14} className="text-amber-500" />}
+                                                {(row.displayIsOutOfStock ?? row.isOutOfStock) && <PackageX size={14} className="text-red-500" />}
+                                                <span>{row.displayStock ?? row.quantity ?? 0}</span>
+                                                <span className="text-xs font-bold text-zinc-500">{row.stockLabel || 'master'}</span>
+                                            </span>
+                                            <button
+                                                onClick={() => toggleExpandRow(row.variantId)}
+                                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                                                    isExpanded
+                                                        ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
+                                                        : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/70'
+                                                }`}
+                                                title="Click to see where these stocks are physically located"
+                                            >
+                                                <MapPin size={11} />
+                                                <span>Locations</span>
+                                                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                            </button>
+                                        </div>
+
+                                        {/* Live Location Tracker Breakdown Pills */}
+                                        {row.locationBreakdown && row.locationBreakdown.length > 0 && (
+                                            <div className="flex flex-wrap items-center justify-end gap-1 max-w-[280px]">
+                                                {row.locationBreakdown.map((loc, idx) => {
+                                                    const isFilteredBranch = locationFilter.startsWith('branch_') && Number(locationFilter.replace('branch_', '')) === Number(loc.branchId);
+                                                    const isFilteredWarehouse = locationFilter === 'MAIN' && loc.isMain;
+                                                    const isHighlighted = isFilteredBranch || isFilteredWarehouse;
+
+                                                    return (
+                                                        <span
+                                                            key={idx}
+                                                            className={`inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                                                                isHighlighted
+                                                                    ? 'ring-2 ring-indigo-600 bg-indigo-50 text-indigo-900 font-black shadow-xs'
+                                                                    : loc.isMain
+                                                                        ? 'bg-slate-100 text-slate-800 border border-slate-200'
+                                                                        : loc.quantity > 0
+                                                                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                                                            : 'bg-stone-50 text-stone-400 border border-stone-200 opacity-60'
+                                                            }`}
+                                                            title={loc.isMain ? 'Physical stock in CPM Main holding pool (not yet allocated for sale)' : `Stock currently held at ${loc.branchName} (unsold)`}
+                                                        >
+                                                            {loc.isMain ? <Boxes size={10} className="text-slate-500 shrink-0" /> : <Store size={10} className="text-emerald-600 shrink-0" />}
+                                                            <span className="truncate max-w-[85px]">{loc.branchName}:</span>
+                                                            <span className="font-black">{loc.quantity}</span>
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+
+                                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                            <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded" title="Total Sold at POS">
                                                 {row.totalSold} sold
                                             </span>
+                                            {row.branchStock > 0 && (
+                                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded" title="Units currently distributed at branches awaiting sale">
+                                                    {row.branchStock} at branches
+                                                </span>
+                                            )}
                                             {row.totalAdjusted > 0 && (
-                                                <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded" title="Manual Deductions / Adjustments">
+                                                <span className="text-[10px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded" title="Manual Deductions / Adjustments (damaged/returned)">
                                                     -{row.totalAdjusted} adj
                                                 </span>
                                             )}
@@ -781,35 +1105,35 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                     <div className="flex items-center justify-end gap-0.5">
                                         <button
                                             onClick={() => openBatchModal(row)}
-                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors"
+                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
                                             title="View Stock Batches"
                                         >
                                             <Layers size={14} /> Batches
                                         </button>
                                         <button
                                             onClick={() => setPendingAuthAction({ type: 'ADD', payload: row })}
-                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors"
+                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors cursor-pointer"
                                             title="Add Stock"
                                         >
                                             <PlusCircle size={14} /> Add
                                         </button>
                                         <button
                                             onClick={() => setPendingAuthAction({ type: 'DEDUCT', payload: row })}
-                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                                             title="Deduct Stock"
                                         >
                                             <MinusCircle size={14} /> Deduct
                                         </button>
                                         <button
                                             onClick={() => setPendingAuthAction({ type: 'EDIT', payload: row })}
-                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors"
+                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-colors cursor-pointer"
                                             title="Edit Variant"
                                         >
                                             <Pencil size={14} />
                                         </button>
                                         <button
                                             onClick={() => setDeleteVariantConfirm(row)}
-                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                            className="inline-flex items-center gap-1 px-2 py-1.5 text-xs font-bold text-zinc-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                                             title="Delete Variant"
                                         >
                                             <Trash2 size={14} />
@@ -817,7 +1141,141 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                     </div>
                                 </td>
                             </tr>
-                        )) : (
+
+                            {/* EXPANDED ACCORDION ROW FOR STOCK LOCATIONS */}
+                            {isExpanded && (
+                                <tr className="bg-gradient-to-r from-indigo-50/40 via-white to-stone-50/60 border-y-2 border-indigo-200">
+                                    <td colSpan="8" className="p-4 sm:p-5">
+                                        <div className="bg-white border border-indigo-100 rounded-xl p-4 shadow-sm">
+                                            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-stone-100">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                                                        <MapPin size={16} />
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-sm font-black text-zinc-900 flex items-center gap-2">
+                                                            <span>{row.brand} {row.name}</span>
+                                                            {row.color !== '-' && <span className="text-xs font-semibold px-2 py-0.5 bg-stone-100 text-stone-700 rounded">{row.color}</span>}
+                                                            {row.variantDetails !== '-' && <span className="text-xs font-semibold px-2 py-0.5 bg-stone-100 text-stone-700 rounded">{row.variantDetails}</span>}
+                                                        </div>
+                                                        <div className="text-[11px] text-zinc-400 font-mono">SKU: {row.sku} · Category: {row.category}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <div className="text-right">
+                                                        <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider">Total Master Stock</span>
+                                                        <span className="text-lg font-black text-zinc-900">{row.quantity ?? 0} <span className="text-xs font-semibold text-zinc-500">units</span></span>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => setLocationModalVariant(row)}
+                                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-colors cursor-pointer"
+                                                    >
+                                                        <Layers size={13} /> Full Breakdown
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* VISUAL STOCK DISTRIBUTION PROGRESS BAR */}
+                                            {row.quantity > 0 && (
+                                                <div className="my-3.5">
+                                                    <div className="flex justify-between items-center text-[11px] font-bold text-zinc-500 mb-1.5">
+                                                        <span>Physical Stock Distribution</span>
+                                                        <span>{row.quantity} Units Total</span>
+                                                    </div>
+                                                    <div className="w-full h-3 bg-stone-100 rounded-full overflow-hidden flex shadow-inner">
+                                                        {(row.locationBreakdown || []).map((loc, lIdx) => {
+                                                            const pct = row.quantity > 0 ? (loc.quantity / row.quantity) * 100 : 0;
+                                                            if (pct <= 0) return null;
+                                                            const colors = loc.isMain
+                                                                ? 'bg-slate-700'
+                                                                : lIdx % 2 === 0 ? 'bg-emerald-500' : 'bg-indigo-500';
+                                                            return (
+                                                                <div
+                                                                    key={lIdx}
+                                                                    style={{ width: `${pct}%` }}
+                                                                    className={`${colors} h-full transition-all duration-300 relative group/bar`}
+                                                                    title={`${loc.branchName}: ${loc.quantity} units (${pct.toFixed(1)}%)`}
+                                                                />
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* BRANCH LOCATION CARDS GRID */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                                                {(row.locationBreakdown && row.locationBreakdown.length > 0 ? row.locationBreakdown : [
+                                                    { branchName: 'Holding (Unallocated)', quantity: row.mainStock || 0, isMain: true },
+                                                    { branchName: 'Branch Stores', quantity: row.branchStock || 0, isMain: false }
+                                                ]).map((loc, lIdx) => {
+                                                    const isMain = loc.isMain;
+                                                    const qty = loc.quantity || 0;
+                                                    const pct = row.quantity > 0 ? Math.round((qty / row.quantity) * 100) : 0;
+                                                    const isOut = qty <= 0;
+                                                    const isLow = !isOut && qty <= (row.lowStockThreshold || 5);
+
+                                                    return (
+                                                        <div
+                                                            key={lIdx}
+                                                            className={`rounded-xl border p-3.5 flex flex-col justify-between transition-all ${
+                                                                isMain
+                                                                    ? 'bg-slate-50/80 border-slate-200'
+                                                                    : qty > 0
+                                                                        ? 'bg-emerald-50/40 border-emerald-200'
+                                                                        : 'bg-stone-50 border-stone-200 opacity-60'
+                                                            }`}
+                                                        >
+                                                            <div className="flex items-start justify-between gap-2 mb-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                                                                        isMain ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
+                                                                    }`}>
+                                                                        {isMain ? <Boxes size={14} /> : <Store size={14} />}
+                                                                    </div>
+                                                                    <div>
+                                                                        <div className="text-xs font-black text-zinc-900 leading-tight">
+                                                                            {loc.branchName}
+                                                                        </div>
+                                                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                                                                            isMain ? 'text-slate-500' : 'text-emerald-700'
+                                                                        }`}>
+                                                                            {isMain ? 'Holding Pool (Unallocated)' : 'Branch Store'}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                                                    isOut
+                                                                        ? 'bg-red-100 text-red-700'
+                                                                        : isLow
+                                                                            ? 'bg-amber-100 text-amber-700'
+                                                                            : 'bg-emerald-100 text-emerald-800'
+                                                                }`}>
+                                                                    {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="flex items-baseline justify-between mt-2 pt-2 border-t border-stone-200/60">
+                                                                <div>
+                                                                    <span className="text-2xl font-black text-zinc-900 leading-none">{qty}</span>
+                                                                    <span className="text-xs font-bold text-zinc-500 ml-1">units</span>
+                                                                </div>
+                                                                {row.quantity > 0 && (
+                                                                    <span className="text-xs font-bold text-zinc-400">
+                                                                        {pct}% of master
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                            </React.Fragment>
+                            );
+                        }) : (
                             <tr>
                                 <td colSpan="8" className="px-6 py-16 text-center text-zinc-400">
                                     No items found.
@@ -838,7 +1296,15 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                             <div className="text-xl font-black text-stone-900 mt-1">
                                 {allocationStats.totalUnits} units
                             </div>
-                            <span className="text-[11px] text-stone-400 font-medium">To all branch inventories</span>
+                            <div className="flex items-center gap-1.5 mt-1 text-[11px] font-semibold flex-wrap">
+                                <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                    {allocationStats.totalSoldUnits} sold
+                                </span>
+                                <span className="text-stone-300">·</span>
+                                <span className="text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded">
+                                    {allocationStats.totalRemainingUnits} in branch stock
+                                </span>
+                            </div>
                         </div>
 
                         <div className="bg-white p-4 rounded-xl border border-stone-200 shadow-sm">
@@ -928,7 +1394,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                         <th className="px-4 py-3">Dispatched</th>
                                         <th className="px-4 py-3">Destination Branch</th>
                                         <th className="px-4 py-3">Product / SKU</th>
-                                        <th className="px-4 py-3">Units</th>
+                                        <th className="px-4 py-3">Units & Sales Tracker</th>
                                         <th className="px-4 py-3">Cost / Unit</th>
                                         <th className="px-4 py-3">Total Billed</th>
                                         <th className="px-4 py-3">Paid / Remaining</th>
@@ -962,8 +1428,34 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                     {a.notes && <div className="text-[10px] text-stone-400 italic">"{a.notes}"</div>}
                                                 </td>
 
-                                                <td className="px-4 py-3 font-black text-stone-900">
-                                                    {a.quantity} units
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="font-black text-stone-900">{a.quantity} units</span>
+                                                        {a.isAllSold ? (
+                                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-100 text-emerald-800">
+                                                                All Sold
+                                                            </span>
+                                                        ) : (a.soldQuantity || 0) > 0 ? (
+                                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-amber-100 text-amber-800">
+                                                                Partially Sold
+                                                            </span>
+                                                        ) : (
+                                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-blue-50 text-blue-700 border border-blue-200">
+                                                                In Branch Stock
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <div className="text-[10px] text-stone-500 mt-1 flex items-center gap-1 font-medium">
+                                                        <span className="text-emerald-700 font-bold">{a.soldQuantity || 0} sold</span>
+                                                        <span className="text-stone-300">•</span>
+                                                        <span className="text-indigo-700 font-bold">{a.remainingQuantity != null ? a.remainingQuantity : a.quantity} unsold</span>
+                                                    </div>
+                                                    <div className="w-24 bg-stone-100 rounded-full h-1 mt-1 overflow-hidden border border-stone-200">
+                                                        <div
+                                                            className="bg-emerald-500 h-1 rounded-full transition-all"
+                                                            style={{ width: `${Math.min(100, Math.round(((a.soldQuantity || 0) / (a.quantity || 1)) * 100))}%` }}
+                                                        />
+                                                    </div>
                                                 </td>
 
                                                 <td className="px-4 py-3 text-stone-600 font-semibold">
@@ -1296,6 +1788,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                             <thead className="bg-stone-100 text-xs uppercase text-zinc-500 font-bold sticky top-0">
                                                 <tr>
                                                     <th className="px-5 py-3">Date Received</th>
+                                                    <th className="px-5 py-3">Location</th>
                                                     <th className="px-5 py-3 text-center">Qty</th>
                                                     <th className="px-5 py-3 text-center">Remaining</th>
                                                     <th className="px-5 py-3 text-right">Cost</th>
@@ -1321,6 +1814,14 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                                     {i === 0 && b.remainingQuantity > 0 && (
                                                                         <span className="mt-0.5 inline-block text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">NEXT SELL</span>
                                                                     )}
+                                                                </td>
+                                                                <td className="px-5 py-3">
+                                                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                                                                        b.branch?.name ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'bg-stone-100 text-stone-700'
+                                                                    }`}>
+                                                                        <Boxes size={11} className="text-stone-400" />
+                                                                        {b.branch?.name || 'Holding (Unallocated)'}
+                                                                    </span>
                                                                 </td>
                                                                 <td className="px-5 py-3 text-center font-bold text-zinc-800">{b.quantity}</td>
                                                                 <td className="px-5 py-3 text-center">
@@ -1369,7 +1870,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                             {/* Per-unit status rows — shown when expanded */}
                                                             {isExpanded && (
                                                                 <tr key={`${b.id}-units`}>
-                                                                    <td colSpan={8} className="px-0 py-0 bg-slate-50 border-b border-slate-200">
+                                                                    <td colSpan={9} className="px-0 py-0 bg-slate-50 border-b border-slate-200">
                                                                         <div className="px-6 py-3 space-y-1.5">
                                                                             <div className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Batch #{i + 1} — Unit Breakdown</div>
                                                                             {/* Sold units */}
@@ -1455,6 +1956,150 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                         <div className="px-6 py-3 border-t border-stone-200 bg-stone-50 shrink-0 flex justify-between items-center text-xs text-zinc-500">
                             <span>{batches.length} batch{batches.length !== 1 ? 'es' : ''}{adjustments.length > 0 ? ` · ${adjustments.length} adjustment${adjustments.length !== 1 ? 's' : ''}` : ''} · FIFO order (oldest first = sold first)</span>
                             <button onClick={() => setBatchModal(null)} className="px-4 py-1.5 font-bold text-zinc-600 hover:bg-stone-200 rounded-lg">Close</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ===== DEDICATED STOCK LOCATIONS MODAL ===== */}
+            {locationModalVariant && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+                        {/* Header */}
+                        <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
+                                    <MapPin size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-black text-zinc-900">
+                                        {locationModalVariant.brand} {locationModalVariant.name}
+                                    </h3>
+                                    <div className="flex items-center gap-2 text-xs text-zinc-500">
+                                        <span className="font-mono">SKU: {locationModalVariant.sku}</span>
+                                        <span>·</span>
+                                        <span>{locationModalVariant.color !== '-' ? locationModalVariant.color : ''} {locationModalVariant.variantDetails !== '-' ? locationModalVariant.variantDetails : ''}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setLocationModalVariant(null)}
+                                className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-stone-200 rounded-lg transition-colors cursor-pointer"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6 space-y-5">
+                            {/* Master Overview Card */}
+                            <div className="grid grid-cols-3 gap-3 p-4 bg-stone-900 text-white rounded-xl">
+                                <div>
+                                    <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400 block">Master Total Stock</span>
+                                    <div className="text-2xl font-black">{locationModalVariant.quantity ?? 0} <span className="text-xs font-normal text-stone-400">units</span></div>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400 block">In Holding Pool</span>
+                                    <div className="text-2xl font-black text-slate-300">{locationModalVariant.mainStock ?? 0} <span className="text-xs font-normal text-stone-400">units</span></div>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] uppercase font-bold tracking-wider text-stone-400 block">At Branches</span>
+                                    <div className="text-2xl font-black text-emerald-400">{locationModalVariant.branchStock ?? 0} <span className="text-xs font-normal text-stone-400">units</span></div>
+                                </div>
+                            </div>
+
+                            {/* Progress bar */}
+                            {locationModalVariant.quantity > 0 && (
+                                <div>
+                                    <div className="flex justify-between items-center text-xs font-bold text-zinc-600 mb-1.5">
+                                        <span>Stock Proportion Across Locations</span>
+                                        <span>100% Accounted</span>
+                                    </div>
+                                    <div className="w-full h-3.5 bg-stone-100 rounded-full overflow-hidden flex shadow-inner">
+                                        {(locationModalVariant.locationBreakdown || []).map((loc, idx) => {
+                                            const pct = (loc.quantity / locationModalVariant.quantity) * 100;
+                                            if (pct <= 0) return null;
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    style={{ width: `${pct}%` }}
+                                                    className={`${loc.isMain ? 'bg-slate-700' : 'bg-emerald-500'} h-full transition-all`}
+                                                    title={`${loc.branchName}: ${loc.quantity} units (${pct.toFixed(1)}%)`}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Branches Table / Cards */}
+                            <div>
+                                <h4 className="text-xs font-black uppercase tracking-wider text-zinc-500 mb-2">Location Breakdown Details</h4>
+                                <div className="space-y-2">
+                                    {(locationModalVariant.locationBreakdown && locationModalVariant.locationBreakdown.length > 0
+                                        ? locationModalVariant.locationBreakdown
+                                        : [
+                                            { branchName: 'Holding (Unallocated)', quantity: locationModalVariant.mainStock || 0, isMain: true },
+                                            { branchName: 'Branch Stores', quantity: locationModalVariant.branchStock || 0, isMain: false }
+                                        ]
+                                    ).map((loc, idx) => {
+                                        const isMain = loc.isMain;
+                                        const qty = loc.quantity || 0;
+                                        const pct = locationModalVariant.quantity > 0 ? Math.round((qty / locationModalVariant.quantity) * 100) : 0;
+                                        const isOut = qty <= 0;
+
+                                        return (
+                                            <div
+                                                key={idx}
+                                                className={`flex items-center justify-between p-3.5 rounded-xl border ${
+                                                    isMain ? 'bg-slate-50 border-slate-200' : 'bg-white border-stone-200'
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                                                        isMain ? 'bg-slate-800 text-white' : 'bg-emerald-600 text-white'
+                                                    }`}>
+                                                        {isMain ? <Boxes size={16} /> : <Store size={16} />}
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-sm font-bold text-zinc-900">{loc.branchName}</div>
+                                                        <div className="text-xs text-zinc-400">
+                                                            {isMain ? 'CPM Main (Holding Pool — not for sale)' : loc.address || 'Branch location'}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-4">
+                                                    <div className="text-right">
+                                                        <div className={`text-xl font-black ${isOut ? 'text-zinc-400' : 'text-zinc-900'}`}>
+                                                            {qty} <span className="text-xs font-normal text-zinc-500">units</span>
+                                                        </div>
+                                                        {locationModalVariant.quantity > 0 && (
+                                                            <div className="text-[11px] text-zinc-400 font-medium">{pct}% of master</div>
+                                                        )}
+                                                    </div>
+                                                    <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                                                        isOut ? 'bg-stone-100 text-stone-500' : 'bg-emerald-100 text-emerald-800'
+                                                    }`}>
+                                                        {isOut ? 'Out of Stock' : 'In Stock'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="px-6 py-3 border-t border-stone-200 bg-stone-50 flex justify-between items-center text-xs">
+                            <span className="text-zinc-500">Live multi-branch inventory tracker</span>
+                            <button
+                                onClick={() => setLocationModalVariant(null)}
+                                className="px-4 py-2 font-bold bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg transition-colors cursor-pointer"
+                            >
+                                Done
+                            </button>
                         </div>
                     </div>
                 </div>

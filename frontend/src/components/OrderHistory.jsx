@@ -777,7 +777,7 @@ const OrderHistory = () => {
     // Unique payment methods in data — mirrors Analytics PaymentFilter options
     const paymentMethods = useMemo(() => {
         const set = new Set(transactions.map(t => t.paymentMethod).filter(Boolean));
-        set.add('BPI');
+        ['Cash', 'GCash', 'Maya', 'GoTyme', 'BDO', 'BPI', 'MBOS', 'Credit Card', 'QRPH'].forEach(m => set.add(m));
         return Array.from(set).sort();
     }, [transactions]);
 
@@ -968,10 +968,10 @@ const OrderHistory = () => {
                             onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
                             className="bg-transparent font-black text-zinc-800 focus:outline-none cursor-pointer"
                         >
-                            <option value="">All Branches</option>
-                            {branchList.map((b) => (
+                            <option value="">Consolidated (All Branches)</option>
+                            {branchList.filter(b => b.active !== false && !b.name?.toLowerCase().includes('warehouse')).map((b) => (
                                 <option key={b.id} value={b.id}>
-                                    {b.name}
+                                    🏬 {b.name}
                                 </option>
                             ))}
                         </select>

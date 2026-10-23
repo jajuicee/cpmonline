@@ -37,13 +37,13 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM StockBatch b WHERE b.variant.id = :variantId AND b.status = 'RECEIVED' " +
-           "AND (b.branch.id = :mainBranchId OR b.branch IS NULL) " +
+           "AND b.branch IS NULL " +
            "AND b.remainingQuantity > 0 ORDER BY b.consigned ASC, b.restockedAt ASC")
-    List<StockBatch> findReceivableForMainForUpdate(@Param("variantId") Long variantId, @Param("mainBranchId") Long mainBranchId);
+    List<StockBatch> findReceivableForHoldingForUpdate(@Param("variantId") Long variantId);
 
     @Query("SELECT COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.variant.id = :variantId AND s.status = 'RECEIVED' " +
-           "AND (s.branch.id = :mainBranchId OR s.branch IS NULL)")
-    Long sumRemainingQuantityForMain(@Param("variantId") Long variantId, @Param("mainBranchId") Long mainBranchId);
+           "AND s.branch IS NULL")
+    Long sumRemainingQuantityForHolding(@Param("variantId") Long variantId);
 
     // For refunding stock, we want the most recently RECEIVED batch (so we order by restockedAt DESC)
     List<StockBatch> findByVariantIdAndStatusOrderByRestockedAtDesc(Long variantId, String status);
@@ -68,6 +68,23 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
     @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' " +
            "AND (:branchId IS NULL OR s.branch.id = :branchId) GROUP BY s.variant.id")
     List<Object[]> sumRemainingQuantityByVariantIdAndBranch(@Param("branchId") Long branchId);
+
+    // Group remaining quantities by variant and location (branch id, branch name)
+    @Query("SELECT s.variant.id, b.id, b.name, COALESCE(SUM(s.remainingQuantity), 0L) " +
+           "FROM StockBatch s JOIN s.branch b " +
+           "WHERE s.status = 'RECEIVED' AND s.remainingQuantity > 0 " +
+           "GROUP BY s.variant.id, b.id, b.name")
+    List<Object[]> findRemainingStockByVariantAndBranch();
+
+    // Group remaining quantities for holding pool (branch IS NULL)
+    @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0L) " +
+           "FROM StockBatch s " +
+           "WHERE s.status = 'RECEIVED' AND s.branch IS NULL AND s.remainingQuantity > 0 " +
+           "GROUP BY s.variant.id")
+    List<Object[]> findRemainingHoldingStockByVariant();
+
+    @Query("SELECT COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' AND s.branch IS NULL")
+    Long sumTotalRemainingHoldingQuantity();
 
     // Single-variant version — used after add/deduct to return the refreshed count
     @Query("SELECT COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.variant.id = :variantId AND s.status = 'RECEIVED'")

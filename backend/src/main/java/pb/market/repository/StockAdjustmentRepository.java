@@ -24,6 +24,18 @@ public interface StockAdjustmentRepository extends JpaRepository<StockAdjustment
            "WHERE (:branchId IS NULL OR a.branch.id = :branchId) GROUP BY a.variant.id")
     List<Object[]> sumQuantityByVariantIdAndBranch(@Param("branchId") Long branchId);
 
+    // Total units transferred/allocated to branches
+    @Query("SELECT a.variant.id, COALESCE(SUM(a.quantity), 0L) FROM StockAdjustment a " +
+           "WHERE a.reason LIKE 'Transfer to%' OR a.reason LIKE 'Allocated to%' " +
+           "GROUP BY a.variant.id")
+    List<Object[]> sumTransferredQuantityByVariantId();
+
+    // Actual manual adjustments (excluding branch transfers)
+    @Query("SELECT a.variant.id, COALESCE(SUM(a.quantity), 0L) FROM StockAdjustment a " +
+           "WHERE a.reason NOT LIKE 'Transfer to%' AND a.reason NOT LIKE 'Allocated to%' " +
+           "AND (:branchId IS NULL OR a.branch.id = :branchId) GROUP BY a.variant.id")
+    List<Object[]> sumActualAdjustmentsByVariantIdAndBranch(@Param("branchId") Long branchId);
+
     @Query("SELECT a FROM StockAdjustment a WHERE a.variant.id = :variantId " +
            "AND (:branchId IS NULL OR a.branch.id = :branchId) ORDER BY a.adjustedAt DESC")
     List<StockAdjustment> findByVariantIdAndBranchOrderByAdjustedAtDesc(@Param("variantId") Long variantId, @Param("branchId") Long branchId);

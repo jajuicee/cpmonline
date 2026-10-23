@@ -15,9 +15,7 @@ import pb.market.repository.TransactionRepository;
 import pb.market.repository.VariantRepository;
 
 import java.math.BigDecimal;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -55,22 +53,23 @@ public class ProductService {
     }
 */
 
+    // Deprecated helpers kept for backwards compatibility with any remaining callers
     public Branch getMainBranch() {
         List<Branch> branches = branchRepository.findAll();
         return branches.stream()
                 .filter(b -> b.getName() != null && b.getName().toLowerCase().contains("main"))
                 .findFirst()
-                .orElseGet(() -> branches.stream()
-                        .filter(b -> b.getId() != null && b.getId() == 1L)
-                        .findFirst()
-                        .orElseGet(() -> branches.isEmpty() ? null : branches.get(0)));
+                .orElse(null);
     }
 
     public boolean isMainBranch(Branch b) {
-        if (b == null) return true;
-        if (b.getName() != null && b.getName().toLowerCase().contains("main")) return true;
-        Branch main = getMainBranch();
-        return main != null && b.getId() != null && b.getId().equals(main.getId());
+        if (b == null) return false;
+        return b.getName() != null && b.getName().toLowerCase().contains("main");
+    }
+
+    public boolean isMainBranch(String branchName) {
+        if (branchName == null || branchName.isBlank()) return false;
+        return branchName.toLowerCase().contains("main");
     }
 
     public java.util.Optional<Product> findById(Long id) {
@@ -117,17 +116,49 @@ public class ProductService {
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
-        // Current remaining stock per variant
+        // Current remaining stock per variant scoped to branch
         Map<Long, Long> stockMap = stockBatchRepository.sumRemainingQuantityByVariantIdAndBranch(branchId).stream()
                 .collect(Collectors.toMap(
                     row -> ((Number) row[0]).longValue(),
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
-        // Total units removed via manual adjustments
-        Map<Long, Long> adjustedMap = stockAdjustmentRepository.sumQuantityByVariantIdAndBranch(branchId).stream()
+        // Group remaining quantities by variant and branch
+        List<Object[]> branchLocationRows = stockBatchRepository.findRemainingStockByVariantAndBranch();
+        Map<String, Integer> branchVariantQtyMap = new HashMap<>();
+        for (Object[] row : branchLocationRows) {
+            Long vId = ((Number) row[0]).longValue();
+            if (row[1] != null) {
+                Long bId = ((Number) row[1]).longValue();
+                int qty = ((Number) row[3]).intValue();
+                branchVariantQtyMap.put(bId + "_" + vId, branchVariantQtyMap.getOrDefault(bId + "_" + vId, 0) + qty);
+            }
+        }
+
+        // Group remaining quantities for holding pool (branch IS NULL)
+        List<Object[]> holdingLocationRows = stockBatchRepository.findRemainingHoldingStockByVariant();
+        Map<Long, Integer> holdingVariantQtyMap = new HashMap<>();
+        for (Object[] row : holdingLocationRows) {
+            Long vId = ((Number) row[0]).longValue();
+            int qty = ((Number) row[1]).intValue();
+            holdingVariantQtyMap.put(vId, qty);
+        }
+
+        List<Branch> allBranches = branchRepository.findAll().stream()
+                .filter(b -> b.isActive() && (b.getName() == null || !b.getName().toLowerCase().contains("warehouse")))
+                .collect(Collectors.toList());
+
+        // Transferred quantities (units allocated/transferred to branches)
+        Map<Long, Long> transferredMap = stockAdjustmentRepository.sumTransferredQuantityByVariantId().stream()
                 .collect(Collectors.toMap(
-                    row -> ((Number) row[0]).longValue(), 
+                    row -> ((Number) row[0]).longValue(),
+                    row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
+                ));
+
+        // Actual manual adjustments (excluding branch transfers)
+        Map<Long, Long> actualAdjustedMap = stockAdjustmentRepository.sumActualAdjustmentsByVariantIdAndBranch(branchId).stream()
+                .collect(Collectors.toMap(
+                    row -> ((Number) row[0]).longValue(),
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
@@ -144,10 +175,49 @@ public class ProductService {
         for (Product product : products) {
             if (product.getVariants() != null) {
                 for (ProductVariant v : product.getVariants()) {
+                    int holdingStock = holdingVariantQtyMap.getOrDefault(v.getId(), 0);
+                    int branchStock = 0;
+                    List<Map<String, Object>> locs = new java.util.ArrayList<>();
+
+                    // 1. Admin placeholder for unallocated items
+                    Map<String, Object> holdingLoc = new LinkedHashMap<>();
+                    holdingLoc.put("branchId", null);
+                    holdingLoc.put("branchName", "Admin (Unallocated)");
+                    holdingLoc.put("address", "Admin Holding — Unallocated Stock");
+                    holdingLoc.put("quantity", holdingStock);
+                    holdingLoc.put("isMain", true);
+                    locs.add(holdingLoc);
+
+                    // 2. Retail branches
+                    for (Branch b : allBranches) {
+                        Long bId = b.getId();
+                        int qty = branchVariantQtyMap.getOrDefault(bId + "_" + v.getId(), 0);
+                        branchStock += qty;
+
+                        Map<String, Object> loc = new LinkedHashMap<>();
+                        loc.put("branchId", bId);
+                        loc.put("branchName", b.getName());
+                        loc.put("address", b.getAddress() != null ? b.getAddress() : "");
+                        loc.put("quantity", qty);
+                        loc.put("isMain", false);
+                        locs.add(loc);
+                    }
+
+                    v.setMainStock(holdingStock);
+                    v.setBranchStock(branchStock);
+                    v.setLocationBreakdown(locs);
+                    v.setTotalTransferred(transferredMap.getOrDefault(v.getId(), 0L));
+                    v.setTotalAdjusted(actualAdjustedMap.getOrDefault(v.getId(), 0L));
                     v.setTotalAdded(addedMap.getOrDefault(v.getId(), 0L));
                     v.setTotalSold(soldMap.getOrDefault(v.getId(), 0L));
-                    v.setTotalAdjusted(adjustedMap.getOrDefault(v.getId(), 0L));
-                    v.setStockQuantity(stockMap.getOrDefault(v.getId(), 0L).intValue());
+
+                    // When branchId is null (Admin / Master Catalog View): total units across all locations
+                    if (branchId == null) {
+                        v.setStockQuantity(holdingStock + branchStock);
+                    } else {
+                        v.setStockQuantity(stockMap.getOrDefault(v.getId(), 0L).intValue());
+                    }
+
                     if (branchId != null && branchPriceMap.containsKey(v.getId())) {
                         BigDecimal bp = branchPriceMap.get(v.getId());
                         v.setBranchSellingPrice(bp);
@@ -156,6 +226,22 @@ public class ProductService {
                     }
                 }
             }
+        }
+
+        // When scoped to a specific retail branch, strictly keep only products and variants
+        // related to that branch (in-stock, previously allocated, or sold at this branch).
+        if (branchId != null) {
+            for (Product product : products) {
+                if (product.getVariants() != null) {
+                    product.getVariants().removeIf(v -> {
+                        long bQty = stockMap.getOrDefault(v.getId(), 0L);
+                        long bAdded = addedMap.getOrDefault(v.getId(), 0L);
+                        long bSold = soldMap.getOrDefault(v.getId(), 0L);
+                        return bQty <= 0 && bAdded <= 0 && bSold <= 0;
+                    });
+                }
+            }
+            products.removeIf(p -> p.getVariants() == null || p.getVariants().isEmpty());
         }
 
         return products;
@@ -236,41 +322,39 @@ public class ProductService {
             branch = branchRepository.findById(branchId).orElse(null);
         }
 
-        Branch mainBranch = getMainBranch();
-        boolean isTransferFromMain = (branch != null && !isMainBranch(branch));
-        if (isTransferFromMain) {
-            Long mainBranchId = mainBranch != null ? mainBranch.getId() : 1L;
-            List<StockBatch> mainBatches = stockBatchRepository
-                    .findReceivableForMainForUpdate(variantId, mainBranchId);
-            int availableInMain = mainBatches.stream()
+        boolean isTransferFromHolding = (branch != null);
+        if (isTransferFromHolding) {
+            List<StockBatch> holdingBatches = stockBatchRepository
+                    .findReceivableForHoldingForUpdate(variantId);
+            int availableInHolding = holdingBatches.stream()
                     .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
                     .sum();
-            if (quantity > availableInMain) {
+            if (quantity > availableInHolding) {
                 String name = variant.getProduct() != null 
                     ? variant.getProduct().getBrandName() + " " + variant.getProduct().getModelName() + " (" + variant.getSku() + ")"
                     : "Variant #" + variantId;
                 throw new IllegalArgumentException("Cannot add to " + branch.getName() +
-                    ": Insufficient stock in Main Inventory for " + name + ". Available in Main: " + availableInMain + ", requested: " + quantity + ".");
+                    ": Insufficient stock in Holding Pool for " + name + ". Available in Holding Pool: " + availableInHolding + ", requested: " + quantity + ".");
             }
             int remainingToDeduct = quantity;
-            for (StockBatch mainBatch : mainBatches) {
+            for (StockBatch hBatch : holdingBatches) {
                 if (remainingToDeduct <= 0) break;
-                int available = mainBatch.getRemainingQuantity() != null ? mainBatch.getRemainingQuantity() : 0;
+                int available = hBatch.getRemainingQuantity() != null ? hBatch.getRemainingQuantity() : 0;
                 if (available >= remainingToDeduct) {
-                    mainBatch.setRemainingQuantity(available - remainingToDeduct);
+                    hBatch.setRemainingQuantity(available - remainingToDeduct);
                     remainingToDeduct = 0;
                 } else {
-                    mainBatch.setRemainingQuantity(0);
+                    hBatch.setRemainingQuantity(0);
                     remainingToDeduct -= available;
                 }
-                stockBatchRepository.save(mainBatch);
+                stockBatchRepository.save(hBatch);
             }
             StockAdjustment adj = new StockAdjustment();
             adj.setVariant(variant);
             adj.setQuantity(quantity);
             adj.setReason("Transfer to " + branch.getName());
             adj.setNote("Stock transfer to branch: " + branch.getName());
-            adj.setBranch(mainBranch);
+            adj.setBranch(null);
             stockAdjustmentRepository.save(adj);
         }
 
@@ -287,7 +371,12 @@ public class ProductService {
 
         // Flush then query the true remaining stock from the DB
         entityManager.flush();
-        Long currentStock = stockBatchRepository.sumRemainingQuantityForVariantAndBranch(variantId, branchId);
+        Long currentStock;
+        if (branchId != null) {
+            currentStock = stockBatchRepository.sumRemainingQuantityForVariantAndBranch(variantId, branchId);
+        } else {
+            currentStock = stockBatchRepository.sumRemainingQuantityForVariant(variantId);
+        }
         variant.setStockQuantity(currentStock != null ? currentStock.intValue() : 0);
         return variant;
     }
@@ -310,8 +399,12 @@ public class ProductService {
             branch = branchRepository.findById(branchId).orElse(null);
         }
 
-        List<StockBatch> batches = stockBatchRepository
-            .findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
+        List<StockBatch> batches;
+        if (branchId != null) {
+            batches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
+        } else {
+            batches = stockBatchRepository.findReceivableForHoldingForUpdate(variantId);
+        }
 
         int actualAvailable = batches.stream()
                 .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
@@ -346,7 +439,12 @@ public class ProductService {
 
         // Flush then query the true remaining stock from the DB
         entityManager.flush();
-        Long currentStock = stockBatchRepository.sumRemainingQuantityForVariantAndBranch(variantId, branchId);
+        Long currentStock;
+        if (branchId != null) {
+            currentStock = stockBatchRepository.sumRemainingQuantityForVariantAndBranch(variantId, branchId);
+        } else {
+            currentStock = stockBatchRepository.sumRemainingQuantityForVariant(variantId);
+        }
         variant.setStockQuantity(currentStock != null ? currentStock.intValue() : 0);
         return variant;
     }

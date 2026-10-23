@@ -211,7 +211,7 @@ const AddBranchStock = ({ products = [], refetchProducts }) => {
                 <div>
                     <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700">
                         <Store size={16} />
-                        <span>{user?.branchName || 'Branch Inventory'}</span>
+                        <span>{user?.branchName || (user?.role === 'ROLE_ADMIN' ? 'Admin Central Intake (Unallocated Holding)' : 'Branch Inventory')}</span>
                     </div>
                     <h1 className="text-2xl font-black text-stone-900 tracking-tight mt-1">
                         Add Inventory (Multi-Item Intake)

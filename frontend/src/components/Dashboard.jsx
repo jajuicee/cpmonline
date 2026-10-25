@@ -26,7 +26,8 @@ import {
     MapPin,
     User,
     DollarSign,
-    CreditCard
+    CreditCard,
+    Send
 } from 'lucide-react';
 
 // Main Page Components
@@ -52,6 +53,7 @@ const BranchDetail = lazy(() => import('./BranchDetail'));
 const BranchPrices = lazy(() => import('./BranchPrices'));
 const BranchDues = lazy(() => import('./BranchDues'));
 const BranchAnalytics = lazy(() => import('./BranchAnalytics'));
+const StockRequests = lazy(() => import('./StockRequests'));
 
 const Dashboard = () => {
     const location = useLocation();
@@ -110,6 +112,7 @@ const Dashboard = () => {
                 title: 'Inventory & Pricing',
                 items: [
                     { name: 'Current Inventory', path: '/inventory',        icon: Boxes },
+                    { name: 'Stock Requests',    path: '/stock-requests',   icon: Send },
                     { name: 'Set Prices',        path: '/branch-prices',    icon: DollarSign },
                     { name: 'Consignees',        path: '/consignees',       icon: Users },
                 ]
@@ -136,6 +139,7 @@ const Dashboard = () => {
                 items: [
                     { name: 'Add Products',     path: '/add-product',      icon: PackagePlus },
                     { name: 'View Inventory',   path: '/inventory',        icon: Boxes },
+                    { name: 'Stock Requests',   path: '/stock-requests',   icon: Send },
                     { name: 'Master Inventory', path: '/manage-inventory', icon: ClipboardList },
                     { name: 'Supplies',         path: '/supplies',         icon: Truck },
                     { name: 'Suppliers',        path: '/suppliers',        icon: Building2 },
@@ -368,6 +372,7 @@ const Dashboard = () => {
                                         <Route path="/add-product" element={<AddProduct onProductAdded={fetchProducts} />} />
                                         <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                         <Route path="/manage-inventory" element={<ManageInventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                        <Route path="/stock-requests" element={<StockRequests />} />
                                         <Route path="/supplies" element={<Supplies />} />
                                         <Route path="/suppliers" element={<Suppliers />} />
                                         <Route path="/branch-sales" element={<BranchSales />} />
@@ -384,6 +389,7 @@ const Dashboard = () => {
                                 ) : (
                                     <>
                                         <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                        <Route path="/stock-requests" element={<StockRequests />} />
                                         <Route path="/branch-prices" element={<BranchPrices products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/branch-dues" element={<BranchDues />} />
                                         <Route path="/branch-analytics" element={<BranchAnalytics />} />

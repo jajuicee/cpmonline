@@ -111,9 +111,29 @@ public class SchemaFix implements CommandLineRunner {
         safeExecute("DROP TABLE IF EXISTS warehouses CASCADE",
                 "Dropped warehouses table.");
 
-        // Ensure Cebu Main and other store branches are active
-        safeExecute("UPDATE branches SET active = true WHERE id = 1",
-                "Ensured Cebu Main branch is active.");
+        // Stock Requests tables (Branch stock requests from Master Storage)
+        safeExecute("CREATE TABLE IF NOT EXISTS stock_requests (" +
+                "id BIGSERIAL PRIMARY KEY, " +
+                "request_number VARCHAR(32) NOT NULL UNIQUE, " +
+                "branch_id BIGINT NOT NULL REFERENCES branches(id) ON DELETE CASCADE, " +
+                "requested_by_username VARCHAR(100) NOT NULL, " +
+                "status VARCHAR(20) NOT NULL DEFAULT 'PENDING', " +
+                "notes TEXT, " +
+                "admin_notes TEXT, " +
+                "admin_batch_id VARCHAR(64), " +
+                "created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP, " +
+                "reviewed_at TIMESTAMP WITHOUT TIME ZONE, " +
+                "reviewed_by_username VARCHAR(100)" +
+                ")", "Table 'stock_requests' verified/created.");
+
+        safeExecute("CREATE TABLE IF NOT EXISTS stock_request_items (" +
+                "id BIGSERIAL PRIMARY KEY, " +
+                "request_id BIGINT NOT NULL REFERENCES stock_requests(id) ON DELETE CASCADE, " +
+                "variant_id BIGINT NOT NULL REFERENCES product_variants(id) ON DELETE RESTRICT, " +
+                "requested_quantity INT NOT NULL CHECK (requested_quantity > 0), " +
+                "approved_quantity INT DEFAULT 0, " +
+                "status VARCHAR(20) NOT NULL DEFAULT 'PENDING'" +
+                ")", "Table 'stock_request_items' verified/created.");
 
         // Clear branch_id for ADMIN users (Admin holds unallocated stock)
         safeExecute("UPDATE users SET branch_id = NULL WHERE role = 'ADMIN'",

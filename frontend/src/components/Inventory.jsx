@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Package, X, Search, Building2, Boxes, Coins, AlertTriangle, PackageX, Tag, Store, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Package, X, Search, Building2, Boxes, Coins, AlertTriangle, PackageX, Tag, Store, RefreshCw, Send, PackagePlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const DEFAULT_LOW_STOCK_THRESHOLD = 5;
@@ -9,7 +10,8 @@ const formatPHP = (n) =>
 
 // Read-only current stock view. Stock additions and deductions are in "Manage Inventory".
 const Inventory = ({ products = [], loading = false, refetchProducts }) => {
-    const { user } = useAuth();
+    const { user, isBranch, isAdmin } = useAuth();
+    const navigate = useNavigate();
 
     // --- INFINITE SCROLL ---
     const [displayedCount, setDisplayedCount] = useState(15);
@@ -165,6 +167,28 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {isBranch && (
+                        <button
+                            onClick={() => navigate('/stock-requests?action=new')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95"
+                            title="Request inventory from Master Storage"
+                        >
+                            <PackagePlus size={13} />
+                            <span>Request Stock</span>
+                        </button>
+                    )}
+
+                    {isAdmin && (
+                        <button
+                            onClick={() => navigate('/stock-requests')}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 hover:bg-black text-white rounded-lg text-xs font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer active:scale-95"
+                            title="View and approve branch stock requests"
+                        >
+                            <Send size={13} />
+                            <span>Stock Requests</span>
+                        </button>
+                    )}
+
                     <button
                         onClick={() => refetchProducts && refetchProducts()}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-bold transition-colors cursor-pointer"

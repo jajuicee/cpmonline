@@ -737,18 +737,26 @@ public class TransactionController {
             return ResponseEntity.badRequest().body(Map.of("error", "Cannot return an already-paid item."));
         }
 
-        // Restore stock to the original batch
+        // Restore stock to Admin Holding (branch_id = NULL).
+        // Consigned items physically come back to the admin warehouse when returned.
         StockBatch batch = tx.getStockBatch();
         if (batch != null) {
             batch.setRemainingQuantity(batch.getRemainingQuantity() + 1);
+            // Move the batch to Admin Holding — returned consigned stock is no longer at Cebu Main
+            batch.setBranch(null);
             stockBatchRepository.save(batch);
         } else {
-            // Fallback: restore to any existing batch for this variant
+            // Fallback: find any holding batch (branch IS NULL) for this variant, or any batch
             ProductVariant variant = tx.getVariant();
-            List<StockBatch> batches = stockBatchRepository.findByVariantIdAndStatusReceivedForUpdate(variant.getId());
+            List<StockBatch> batches = stockBatchRepository.findReceivableForHoldingForUpdate(variant.getId());
+            if (batches.isEmpty()) {
+                // No holding batch exists — fall back to any received batch
+                batches = stockBatchRepository.findByVariantIdAndStatusReceivedForUpdate(variant.getId());
+            }
             if (!batches.isEmpty()) {
                 StockBatch target = batches.get(0);
                 target.setRemainingQuantity(target.getRemainingQuantity() + 1);
+                target.setBranch(null); // ensure it lands in Admin Holding
                 stockBatchRepository.save(target);
             }
         }
@@ -781,12 +789,17 @@ public class TransactionController {
         }
 
         for (Transaction tx : group) {
+            boolean isConsigned = Boolean.TRUE.equals(tx.getConsigned()) || "CONSIGNMENT".equals(tx.getTransactionType());
             // 1. Restore the stock batch accurately
             StockBatch batch = tx.getStockBatch();
             
             if (batch != null) {
                 // Ideal case: we know exactly which batch this unit came from.
                 batch.setRemainingQuantity(batch.getRemainingQuantity() + 1);
+                if (isConsigned) {
+                    // Consigned cancelled orders return to Admin Holding
+                    batch.setBranch(null);
+                }
                 stockBatchRepository.save(batch);
             } else {
                 // Fallback for legacy transactions (null stockBatch):
@@ -810,6 +823,9 @@ public class TransactionController {
                 }
                 if (targetBatch != null) {
                     targetBatch.setRemainingQuantity(targetBatch.getRemainingQuantity() + 1);
+                    if (isConsigned) {
+                        targetBatch.setBranch(null);
+                    }
                     stockBatchRepository.save(targetBatch);
                 }
             }

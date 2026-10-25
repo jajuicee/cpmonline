@@ -675,7 +675,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
     }, [flattenedInventory]);
 
     return (
-        <div className="flex flex-col h-full relative">
+        <div className="flex flex-col min-w-0 h-full relative">
             {/* TABS SWITCHER */}
             <div className="flex items-center gap-2 mb-4 shrink-0 border-b border-stone-200 pb-2">
                 <button
@@ -950,9 +950,9 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
             <div
                 ref={tableContainerRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-auto bg-white border border-stone-200 rounded-xl shadow-sm relative"
+                className="flex-1 min-w-0 overflow-auto bg-white border border-stone-200 rounded-xl shadow-sm relative"
             >
-                <table className="w-full text-left border-collapse">
+                <table className="w-full min-w-[950px] text-left border-collapse">
                     <thead className="sticky top-0 bg-stone-100 shadow-sm z-10 text-xs uppercase tracking-wider text-zinc-500 font-bold border-b border-stone-200">
                         <tr>
                             <th className="px-4 py-4">SKU</th>

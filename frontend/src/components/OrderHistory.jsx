@@ -795,7 +795,7 @@ const OrderHistory = () => {
 
     // ─────────────────────────────────────────────────────────────────────────
     return (
-        <div className="flex flex-col lg:h-full">
+        <div className="flex flex-col min-w-0 lg:h-full">
             <style>{`
                 @keyframes fadeSlideIn {
                     from { opacity: 0; transform: translateY(5px); }
@@ -896,7 +896,7 @@ const OrderHistory = () => {
             </div>
 
             {/* ROW 2 — Controls bar */}
-            <div className="flex items-center gap-2 mb-4 shrink-0 w-full">
+            <div className="flex flex-wrap items-center gap-2 mb-4 shrink-0 w-full">
 
                 {/* SEARCH BAR */}
                 <div className="relative">
@@ -985,7 +985,7 @@ const OrderHistory = () => {
                 )}
 
                 {/* Spacer */}
-                <div className="flex-1" />
+                <div className="hidden xl:flex flex-1" />
 
                 {/* TIME RANGE PRESETS */}
                 <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
@@ -1075,7 +1075,7 @@ const OrderHistory = () => {
 
             {/* TABLE */}
             <div className="flex-1 min-h-0 overflow-auto bg-white border border-stone-200 rounded-xl shadow-sm">
-                <table className="w-full text-left border-collapse">
+                <table className="w-full min-w-[900px] text-left border-collapse">
                     <thead className="sticky top-0 bg-stone-100 z-10 text-xs uppercase tracking-wider text-zinc-500 font-bold border-b border-stone-200 shadow-sm">
                         <tr>
                             <th className="px-5 py-4 w-10"></th>

@@ -162,7 +162,7 @@ const Dashboard = () => {
         <div className="flex h-screen bg-[#F8F7F4] font-sans text-brand-black overflow-hidden">
 
             {/* --- LEFT SIDEBAR (LUXURY OBSIDIAN & ANIMATED) --- */}
-            <aside className="w-68 bg-[#0d0e12] text-stone-300 flex flex-col shadow-[4px_0_30px_rgba(0,0,0,0.25)] z-20 border-r border-stone-800/80 shrink-0 select-none">
+            <aside className="w-64 bg-[#0d0e12] text-stone-300 flex flex-col shadow-[4px_0_30px_rgba(0,0,0,0.25)] z-20 border-r border-stone-800/80 shrink-0 select-none">
                 {/* Brand Header */}
                 <div className="p-6 text-center border-b border-stone-800/60 flex flex-col items-center relative overflow-hidden">
                     <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
@@ -268,8 +268,8 @@ const Dashboard = () => {
             </aside>
 
             {/* --- MAIN CONTENT AREA --- */}
-            <main className="flex-1 flex flex-col relative w-full h-full overflow-hidden bg-[#F8F7F4]">
-                <header className="bg-white/80 backdrop-blur-md border-b border-stone-200/80 px-8 py-3.5 flex flex-wrap justify-between items-center z-10 shadow-sm relative gap-4">
+            <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-hidden bg-[#F8F7F4]">
+                <header className="bg-white/80 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap justify-between items-center z-10 shadow-sm relative gap-4">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-stone-900 text-white rounded-xl shadow-sm">
                             <LayoutDashboard size={18} />
@@ -344,10 +344,10 @@ const Dashboard = () => {
                 </header>
 
                 {/* ── ROUTED VIEWS ── */}
-                <div className="flex-1 overflow-hidden bg-[#F7F6F0]">
+                <div className="flex-1 min-w-0 overflow-hidden bg-[#F7F6F0]">
                     <div
                         key={location.pathname + (currentBranchId || 'all')}
-                        className="h-full flex flex-col p-8 pb-12 w-full mx-auto min-h-0 overflow-y-auto custom-scrollbar"
+                        className="h-full flex flex-col p-4 sm:p-6 lg:p-8 pb-12 w-full min-w-0 mx-auto min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar"
                         style={{ animation: 'pageSlideIn 280ms cubic-bezier(0.16, 1, 0.3, 1) both' }}
                     >
                         <Suspense fallback={<div className="h-full w-full flex justify-center items-center p-12"><Loader2 className="w-8 h-8 animate-spin text-zinc-400" /></div>}>

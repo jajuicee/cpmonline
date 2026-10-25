@@ -459,7 +459,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const activeTotalUnits = completedReceipt?.totalUnits ?? totalUnits;
 
     return (
-        <div className="max-w-7xl mx-auto w-full space-y-5">
+        <div className="max-w-7xl mx-auto w-full min-w-0 space-y-5">
             {/* Print-only CSS: Replicated from original thermal printer settings (72mm thermal width) */}
             <style>{`
                 @media print {
@@ -623,10 +623,10 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             )}
 
             {/* ─── TWO-COLUMN WORKSPACE (7 cols : 5 cols) ─── */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pos-ticket-no-print">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start min-w-0 pos-ticket-no-print">
 
                 {/* ─── LEFT PANEL: 1. CATALOG PRODUCTS (7 cols) ─── */}
-                <div className="lg:col-span-7 bg-white p-5 rounded-2xl border border-stone-200 shadow-sm flex flex-col h-[740px]">
+                <div className="lg:col-span-7 bg-white p-4 sm:p-5 rounded-2xl border border-stone-200 shadow-sm flex flex-col min-w-0 h-[740px]">
                     <div className="space-y-3 mb-4 shrink-0">
                         <div className="flex items-center justify-between">
                             <label className="block text-xs font-black uppercase tracking-wider text-stone-700">
@@ -786,7 +786,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 </div>
 
                 {/* ─── RIGHT PANEL: 2. ORDER CART & CHECKOUT (5 cols) ─── */}
-                <div className="lg:col-span-5 bg-white p-5 rounded-2xl border border-stone-200 shadow-sm flex flex-col h-[740px]">
+                <div className="lg:col-span-5 bg-white p-4 sm:p-5 rounded-2xl border border-stone-200 shadow-sm flex flex-col min-w-0 h-[740px]">
                     <div className="flex items-center justify-between pb-3 border-b border-stone-100 shrink-0">
                         <div>
                             <label className="block text-xs font-black uppercase tracking-wider text-stone-700">
@@ -1009,7 +1009,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 <span className="block text-[10px] font-black uppercase tracking-wider text-stone-400 mb-1.5">
                                     Payment Method:
                                 </span>
-                                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-1.5">
                                     {PAYMENT_METHODS.map(m => {
                                         const isSelected = formData.paymentMethod === m.id;
                                         const Icon = m.icon;

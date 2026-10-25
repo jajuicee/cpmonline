@@ -159,10 +159,10 @@ const TabletLayout = () => {
             </header>
 
             {/* --- MAIN SCROLLABLE CONTENT AREA --- */}
-            <main className="flex-1 overflow-hidden relative pb-[85px] w-full">
+            <main className="flex-1 min-w-0 overflow-hidden relative pb-[85px] w-full">
                 <div
                     key={location.pathname}
-                    className="h-full w-full overflow-y-auto overflow-x-hidden p-4 sm:p-6"
+                    className="h-full w-full min-w-0 overflow-y-auto p-4 sm:p-6"
                     style={{ animation: 'pageSlideIn 250ms ease-out both' }}
                 >
                     <Suspense fallback={<div className="h-full w-full flex justify-center items-center p-12"><Loader2 className="w-8 h-8 animate-spin text-zinc-400" /></div>}>

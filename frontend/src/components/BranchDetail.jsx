@@ -979,7 +979,7 @@ const BranchDetail = () => {
     }
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto pb-12">
+        <div className="space-y-6 max-w-7xl mx-auto min-w-0 pb-12">
             {/* Top Navigation & Branch Title */}
             <div className="flex items-center gap-3">
                 <button
@@ -1068,7 +1068,7 @@ const BranchDetail = () => {
             </div>
 
             {/* Navigation Tabs */}
-            <div className="flex items-center gap-2 border-b border-stone-200 pb-3">
+            <div className="flex flex-wrap items-center gap-2 border-b border-stone-200 pb-3">
                 {[
                     { id: 'overview', label: 'Overview', icon: Building2 },
                     { id: 'allocate', label: 'Allocate Stock', icon: PackagePlus, highlight: true },
@@ -1988,8 +1988,8 @@ const BranchDetail = () => {
                         </div>
 
                         {/* Interactive Table */}
-                        <div className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-xs flex-1 min-h-[220px] overflow-y-auto custom-scrollbar">
-                            <table className="w-full text-left text-xs">
+                        <div className="border border-stone-200 rounded-2xl overflow-hidden bg-white shadow-xs flex-1 min-h-[220px] overflow-auto custom-scrollbar">
+                            <table className="w-full min-w-[750px] text-left text-xs">
                                 <thead className="bg-stone-50 text-[10px] font-black uppercase tracking-wider text-stone-500 border-b border-stone-200 sticky top-0 z-10">
                                     <tr>
                                         <th className="py-3 px-3 w-8 text-center">#</th>

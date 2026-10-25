@@ -106,7 +106,7 @@ const BranchesAdmin = () => {
     const retailBranches = branches;
 
     return (
-        <div className="max-w-6xl mx-auto w-full space-y-8">
+        <div className="max-w-6xl mx-auto w-full min-w-0 space-y-8">
             {/* Page Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-stone-200 shadow-sm">
                 <div>
@@ -167,7 +167,7 @@ const BranchesAdmin = () => {
                                 </button>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                                 {retailBranches.map((b) => (
                                     <div
                                         key={b.id}

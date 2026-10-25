@@ -23,6 +23,15 @@ const formatDate = (iso) => {
     });
 };
 
+const formatDateTwoLines = (iso) => {
+    if (!iso) return { date: '—', time: '' };
+    const d = new Date(iso);
+    return {
+        date: d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' }),
+        time: d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })
+    };
+};
+
 const formatCurrency = (val) =>
     val != null ? `₱${Number(val).toLocaleString('en-PH', { minimumFractionDigits: 2 })}` : '—';
 
@@ -210,7 +219,7 @@ const PaymentFilter = ({ transactions, value, onChange }) => {
         <div className="relative" ref={ref}>
             <button
                 onClick={() => setOpen(v => !v)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border shadow-sm text-xs font-bold"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border shadow-sm text-xs font-bold"
                 style={{
                     backgroundColor: isFiltered ? '#09090b' : '#ffffff',
                     color: isFiltered ? '#ffffff' : '#71717a',
@@ -864,12 +873,12 @@ const OrderHistory = () => {
             )}
 
             {/* ROW 1 — Title + count + period */}
-            <div className="flex items-baseline gap-3 mb-3 shrink-0">
-                <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2 shrink-0">
-                    <History className="text-zinc-500" size={22} /> Order History
+            <div className="flex items-baseline gap-2 mb-2 shrink-0">
+                <h2 className="text-xl font-black text-zinc-900 flex items-center gap-2 shrink-0">
+                    <History className="text-zinc-600" size={19} /> Order History
                 </h2>
                 <span
-                    className="text-base font-semibold text-zinc-500"
+                    className="text-xs font-bold text-zinc-500"
                     style={{
                         opacity: loading ? 0 : 1,
                         transition: 'opacity 300ms ease',
@@ -877,16 +886,16 @@ const OrderHistory = () => {
                 >
                     {isSearching ? (
                         <>
-                            <span className="text-zinc-700">{timelineItems.length} items</span>
-                            <span className="mx-2 text-zinc-300">·</span>
+                            <span className="text-zinc-800">{timelineItems.length} items</span>
+                            <span className="mx-1.5 text-zinc-300">·</span>
                             <span>Searching all dates for "{searchQuery.trim()}"</span>
                         </>
                     ) : (
                         <>
-                            <span className="text-zinc-700">{timelineItems.filter(i => i.type === 'ORDER').length} orders</span>
+                            <span className="text-zinc-800">{timelineItems.filter(i => i.type === 'ORDER').length} orders</span>
                             {periodLabel && (
                                 <>
-                                    <span className="mx-2 text-zinc-300">·</span>
+                                    <span className="mx-1.5 text-zinc-300">·</span>
                                     <span className="text-zinc-500">{periodLabel}</span>
                                 </>
                             )}
@@ -896,21 +905,21 @@ const OrderHistory = () => {
             </div>
 
             {/* ROW 2 — Controls bar */}
-            <div className="flex flex-wrap items-center gap-2 mb-4 shrink-0 w-full">
+            <div className="flex flex-wrap items-center gap-1.5 mb-3 shrink-0 w-full">
 
                 {/* SEARCH BAR */}
                 <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
                     <input
                         type="text"
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
                         placeholder="Search all orders…"
-                        className="pl-8 pr-8 py-2 text-xs font-medium rounded-lg border border-stone-300 bg-white shadow-sm text-zinc-700 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 focus:border-zinc-400 w-52"
+                        className="pl-7 pr-7 py-1.5 text-xs font-medium rounded-lg border border-stone-300 bg-white shadow-sm text-zinc-700 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 focus:border-zinc-400 w-44"
                         style={{ transition: 'border-color 200ms ease, box-shadow 200ms ease' }}
                     />
                     <span
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2"
+                        className="absolute right-2 top-1/2 -translate-y-1/2"
                         style={{
                             opacity: isSearching ? 1 : 0,
                             transform: `translateY(-50%) scale(${isSearching ? 1 : 0.6})`,
@@ -919,7 +928,7 @@ const OrderHistory = () => {
                         }}
                     >
                         <button onClick={() => setSearchQuery('')} className="text-zinc-400 hover:text-zinc-700 transition-colors duration-150">
-                            <X size={13} />
+                            <X size={12} />
                         </button>
                     </span>
                 </div>
@@ -933,7 +942,7 @@ const OrderHistory = () => {
                     <button
                         key={key}
                         onClick={() => setFilter(key)}
-                        className="px-4 py-1.5 rounded-full text-sm font-bold border"
+                        className="px-3 py-1 rounded-full text-xs font-bold border"
                         style={{
                             backgroundColor: filter === key ? '#09090b' : '#ffffff',
                             color: filter === key ? '#ffffff' : '#52525b',
@@ -943,7 +952,7 @@ const OrderHistory = () => {
                     >
                         {label}
                         <span
-                            className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full"
+                            className="ml-1 text-[11px] px-1.5 py-0.2 rounded-full"
                             style={{
                                 backgroundColor: filter === key ? 'rgba(255,255,255,0.2)' : '#f5f5f4',
                                 color: filter === key ? '#ffffff' : '#71717a',
@@ -960,15 +969,15 @@ const OrderHistory = () => {
 
                 {/* BRANCH FILTER */}
                 {isAdmin && (
-                    <div className="flex items-center gap-1.5 bg-white border border-stone-300 px-3 py-1.5 rounded-lg shadow-sm text-xs">
-                        <MapPin size={13} className="text-zinc-500" />
-                        <span className="font-bold text-zinc-500 uppercase tracking-wider text-[11px]">Branch:</span>
+                    <div className="flex items-center gap-1.5 bg-white border border-stone-300 px-2.5 py-1 rounded-lg shadow-sm text-xs">
+                        <MapPin size={12} className="text-zinc-500" />
+                        <span className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Branch:</span>
                         <select
                             value={selectedBranchId || ''}
                             onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
-                            className="bg-transparent font-black text-zinc-800 focus:outline-none cursor-pointer"
+                            className="bg-transparent font-black text-xs text-zinc-800 focus:outline-none cursor-pointer"
                         >
-                            <option value="">Consolidated (All Branches)</option>
+                            <option value="">Consolidated (All)</option>
                             {branchList.filter(b => b.active !== false && !b.name?.toLowerCase().includes('warehouse')).map((b) => (
                                 <option key={b.id} value={b.id}>
                                     🏬 {b.name}
@@ -978,8 +987,8 @@ const OrderHistory = () => {
                     </div>
                 )}
                 {isBranch && (
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-sm">
-                        <Store size={13} className="text-emerald-600" />
+                    <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-sm">
+                        <Store size={12} className="text-emerald-600" />
                         <span>{user?.branchName || 'Assigned Branch'}</span>
                     </div>
                 )}
@@ -988,12 +997,12 @@ const OrderHistory = () => {
                 <div className="hidden xl:flex flex-1" />
 
                 {/* TIME RANGE PRESETS */}
-                <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
+                <div className="flex bg-white border border-stone-200 rounded-lg p-0.5 shadow-sm">
                     {TIME_RANGES.map(range => (
                         <button
                             key={range.id}
                             onClick={() => handlePresetSelect(range.id)}
-                            className="px-3 py-1.5 text-xs font-bold rounded-md"
+                            className="px-2.5 py-1 text-xs font-bold rounded-md"
                             style={{
                                 backgroundColor: activePreset === range.id && !customRange ? '#09090b' : 'transparent',
                                 color: activePreset === range.id && !customRange ? '#ffffff' : '#71717a',
@@ -1011,7 +1020,7 @@ const OrderHistory = () => {
                     <button
                         onClick={() => setShowCalendar(v => !v)}
                         title="Select custom date range"
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border shadow-sm text-xs font-bold"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg border shadow-sm text-xs font-bold"
                         style={{
                             backgroundColor: customRange ? '#09090b' : '#ffffff',
                             color: customRange ? '#ffffff' : '#71717a',
@@ -1019,9 +1028,9 @@ const OrderHistory = () => {
                             transition: 'background-color 200ms ease, color 200ms ease, border-color 200ms ease',
                         }}
                     >
-                        <Calendar size={15} />
+                        <Calendar size={14} />
                         {customRange && (
-                            <span className="max-w-[160px] truncate">{customRange.label}</span>
+                            <span className="max-w-[140px] truncate">{customRange.label}</span>
                         )}
                     </button>
 
@@ -1053,51 +1062,51 @@ const OrderHistory = () => {
                 <button
                     onClick={fetchTransactions}
                     disabled={loading}
-                    className="p-2 rounded-lg border border-stone-300 bg-white text-zinc-500 disabled:opacity-40 shadow-sm"
+                    className="p-1.5 rounded-lg border border-stone-300 bg-white text-zinc-500 disabled:opacity-40 shadow-sm"
                     title="Refresh"
                     style={{ transition: 'background-color 150ms ease' }}
                     onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f5f5f4'}
                     onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}
                 >
-                    <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                 </button>
             </div>
 
             {/* ERROR BANNER */}
             {error && (
                 <div
-                    className="flex items-center gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm shrink-0"
+                    className="flex items-center gap-2 p-2.5 mb-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs shrink-0"
                     style={{ animation: 'fadeSlideIn 250ms ease' }}
                 >
-                    <AlertCircle size={16} /> {error}
+                    <AlertCircle size={15} /> {error}
                 </div>
             )}
 
             {/* TABLE */}
             <div className="flex-1 min-h-0 overflow-auto bg-white border border-stone-200 rounded-xl shadow-sm">
-                <table className="w-full min-w-[900px] text-left border-collapse">
-                    <thead className="sticky top-0 bg-stone-100 z-10 text-xs uppercase tracking-wider text-zinc-500 font-bold border-b border-stone-200 shadow-sm">
+                <table className="w-full min-w-[850px] text-left border-collapse">
+                    <thead className="sticky top-0 bg-stone-100 z-10 text-[11px] uppercase tracking-wider text-zinc-600 font-black border-b border-stone-200 shadow-sm">
                         <tr>
-                            <th className="px-5 py-4 w-10"></th>
-                            <th className="px-5 py-4">Order ID</th>
-                            <th className="px-5 py-4">Customer</th>
-                            <th className="px-5 py-4">Products</th>
-                            <th className="px-5 py-4">Payment</th>
-                            <th className="px-5 py-4">Status</th>
-                            <th className="px-5 py-4 text-right">Downpayment</th>
-                            <th className="px-5 py-4 text-right">Total Balance</th>
-                            <th className="px-5 py-4">Date</th>
-                            <th className="px-5 py-4">Action</th>
+                            <th className="px-2 py-2.5 w-8"></th>
+                            <th className="px-3 py-2.5">Order ID</th>
+                            <th className="px-3 py-2.5">Customer</th>
+                            <th className="px-3 py-2.5">Products</th>
+                            <th className="px-3 py-2.5">Payment</th>
+                            <th className="px-3 py-2.5">Status</th>
+                            <th className="px-3 py-2.5 text-right">Downpayment</th>
+                            <th className="px-3 py-2.5 text-right">Total Balance</th>
+                            <th className="px-3 py-2.5">Date</th>
+                            <th className="px-3 py-2.5 text-center">Action</th>
                         </tr>
                     </thead>
 
-                    <tbody key={tableKey} className="divide-y divide-stone-100 text-sm">
+                    <tbody key={tableKey} className="divide-y divide-stone-100 text-xs">
                         {loading ? (
-                            Array.from({ length: 5 }).map((_, i) => (
+                            Array.from({ length: 8 }).map((_, i) => (
                                 <tr key={i} className="animate-pulse">
                                     {Array.from({ length: 10 }).map((_, j) => (
-                                        <td key={j} className="px-5 py-4">
-                                            <div className="h-4 bg-stone-200 rounded w-3/4" />
+                                        <td key={j} className="px-3 py-2">
+                                            <div className="h-3.5 bg-stone-200 rounded w-3/4" />
                                         </td>
                                     ))}
                                 </tr>
@@ -1147,16 +1156,16 @@ const OrderHistory = () => {
                                             }}
                                         >
                                             {/* indent + icon */}
-                                            <td className="px-5 py-3">
+                                            <td className="px-2 py-2 text-center">
                                                 <span style={{ color: '#d97706', display: 'flex', justifyContent: 'center' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                                         <polyline points="15 10 20 15 15 20"/>
                                                         <path d="M4 4v7a4 4 0 0 0 4 4h12"/>
                                                     </svg>
                                                 </span>
                                             </td>
                                             {/* order id ref */}
-                                            <td className="px-5 py-3">
+                                            <td className="px-3 py-2">
                                                 <span
                                                     className="font-mono text-xs font-black"
                                                     style={{ color: '#92400e' }}
@@ -1171,13 +1180,13 @@ const OrderHistory = () => {
                                                 </span>
                                             </td>
                                             {/* customer */}
-                                            <td className="px-5 py-3 text-xs font-medium" style={{ color: '#78350f' }}>
+                                            <td className="px-3 py-2 text-xs font-medium" style={{ color: '#78350f' }}>
                                                 {group.customerName}
                                             </td>
                                             {/* description */}
-                                            <td className="px-5 py-3" colSpan={2}>
+                                            <td className="px-3 py-2" colSpan={2}>
                                                 <span
-                                                    className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-1 rounded"
+                                                    className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded"
                                                     style={{ backgroundColor: '#fde68a', color: '#78350f' }}
                                                 >
                                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1187,29 +1196,30 @@ const OrderHistory = () => {
                                                 </span>
                                             </td>
                                             {/* status badge */}
-                                            <td className="px-5 py-3">
+                                            <td className="px-3 py-2">
                                                 <span
-                                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] uppercase tracking-wider font-bold"
+                                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold"
                                                     style={{ backgroundColor: '#fde68a', color: '#78350f' }}
                                                 >
                                                     <CreditCard size={10} /> {log.paymentMethod || 'Unknown'}
                                                 </span>
                                             </td>
                                             {/* empty downpayment */}
-                                            <td className="px-5 py-3 text-right font-mono text-xs" style={{ color: '#92400e' }}>—</td>
+                                            <td className="px-3 py-2 text-right font-mono text-xs" style={{ color: '#92400e' }}>—</td>
                                             {/* amount */}
-                                            <td className="px-5 py-3 text-right font-mono">
-                                                <span className="font-black text-sm" style={{ color: '#16a34a' }}>+{formatCurrency(log.amount)}</span>
+                                            <td className="px-3 py-2 text-right font-mono">
+                                                <span className="font-black text-xs" style={{ color: '#16a34a' }}>+{formatCurrency(log.amount)}</span>
                                             </td>
                                             {/* payment date */}
-                                            <td className="px-5 py-3 text-xs font-medium" style={{ color: '#92400e' }}>
-                                                {formatDate(log.paymentDate)}
+                                            <td className="px-3 py-2 text-xs font-medium" style={{ color: '#92400e' }}>
+                                                <div>{formatDateTwoLines(log.paymentDate).date}</div>
+                                                <div className="text-[10px] opacity-75">{formatDateTwoLines(log.paymentDate).time}</div>
                                             </td>
-                                            <td className="px-5 py-3">
+                                            <td className="px-3 py-2 text-center">
                                                 <button
                                                     onClick={() => scrollToOrder(group.orderId)}
                                                     title="Jump to the original order row"
-                                                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md"
+                                                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md"
                                                     style={{
                                                         backgroundColor: '#fde68a',
                                                         color: '#78350f',
@@ -1252,10 +1262,11 @@ const OrderHistory = () => {
                                             onMouseLeave={e => e.currentTarget.style.backgroundColor = isUnfinished ? 'rgba(251,191,36,0.04)' : ''}
                                         >
                                             {/* Expand toggle */}
-                                            <td className="px-5 py-4">
+                                            <td className="px-2 py-2 text-center w-8">
                                                 <button
                                                     onClick={() => toggleExpand(group.orderId)}
-                                                    className="p-1 rounded bg-stone-100 text-zinc-400 hover:text-zinc-800 hover:bg-stone-200"
+                                                    className="p-1 rounded bg-stone-100 text-zinc-500 hover:text-zinc-900 hover:bg-stone-200"
+                                                    title="Toggle Item Details"
                                                     style={{ transition: 'background-color 150ms ease, color 150ms ease' }}
                                                 >
                                                     <span style={{
@@ -1263,138 +1274,212 @@ const OrderHistory = () => {
                                                         transition: 'transform 220ms ease',
                                                         transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
                                                     }}>
-                                                        <ChevronDown size={16} />
+                                                        <ChevronDown size={14} />
                                                     </span>
                                                 </button>
                                             </td>
 
                                             {/* Clickable Order ID — toggles payment log rows */}
                                             <td
-                                                className="px-5 py-4"
+                                                className="px-3 py-2"
                                                 style={{ cursor: group.paymentLogs.length > 0 ? 'pointer' : 'default' }}
                                                 onClick={() => group.paymentLogs.length > 0 && togglePayLogs(group.orderId)}
                                                 title={group.paymentLogs.length > 0 ? 'Click to show/hide payment logs' : undefined}
                                             >
-                                                <span className="font-mono text-xs font-bold text-zinc-500">
-                                                    #{group.displayId}
-                                                </span>
-                                                {group.branchName && (
-                                                    <span className="block text-[10px] font-black uppercase tracking-wider text-stone-500 mt-0.5">
-                                                        {group.branchName}
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <span className="font-mono text-xs font-black text-zinc-800 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200">
+                                                        #{group.displayId}
                                                     </span>
-                                                )}
-                                                {group.paymentLogs.length > 0 && (
-                                                    <span
-                                                        className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full align-middle"
-                                                        style={{
-                                                            backgroundColor: payLogsExpanded.has(group.orderId) ? '#dcfce7' : '#f1f5f9',
-                                                            color: payLogsExpanded.has(group.orderId) ? '#15803d' : '#64748b',
-                                                            border: `1px solid ${payLogsExpanded.has(group.orderId) ? '#86efac' : '#e2e8f0'}`,
-                                                            transition: 'background-color 150ms ease, color 150ms ease',
-                                                        }}
-                                                    >
-                                                        <CreditCard size={9} />
-                                                        {group.paymentLogs.length}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-5 py-4 font-medium text-zinc-800">
-                                                <div className="flex items-center gap-2">
-                                                    <span>{group.customerName}</span>
-                                                    {group.transactionType === 'CONSIGNMENT' && (
-                                                        <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">
-                                                            CONSIGNMENT
+                                                    {group.paymentLogs.length > 0 && (
+                                                        <span
+                                                            className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                                                            style={{
+                                                                backgroundColor: payLogsExpanded.has(group.orderId) ? '#dcfce7' : '#f1f5f9',
+                                                                color: payLogsExpanded.has(group.orderId) ? '#15803d' : '#475569',
+                                                                border: `1px solid ${payLogsExpanded.has(group.orderId) ? '#86efac' : '#cbd5e1'}`,
+                                                                transition: 'background-color 150ms ease, color 150ms ease',
+                                                            }}
+                                                        >
+                                                            <CreditCard size={9} />
+                                                            {group.paymentLogs.length}
                                                         </span>
                                                     )}
                                                 </div>
-                                            </td>
-                                            <td className="px-5 py-4 text-zinc-700">
-                                                {group.items.length === 1 && group.items[0].variant?.product ? (
-                                                    `${group.items[0].variant.product.brandName} ${group.items[0].variant.product.modelName} ${group.items[0].variant?.color ? `(${group.items[0].variant.color})` : ''}`
-                                                ) : (
-                                                    <span className="inline-flex items-center gap-1.5 font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                                                        <Package size={14} /> {group.items.length} items
+                                                {group.branchName && (
+                                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-stone-600 bg-stone-50 border border-stone-200/80 px-1.5 py-0.5 rounded mt-1 max-w-[150px] truncate" title={group.branchName}>
+                                                        🏬 {group.branchName}
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-5 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <span
-                                                        className="flex items-center gap-1 text-zinc-600 cursor-pointer hover:text-zinc-900 group"
-                                                        onClick={(e) => { e.stopPropagation(); setEditingPayment(editingPayment === group.orderId ? null : group.orderId); }}
-                                                        title="Click to change payment method"
-                                                    >
-                                                        <CreditCard size={13} />
-                                                        <span className="font-medium">{group.paymentMethod}</span>
-                                                        <Pen size={11} className="text-zinc-400 group-hover:text-zinc-600 transition-colors" />
-                                                    </span>
+                                            <td className="px-3 py-2 font-medium text-zinc-800">
+                                                <div className="flex flex-col gap-0.5">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="font-bold text-xs text-zinc-900">{group.customerName || 'Walk-in Customer'}</span>
+                                                        {group.transactionType === 'CONSIGNMENT' && (
+                                                            <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                                                                CONSIGNMENT
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                     {group.paymentDetails && (
-                                                        <button
+                                                        <div
                                                             onClick={(e) => { e.stopPropagation(); setNoteModal(group.paymentDetails); }}
-                                                            className="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-md transition-colors"
-                                                            title="View Note"
+                                                            className="text-[10px] text-blue-600 font-semibold flex items-center gap-1 cursor-pointer hover:underline max-w-[170px] truncate mt-0.5"
+                                                            title={`Note: ${group.paymentDetails}`}
                                                         >
-                                                            <MessageSquare size={14} />
-                                                        </button>
+                                                            <MessageSquare size={10} className="shrink-0" />
+                                                            <span className="truncate">{group.paymentDetails}</span>
+                                                        </div>
                                                     )}
                                                 </div>
                                             </td>
-                                            <td className="px-5 py-4">
+                                            <td className="px-3 py-2 text-zinc-700">
+                                                {group.items.length === 1 ? (
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <span className="font-bold text-xs text-zinc-900">
+                                                            {group.items[0]?.variant?.product
+                                                                ? `${group.items[0].variant.product.brandName} ${group.items[0].variant.product.modelName}`
+                                                                : '1 Item'}
+                                                        </span>
+                                                        {group.items[0]?.variant?.color && group.items[0]?.variant?.color !== 'N/A' && (
+                                                            <span className="text-[10px] font-semibold text-zinc-600 bg-stone-100 border border-stone-200 px-1.5 py-0.5 rounded">
+                                                                {group.items[0].variant.color}
+                                                            </span>
+                                                        )}
+                                                        {group.items[0]?.variant?.sku && (
+                                                            <span className="text-[10px] font-mono text-zinc-400">
+                                                                ({group.items[0].variant.sku})
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col gap-1 max-w-[340px]">
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="inline-flex items-center gap-1 font-black text-blue-700 bg-blue-50 border border-blue-200/80 px-1.5 py-0.5 rounded text-[10px] shrink-0">
+                                                                <Package size={11} /> {group.items.length} items
+                                                            </span>
+                                                            <span className="font-bold text-xs text-zinc-900 truncate">
+                                                                {group.items[0]?.variant?.product
+                                                                    ? `${group.items[0].variant.product.brandName} ${group.items[0].variant.product.modelName}${group.items[0].variant?.color && group.items[0].variant?.color !== 'N/A' ? ` (${group.items[0].variant.color})` : ''}`
+                                                                    : 'Item 1'}
+                                                            </span>
+                                                        </div>
+                                                        {/* List other items */}
+                                                        <div className="flex items-center gap-1 flex-wrap">
+                                                            {group.items.slice(1, 4).map((it, idx) => {
+                                                                const itName = it.variant?.product
+                                                                    ? `${it.variant.product.modelName || it.variant.product.brandName}${it.variant?.color && it.variant?.color !== 'N/A' ? ` (${it.variant.color})` : ''}`
+                                                                    : `Item #${it.id}`;
+                                                                return (
+                                                                    <span
+                                                                        key={idx}
+                                                                        className="inline-flex items-center text-[10px] font-medium text-stone-600 bg-stone-100 border border-stone-200/70 px-1.5 py-0.2 rounded truncate max-w-[150px]"
+                                                                        title={itName}
+                                                                    >
+                                                                        + {itName}
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                            {group.items.length > 4 && (
+                                                                <span className="text-[10px] font-bold text-blue-600 bg-blue-50/80 border border-blue-200/60 px-1.5 py-0.2 rounded">
+                                                                    +{group.items.length - 4} more
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </td>
+                                            <td className="px-3 py-2">
+                                                <div className="flex flex-col gap-0.5">
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span
+                                                            className="flex items-center gap-1 text-zinc-700 cursor-pointer hover:text-zinc-950 group"
+                                                            onClick={(e) => { e.stopPropagation(); setEditingPayment(editingPayment === group.orderId ? null : group.orderId); }}
+                                                            title="Click to change payment method"
+                                                        >
+                                                            <CreditCard size={12} className="text-zinc-500" />
+                                                            <span className="font-bold text-xs">{group.paymentMethod}</span>
+                                                            <Pen size={10} className="text-zinc-400 group-hover:text-zinc-600 transition-colors" />
+                                                        </span>
+                                                    </div>
+                                                    {group.paymentLogs.length > 0 && (
+                                                        <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                                            {group.paymentLogs.slice(0, 2).map((pl, pIdx) => (
+                                                                <span key={pIdx} className="text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-1.5 py-0.2 rounded">
+                                                                    {pl.paymentMethod || 'Pay'}: {formatCurrency(pl.amount)}
+                                                                </span>
+                                                            ))}
+                                                            {group.paymentLogs.length > 2 && (
+                                                                <span className="text-[10px] font-bold text-emerald-700">+{group.paymentLogs.length - 2}</span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-2">
                                                 {isUnfinished ? (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700">
-                                                        <Clock size={11} /> {group.status === 'UNPAID' ? 'Pending' : 'Partial'}
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+                                                        <Clock size={10} /> {group.status === 'UNPAID' ? 'Pending' : 'Partial'}
                                                     </span>
                                                 ) : (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold bg-green-100 text-green-700">
-                                                        <CheckCircle2 size={11} /> Completed
+                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                        <CheckCircle2 size={10} /> Completed
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-5 py-4 text-right font-mono text-zinc-600">
-                                                {group.totalDownpayment > 0 ? formatCurrency(group.totalDownpayment) : '—'}
+                                            <td className="px-3 py-2 text-right font-mono text-zinc-600">
+                                                {group.totalDownpayment > 0 ? (
+                                                    <span className="font-semibold text-zinc-700">{formatCurrency(group.totalDownpayment)}</span>
+                                                ) : (
+                                                    <span className="text-zinc-300">—</span>
+                                                )}
                                             </td>
-                                            <td className="px-5 py-4 text-right font-mono text-zinc-800">
-                                                <span className="font-black text-sm">{formatCurrency(group.totalPrice)}</span>
+                                            <td className="px-3 py-2 text-right font-mono text-zinc-800">
+                                                <span className="font-black text-xs text-zinc-900">{formatCurrency(group.totalPrice)}</span>
                                                 {isUnfinished && remaining > 0 && (
-                                                    <span className="block text-xs text-amber-600 font-bold mt-1">
+                                                    <span className="block text-[10px] text-amber-600 font-black">
                                                         {formatCurrency(remaining)} due
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-5 py-4 text-xs text-zinc-500">
-                                                {formatDate(group.date)}
+                                            <td className="px-3 py-2 text-xs">
+                                                <div className="font-bold text-zinc-700 leading-tight">
+                                                    {formatDateTwoLines(group.date).date}
+                                                </div>
+                                                <div className="text-[10px] text-zinc-400 font-semibold mt-0.5">
+                                                    {formatDateTwoLines(group.date).time}
+                                                </div>
                                             </td>
-                                            <td className="px-5 py-4">
-                                                <div className="flex flex-col gap-1.5">
+                                            <td className="px-3 py-2 text-center">
+                                                <div className="flex items-center justify-center gap-1 flex-wrap">
                                                     {isUnfinished && group.items.length === 1 && (
                                                         <button
                                                             onClick={() => handleCompleteItem(group.items[0])}
                                                             disabled={completing === group.items[0].id}
-                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg disabled:opacity-50 shadow-sm"
+                                                            className="flex items-center gap-1 px-2 py-1 text-white text-[11px] font-bold rounded-lg disabled:opacity-50 shadow-sm"
                                                             style={{ backgroundColor: '#16a34a', transition: 'background-color 150ms ease' }}
                                                             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#15803d'}
                                                             onMouseLeave={e => e.currentTarget.style.backgroundColor = '#16a34a'}
+                                                            title="Pay Balance"
                                                         >
-                                                            {completing === group.items[0].id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
-                                                            Pay Bal.
+                                                            {completing === group.items[0].id ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                                                            Pay
                                                         </button>
                                                     )}
                                                     {isUnfinished && group.items.length > 1 && (
-                                                        <div className="flex flex-col gap-1.5">
+                                                        <div className="flex items-center gap-1">
                                                             <button
                                                                 onClick={() => handleCompleteGroup(group)}
                                                                 disabled={completing === group.orderId}
-                                                                className="flex items-center justify-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg disabled:opacity-50 shadow-sm"
-                                                                style={{
-                                                                    backgroundColor: '#16a34a',
-                                                                    transition: 'background-color 150ms ease',
-                                                                }}
+                                                                className="flex items-center justify-center gap-1 px-2 py-1 text-white text-[11px] font-bold rounded-lg disabled:opacity-50 shadow-sm"
+                                                                style={{ backgroundColor: '#16a34a', transition: 'background-color 150ms ease' }}
                                                                 onMouseEnter={e => e.currentTarget.style.backgroundColor = '#15803d'}
                                                                 onMouseLeave={e => e.currentTarget.style.backgroundColor = '#16a34a'}
+                                                                title="All Paid"
                                                             >
                                                                 {completing === group.orderId
-                                                                    ? <Loader2 size={12} className="animate-spin" />
-                                                                    : <CheckCircle2 size={12} />}
+                                                                    ? <Loader2 size={11} className="animate-spin" />
+                                                                    : <CheckCircle2 size={11} />}
                                                                 All Paid
                                                             </button>
                                                             <button
@@ -1404,30 +1489,29 @@ const OrderHistory = () => {
                                                                     setPaymentAmountInput(remaining.toString());
                                                                 }}
                                                                 disabled={completing === group.orderId}
-                                                                className="flex items-center justify-center gap-1.5 px-3 py-1 text-blue-600 text-[11px] font-bold rounded-md hover:bg-blue-50 border border-blue-200 transition-colors"
+                                                                className="px-2 py-1 text-blue-600 text-[10px] font-bold rounded-md hover:bg-blue-50 border border-blue-200 transition-colors"
                                                             >
-                                                                Pay Amount
+                                                                Pay Amt
                                                             </button>
                                                         </div>
                                                     )}
-                                                    {
-                                                        <button
-                                                            onClick={() => handleCancelOrder(group)}
-                                                            disabled={cancelling === group.orderId}
-                                                            className="flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-lg disabled:opacity-50 shadow-sm"
-                                                            style={{
-                                                                backgroundColor: '#dc2626',
-                                                                transition: 'background-color 150ms ease',
-                                                            }}
-                                                            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#b91c1c'}
-                                                            onMouseLeave={e => e.currentTarget.style.backgroundColor = '#dc2626'}
-                                                        >
-                                                            {cancelling === group.orderId
-                                                                ? <Loader2 size={12} className="animate-spin" />
-                                                                : <XCircle size={12} />}
-                                                            Delete
-                                                        </button>
-                                                    }
+                                                    <button
+                                                        onClick={() => handleCancelOrder(group)}
+                                                        disabled={cancelling === group.orderId}
+                                                        className="flex items-center gap-1 px-2 py-1 text-white text-[11px] font-bold rounded-lg disabled:opacity-50 shadow-sm transition-colors"
+                                                        style={{
+                                                            backgroundColor: '#dc2626',
+                                                            transition: 'background-color 150ms ease',
+                                                        }}
+                                                        onMouseEnter={e => e.currentTarget.style.backgroundColor = '#b91c1c'}
+                                                        onMouseLeave={e => e.currentTarget.style.backgroundColor = '#dc2626'}
+                                                        title="Delete Order"
+                                                    >
+                                                        {cancelling === group.orderId
+                                                            ? <Loader2 size={11} className="animate-spin" />
+                                                            : <XCircle size={11} />}
+                                                        Delete
+                                                    </button>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1538,49 +1622,54 @@ const OrderHistory = () => {
                                                     onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f0fdf4'}
                                                     onMouseLeave={e => e.currentTarget.style.backgroundColor = 'rgba(240,253,244,0.3)'}
                                                 >
-                                                    <td className="px-5 py-4" />
-                                                    <td className="px-5 py-4 font-mono text-xs font-bold text-zinc-500">
+                                                    <td className="px-2 py-2" />
+                                                    <td className="px-3 py-2 font-mono text-xs font-bold text-zinc-500">
                                                         PAY-#{group.displayId}
                                                     </td>
-                                                    <td className="px-5 py-4 font-medium text-zinc-800">
-                                                        <div className="flex items-center gap-2">
-                                                            <span>{group.customerName}</span>
+                                                    <td className="px-3 py-2 font-medium text-zinc-800">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <span className="font-bold text-xs">{group.customerName}</span>
                                                             {group.transactionType === 'CONSIGNMENT' && (
-                                                                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">CONSIGNMENT</span>
+                                                                <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">CONSIGNMENT</span>
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="px-5 py-4">
-                                                        <div className="flex flex-col gap-1">
-                                                            <span className="text-green-700 font-bold">Payment towards Order</span>
+                                                    <td className="px-3 py-2">
+                                                        <div className="flex flex-col gap-0.5">
+                                                            <span className="text-green-700 font-bold text-xs">Payment towards Order</span>
                                                             {isLatePayment && (
                                                                 <span
-                                                                    className="inline-flex items-center gap-1 self-start px-2 py-0.5 rounded text-[10px] font-bold tracking-wide"
+                                                                    className="inline-flex items-center gap-1 self-start px-1.5 py-0.2 rounded text-[10px] font-bold tracking-wide"
                                                                     title={`Original order placed on ${orderDateLabel}`}
                                                                     style={{ backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}
                                                                 >
-                                                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
                                                                     Order from {orderDateLabel}
                                                                 </span>
                                                             )}
                                                         </div>
                                                     </td>
-                                                    <td className="px-5 py-4">
-                                                        <span className="inline-flex items-center gap-1 font-bold text-zinc-600 bg-stone-100 px-2 py-1 rounded">
-                                                            <CreditCard size={14} /> {log.paymentMethod || 'Unknown'}
+                                                    <td className="px-3 py-2">
+                                                        <span className="inline-flex items-center gap-1 font-bold text-xs text-zinc-700 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">
+                                                            <CreditCard size={12} className="text-zinc-500" /> {log.paymentMethod || 'Unknown'}
                                                         </span>
                                                     </td>
-                                                    <td className="px-5 py-4">
-                                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] uppercase tracking-wider font-bold bg-green-100 text-green-700">Payment Recv</span>
+                                                    <td className="px-3 py-2">
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-bold bg-green-100 text-green-700 border border-green-200">Payment Recv</span>
                                                     </td>
-                                                    <td className="px-5 py-4 text-right font-mono text-zinc-600">—</td>
-                                                    <td className="px-5 py-4 text-right font-mono">
-                                                        <span className="font-black text-sm text-green-600">+{formatCurrency(log.amount)}</span>
+                                                    <td className="px-3 py-2 text-right font-mono text-zinc-400">—</td>
+                                                    <td className="px-3 py-2 text-right font-mono">
+                                                        <span className="font-black text-xs text-green-600">+{formatCurrency(log.amount)}</span>
                                                     </td>
-                                                    <td className="px-5 py-4 text-xs text-zinc-500 font-medium">
-                                                        {formatDate(log.paymentDate)}
+                                                    <td className="px-3 py-2 text-xs text-zinc-500">
+                                                        <div className="font-bold text-zinc-700 leading-tight">
+                                                            {formatDateTwoLines(log.paymentDate).date}
+                                                        </div>
+                                                        <div className="text-[10px] text-zinc-400 font-semibold mt-0.5">
+                                                            {formatDateTwoLines(log.paymentDate).time}
+                                                        </div>
                                                     </td>
-                                                    <td className="px-5 py-4" />
+                                                    <td className="px-3 py-2" />
                                                 </tr>
                                             );
                                         })}

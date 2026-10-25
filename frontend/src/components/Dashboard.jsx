@@ -58,6 +58,13 @@ const Dashboard = () => {
     const navigate = useNavigate();
     const { user, logout, isAdmin, isBranch, selectedBranchId, setSelectedBranchId, currentBranchId } = useAuth();
 
+    // Display scale / fit density mode (defaults to 'fit' matching the 80% unzoom look)
+    const [fitScale, setFitScale] = useState(() => localStorage.getItem('cpm_fit_scale') || 'fit');
+    useEffect(() => {
+        document.documentElement.style.zoom = fitScale === 'fit' ? '82%' : '100%';
+        localStorage.setItem('cpm_fit_scale', fitScale);
+    }, [fitScale]);
+
     // Branch list for Admin dropdown
     const [branchList, setBranchList] = useState([]);
     useEffect(() => {
@@ -162,22 +169,22 @@ const Dashboard = () => {
         <div className="flex h-screen bg-[#F8F7F4] font-sans text-brand-black overflow-hidden">
 
             {/* --- LEFT SIDEBAR (LUXURY OBSIDIAN & ANIMATED) --- */}
-            <aside className="w-64 bg-[#0d0e12] text-stone-300 flex flex-col shadow-[4px_0_30px_rgba(0,0,0,0.25)] z-20 border-r border-stone-800/80 shrink-0 select-none">
+            <aside className="w-56 bg-[#0d0e12] text-stone-300 flex flex-col shadow-[4px_0_30px_rgba(0,0,0,0.25)] z-20 border-r border-stone-800/80 shrink-0 select-none">
                 {/* Brand Header */}
-                <div className="p-6 text-center border-b border-stone-800/60 flex flex-col items-center relative overflow-hidden">
+                <div className="p-3.5 text-center border-b border-stone-800/60 flex flex-col items-center relative overflow-hidden">
                     <div className="absolute -top-12 -left-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
                     
-                    <div className="relative group cursor-pointer mb-3">
+                    <div className="relative group cursor-pointer mb-2">
                         <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-emerald-500/30 to-amber-500/30 blur-sm group-hover:blur-md transition-all duration-300 opacity-70 group-hover:opacity-100" />
                         <img
                             src="/logo.png"
                             alt="Cebu Pickleball Market Logo"
                             onError={(e) => { e.target.style.display = 'none'; }}
-                            className="relative w-20 h-20 rounded-full brightness-105 shadow-xl border-2 border-stone-700/60 object-cover transform transition-transform duration-300 group-hover:scale-105"
+                            className="relative w-14 h-14 rounded-full brightness-105 shadow-xl border-2 border-stone-700/60 object-cover transform transition-transform duration-300 group-hover:scale-105"
                         />
                     </div>
 
-                    <h1 className="text-lg tracking-wider text-white uppercase leading-tight font-black">
+                    <h1 className="text-base tracking-wider text-white uppercase leading-tight font-black">
                         Cebu PICKLEBALL
                         <span className="block text-[11px] text-emerald-400 mt-0.5 tracking-widest font-black uppercase">
                             Market Online
@@ -185,12 +192,12 @@ const Dashboard = () => {
                     </h1>
 
                     {/* Role / Branch Tag with Live Glow Indicator */}
-                    <div className="mt-3 inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-stone-900/90 text-stone-200 border border-stone-800 shadow-inner">
+                    <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-stone-900/90 text-stone-200 border border-stone-800 shadow-inner">
                         <span className="relative flex h-2 w-2">
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                         </span>
-                        <span className="truncate max-w-[140px]">
+                        <span className="truncate max-w-[130px]">
                             {isBranch ? (user?.branchName || 'Assigned Branch') : 'Central Admin'}
                         </span>
                     </div>
@@ -269,25 +276,25 @@ const Dashboard = () => {
 
             {/* --- MAIN CONTENT AREA --- */}
             <main className="flex-1 min-w-0 flex flex-col relative h-full overflow-hidden bg-[#F8F7F4]">
-                <header className="bg-white/80 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap justify-between items-center z-10 shadow-sm relative gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-stone-900 text-white rounded-xl shadow-sm">
-                            <LayoutDashboard size={18} />
+                <header className="bg-white/80 backdrop-blur-md border-b border-stone-200/80 px-4 sm:px-6 py-2.5 flex flex-wrap justify-between items-center z-10 shadow-sm relative gap-3">
+                    <div className="flex items-center gap-2.5">
+                        <div className="p-1.5 bg-stone-900 text-white rounded-xl shadow-sm">
+                            <LayoutDashboard size={16} />
                         </div>
                         <div>
-                            <h2 className="text-xl font-black text-stone-900 tracking-tight leading-none">{currentTab}</h2>
-                            <p className="text-[11px] text-stone-400 font-bold mt-1 uppercase tracking-wider">
+                            <h2 className="text-lg font-black text-stone-900 tracking-tight leading-none">{currentTab}</h2>
+                            <p className="text-[10px] text-stone-400 font-bold mt-0.5 uppercase tracking-wider">
                                 {isBranch ? (user?.branchName || 'Branch Terminal') : 'Central Hub Management'}
                             </p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3.5 flex-wrap">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                         {/* Admin Branch Selector */}
                         {isAdmin && (
-                            <div className="flex items-center gap-2 bg-white border border-stone-200 px-3 py-1.5 rounded-xl shadow-sm hover:border-stone-300 transition-colors">
-                                <MapPin size={14} className="text-emerald-600" />
-                                <span className="text-xs font-black text-stone-400 uppercase tracking-wider text-[10px]">Filter Branch:</span>
+                            <div className="flex items-center gap-1.5 bg-white border border-stone-200 px-2.5 py-1 rounded-xl shadow-sm hover:border-stone-300 transition-colors">
+                                <MapPin size={13} className="text-emerald-600" />
+                                <span className="font-black text-stone-400 uppercase tracking-wider text-[10px]">Filter:</span>
                                 <select
                                     value={selectedBranchId || ''}
                                     onChange={(e) => setSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
@@ -307,35 +314,61 @@ const Dashboard = () => {
 
                         {/* Branch User Store Indicator */}
                         {isBranch && (
-                            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/80 px-3.5 py-1.5 rounded-xl text-xs font-black text-emerald-800 shadow-sm">
-                                <Store size={14} className="text-emerald-600" />
+                            <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-3 py-1 rounded-xl text-xs font-black text-emerald-800 shadow-sm">
+                                <Store size={13} className="text-emerald-600" />
                                 <span>{user?.branchName || 'Assigned Branch'}</span>
                             </div>
                         )}
 
                         {/* Sync Status Badges */}
                         {loadingProducts && (
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 border border-amber-200 rounded-full shadow-sm">
-                                <Loader2 size={12} className="animate-spin text-amber-600" />
-                                <span className="text-[11px] font-black uppercase tracking-wider text-amber-700">Syncing</span>
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-full shadow-sm">
+                                <Loader2 size={11} className="animate-spin text-amber-600" />
+                                <span className="text-[10px] font-black uppercase tracking-wider text-amber-700">Syncing</span>
                             </div>
                         )}
                         {!loadingProducts && wsConnected && (
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full shadow-sm">
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-full shadow-sm">
                                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
-                                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700">Live Sync</span>
+                                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Live Sync</span>
                             </div>
                         )}
                         {!loadingProducts && !wsConnected && (
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-rose-50 border border-rose-200 rounded-full shadow-sm">
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 border border-rose-200 rounded-full shadow-sm">
                                 <span className="w-2 h-2 bg-rose-500 rounded-full"></span>
-                                <span className="text-[11px] font-black uppercase tracking-wider text-rose-700">Offline</span>
+                                <span className="text-[10px] font-black uppercase tracking-wider text-rose-700">Offline</span>
                             </div>
                         )}
 
+                        {/* Display Scale Fit Toggle */}
+                        <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-inner">
+                            <button
+                                onClick={() => setFitScale('fit')}
+                                title="Fit View (matches 80% unzoomed density)"
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                    fitScale === 'fit'
+                                        ? 'bg-stone-900 text-white shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                Fit (80%)
+                            </button>
+                            <button
+                                onClick={() => setFitScale('100')}
+                                title="Standard 100% scale"
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                    fitScale === '100'
+                                        ? 'bg-stone-900 text-white shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                100%
+                            </button>
+                        </div>
+
                         <button
                             onClick={() => navigate('/tablet')}
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-sm active:scale-95 cursor-pointer"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-sm active:scale-95 cursor-pointer"
                         >
                             <Tablet size={13} />
                             Tablet Mode
@@ -347,7 +380,7 @@ const Dashboard = () => {
                 <div className="flex-1 min-w-0 overflow-hidden bg-[#F7F6F0]">
                     <div
                         key={location.pathname + (currentBranchId || 'all')}
-                        className="h-full flex flex-col p-4 sm:p-6 lg:p-8 pb-12 w-full min-w-0 mx-auto min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar"
+                        className="h-full flex flex-col p-2.5 sm:p-3.5 lg:p-4 pb-4 w-full min-w-0 mx-auto min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar"
                         style={{ animation: 'pageSlideIn 280ms cubic-bezier(0.16, 1, 0.3, 1) both' }}
                     >
                         <Suspense fallback={<div className="h-full w-full flex justify-center items-center p-12"><Loader2 className="w-8 h-8 animate-spin text-zinc-400" /></div>}>

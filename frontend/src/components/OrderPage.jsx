@@ -47,7 +47,8 @@ const newTicketNumber = () =>
     'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
 const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
-    const { user } = useAuth();
+    const { user, isBranch, currentBranchId } = useAuth();
+    const activeBranchId = isBranch ? user?.branchId : (currentBranchId || user?.branchId || 1);
     const [searchQuery, setSearchQuery]         = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [cart, setCart]                       = useState([]); // Array of { variant, qty, finalPrice, paymentStatus, downpayment }
@@ -123,7 +124,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
     const fetchConsignees = async () => {
         try {
-            const res = await axios.get(`/api/consignees`);
+            const params = activeBranchId ? { branchId: activeBranchId } : {};
+            const res = await axios.get(`/api/consignees`, { params });
             setConsignees(Array.isArray(res.data) ? res.data : []);
         } catch {
             console.error('Failed to fetch consignees');
@@ -133,13 +135,18 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     useEffect(() => {
         if (refetchProducts) refetchProducts();
         fetchConsignees();
-    }, []);
+    }, [activeBranchId]);
 
     const handleAddConsignee = async () => {
         if (!newConsigneeName.trim()) return;
         try {
-            const res = await axios.post(`/api/consignees`, { name: newConsigneeName });
-            setConsignees([...consignees, res.data]);
+            const payload = {
+                name: newConsigneeName.trim(),
+                branch: activeBranchId ? { id: activeBranchId } : undefined
+            };
+            const params = activeBranchId ? { branchId: activeBranchId } : {};
+            const res = await axios.post(`/api/consignees`, payload, { params });
+            setConsignees(prev => [...prev, res.data]);
             setSelectedConsigneeId(res.data.id.toString());
             setShowAddConsignee(false);
             setNewConsigneeName('');

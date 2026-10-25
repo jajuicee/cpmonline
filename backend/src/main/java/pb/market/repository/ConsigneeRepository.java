@@ -7,6 +7,6 @@ import pb.market.entity.Consignee;
 import java.util.List;
 
 public interface ConsigneeRepository extends JpaRepository<Consignee, Long> {
-    @Query("SELECT c FROM Consignee c WHERE (:branchId IS NULL OR c.branch.id = :branchId) ORDER BY c.name ASC")
+    @Query("SELECT c FROM Consignee c LEFT JOIN FETCH c.branch WHERE (:branchId IS NULL OR c.branch.id = :branchId) ORDER BY c.name ASC")
     List<Consignee> findAllByBranch(@Param("branchId") Long branchId);
 }

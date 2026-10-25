@@ -29,19 +29,58 @@ public class ConsigneeController {
     @PostMapping
     public Consignee addConsignee(
             @RequestBody Consignee consignee,
+            @RequestParam(required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (consignee.getName() == null || consignee.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Consignee name is required.");
         }
-        Long branchId = null;
+        Long resolvedBranchId = null;
         if (user != null && "BRANCH".equals(user.getRole())) {
-            branchId = user.getBranchId();
+            resolvedBranchId = user.getBranchId();
+        } else if (branchId != null) {
+            resolvedBranchId = branchId;
         } else if (consignee.getBranch() != null && consignee.getBranch().getId() != null) {
-            branchId = consignee.getBranch().getId();
+            resolvedBranchId = consignee.getBranch().getId();
         }
-        if (branchId != null) {
-            branchRepository.findById(branchId).ifPresent(consignee::setBranch);
+
+        if (resolvedBranchId == null) {
+            // Default to Cebu Main (branch_id = 1) if no branch specified
+            resolvedBranchId = 1L;
         }
+
+        branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+        return consigneeRepository.save(consignee);
+    }
+
+    @PutMapping("/{id}")
+    public Consignee updateConsignee(
+            @PathVariable("id") Long id,
+            @RequestBody Consignee updated,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+        Consignee consignee = consigneeRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Consignee not found."));
+        if (updated.getName() != null && !updated.getName().trim().isEmpty()) {
+            consignee.setName(updated.getName().trim());
+        }
+        if (updated.getContactInfo() != null) {
+            consignee.setContactInfo(updated.getContactInfo());
+        }
+
+        // Branch update: only admin or if not branch-restricted
+        Long resolvedBranchId = null;
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            resolvedBranchId = user.getBranchId();
+        } else if (branchId != null) {
+            resolvedBranchId = branchId;
+        } else if (updated.getBranch() != null && updated.getBranch().getId() != null) {
+            resolvedBranchId = updated.getBranch().getId();
+        }
+
+        if (resolvedBranchId != null) {
+            branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+        }
+
         return consigneeRepository.save(consignee);
     }
 

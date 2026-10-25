@@ -789,7 +789,7 @@ public class TransactionController {
         }
 
         for (Transaction tx : group) {
-            boolean isConsigned = Boolean.TRUE.equals(tx.getConsigned()) || "CONSIGNMENT".equals(tx.getTransactionType());
+            boolean isConsigned = tx.isConsigned() || "CONSIGNMENT".equals(tx.getTransactionType());
             // 1. Restore the stock batch accurately
             StockBatch batch = tx.getStockBatch();
             

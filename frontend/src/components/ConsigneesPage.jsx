@@ -2,20 +2,39 @@ import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import {
     Users, UserPlus, CreditCard, CheckCircle2, Loader2,
-    AlertCircle, X, Undo2, ChevronDown, Trash2, Search, Tag
+    AlertCircle, X, Undo2, ChevronDown, Trash2, Search, Tag,
+    Store, Lock, Phone, Filter
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 const BASE = '';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-PH', { style: 'currency', currency: 'PHP' });
 
 const ConsigneesPage = () => {
-    const [consignees, setConsignees] = useState([]);
+    const { user, isAdmin, isBranch, currentBranchId } = useAuth();
+
+    const [allConsignees, setAllConsignees] = useState([]);
     const [transactions, setTransactions] = useState([]);
+    const [branches, setBranches] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedConsigneeId, setSelectedConsigneeId] = useState(null);
+
+    // Branch filter state: 'ALL' or a specific branch ID (number)
+    // Branch user is strictly locked to their branch!
+    const [selectedBranchFilter, setSelectedBranchFilter] = useState(() => {
+        if (isBranch && user?.branchId) return user.branchId;
+        return currentBranchId || 'ALL';
+    });
+
     const [showAddConsignee, setShowAddConsignee] = useState(false);
     const [newConsigneeName, setNewConsigneeName] = useState('');
+    const [newConsigneeContact, setNewConsigneeContact] = useState('');
+    const [newConsigneeBranchId, setNewConsigneeBranchId] = useState(() => {
+        if (isBranch && user?.branchId) return user.branchId;
+        return (selectedBranchFilter !== 'ALL' && selectedBranchFilter) ? Number(selectedBranchFilter) : 1;
+    });
+
     const [deleteConfirm, setDeleteConfirm] = useState(null);
 
     // Payment states
@@ -46,15 +65,46 @@ const ConsigneesPage = () => {
         setTimeout(() => setToast(null), 3500);
     };
 
+    // Synchronize branch filter when auth context changes
+    useEffect(() => {
+        if (isBranch && user?.branchId) {
+            setSelectedBranchFilter(user.branchId);
+            setNewConsigneeBranchId(user.branchId);
+        } else if (currentBranchId && currentBranchId !== 'ALL') {
+            setSelectedBranchFilter(currentBranchId);
+            setNewConsigneeBranchId(Number(currentBranchId));
+        }
+    }, [isBranch, user?.branchId, currentBranchId]);
+
+    // Fetch active branches
+    const fetchBranches = async () => {
+        try {
+            const res = await axios.get(`${BASE}/api/branches`);
+            if (Array.isArray(res.data) && res.data.length > 0) {
+                setBranches(res.data);
+            }
+        } catch {
+            try {
+                const res2 = await axios.get(`${BASE}/api/admin/branches`);
+                if (Array.isArray(res2.data)) setBranches(res2.data);
+            } catch {
+                setBranches([
+                    { id: 1, name: 'Cebu Main' },
+                    { id: 2, name: 'BAYABAS, BASAK SAN NICHOLAS' }
+                ]);
+            }
+        }
+    };
+
     const fetchData = async () => {
         setLoading(true);
         try {
             const [consRes, txRes] = await Promise.all([
                 axios.get(`${BASE}/api/consignees`),
-                axios.get(`${BASE}/api/transactions/consignment`), // consignment-only endpoint
+                axios.get(`${BASE}/api/transactions/consignment`),
             ]);
-            setConsignees(consRes.data);
-            setTransactions(txRes.data);
+            setAllConsignees(Array.isArray(consRes.data) ? consRes.data : []);
+            setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
         } catch {
             showToast('Failed to load data.', 'error');
         } finally {
@@ -62,26 +112,84 @@ const ConsigneesPage = () => {
         }
     };
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => {
+        fetchBranches();
+        fetchData();
+    }, []);
+
+    // ── Branch Counts for Filter Tabs ──────────────────────────────────────────
+    const branchCounts = useMemo(() => {
+        const counts = { ALL: allConsignees.length };
+        branches.forEach(b => { counts[b.id] = 0; });
+        allConsignees.forEach(c => {
+            const bid = c.branch?.id || 1;
+            counts[bid] = (counts[bid] || 0) + 1;
+        });
+        return counts;
+    }, [allConsignees, branches]);
+
+    // ── Strictly Scoped Consignees per selected branch ──────────────────────────
+    const visibleConsignees = useMemo(() => {
+        if (isBranch) {
+            // Backend already restricts /api/consignees, but reinforce on client:
+            return allConsignees.filter(c => !user?.branchId || (c.branch?.id || 1) === user.branchId);
+        }
+        if (selectedBranchFilter === 'ALL') {
+            return allConsignees;
+        }
+        return allConsignees.filter(c => (c.branch?.id || 1) === Number(selectedBranchFilter));
+    }, [allConsignees, selectedBranchFilter, isBranch, user?.branchId]);
+
+    // ── Strictly Scoped Transactions per selected branch ───────────────────────
+    const visibleTransactions = useMemo(() => {
+        if (isBranch) {
+            return transactions.filter(t => !user?.branchId || (t.branch?.id || 1) === user.branchId);
+        }
+        if (selectedBranchFilter === 'ALL') {
+            return transactions;
+        }
+        return transactions.filter(t => (t.branch?.id || 1) === Number(selectedBranchFilter));
+    }, [transactions, selectedBranchFilter, isBranch, user?.branchId]);
+
+    // Keep selectedConsigneeId valid when filtering
+    useEffect(() => {
+        if (visibleConsignees.length > 0) {
+            if (!selectedConsigneeId || !visibleConsignees.some(c => c.id === selectedConsigneeId)) {
+                setSelectedConsigneeId(visibleConsignees[0].id);
+            }
+        } else {
+            setSelectedConsigneeId(null);
+        }
+    }, [visibleConsignees]);
 
     const handleAddConsignee = async (e) => {
         e.preventDefault();
         if (!newConsigneeName.trim()) return;
         try {
-            const res = await axios.post(`${BASE}/api/consignees`, { name: newConsigneeName });
-            setConsignees(prev => [...prev, res.data]);
+            const targetBranchId = isBranch ? user?.branchId : newConsigneeBranchId;
+            const payload = {
+                name: newConsigneeName.trim(),
+                contactInfo: newConsigneeContact.trim() || undefined,
+                branch: targetBranchId ? { id: Number(targetBranchId) } : undefined
+            };
+            const res = await axios.post(`${BASE}/api/consignees`, payload, {
+                params: targetBranchId ? { branchId: targetBranchId } : {}
+            });
+            setAllConsignees(prev => [...prev, res.data]);
             setSelectedConsigneeId(res.data.id);
             setShowAddConsignee(false);
             setNewConsigneeName('');
-        } catch {
-            showToast('Failed to add consignee.', 'error');
+            setNewConsigneeContact('');
+            showToast(`Consignee added to ${res.data.branch?.name || 'branch'}!`, 'success');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to add consignee.', 'error');
         }
     };
 
     // ── Grouping ──────────────────────────────────────────────────────────────
     const groupedTransactions = useMemo(() => {
         if (!selectedConsigneeId) return [];
-        const consigneeTxs = transactions.filter(t =>
+        const consigneeTxs = visibleTransactions.filter(t =>
             t.consignee?.id === selectedConsigneeId
         );
 
@@ -113,37 +221,39 @@ const ConsigneesPage = () => {
         });
 
         return sorted;
-    }, [transactions, selectedConsigneeId]);
+    }, [visibleTransactions, selectedConsigneeId]);
 
     // ── Sorted consignee list ─────────────────────────────────────────────────
     const sortedConsignees = useMemo(() => {
-        // Build a map of consignee id → latest transaction date for date-based sorting
         const latestDate = {};
-        transactions.forEach(t => {
+        visibleTransactions.forEach(t => {
             const cid = t.consignee?.id;
             if (!cid) return;
             const d = new Date(t.transactionDate);
             if (!latestDate[cid] || d > latestDate[cid]) latestDate[cid] = d;
         });
 
-        return [...consignees].sort((a, b) => {
+        return [...visibleConsignees].sort((a, b) => {
             if (consigneeSort === 'NAME') {
                 return a.name.localeCompare(b.name, 'en', { sensitivity: 'base' });
             }
-            // Date sort — consignees with no activity fall to the bottom
             const da = latestDate[a.id] || new Date(0);
             const db = latestDate[b.id] || new Date(0);
             return consigneeSort === 'DATE_DESC' ? db - da : da - db;
         });
-    }, [consignees, transactions, consigneeSort]);
+    }, [visibleConsignees, visibleTransactions, consigneeSort]);
 
-    // ── Global item search across ALL consignees ────────────────────────────────────
+    // ── Global item search across visible consignees ───────────────────────────
     const searchResults = useMemo(() => {
         const q = itemSearch.trim().toLowerCase();
         if (!q) return [];
         const consigneeMap = {};
-        consignees.forEach(c => { consigneeMap[c.id] = c.name; });
-        const matched = transactions.filter(t => {
+        const branchMap = {};
+        allConsignees.forEach(c => {
+            consigneeMap[c.id] = c.name;
+            branchMap[c.id] = c.branch?.name || (c.branch?.id === 2 ? 'BAYABAS' : 'Cebu Main');
+        });
+        const matched = visibleTransactions.filter(t => {
             const brand = t.variant?.product?.brandName || '';
             const model = t.variant?.product?.modelName || '';
             const color = t.variant?.color || '';
@@ -159,6 +269,7 @@ const ConsigneesPage = () => {
                     date: new Date(t.transactionDate),
                     consigneeId: t.consignee?.id,
                     consigneeName: consigneeMap[t.consignee?.id] || 'Unknown',
+                    branchName: branchMap[t.consignee?.id] || t.branch?.name || '',
                     items: [],
                 };
             }
@@ -177,7 +288,7 @@ const ConsigneesPage = () => {
                 status: g.items.some(i => i.status === 'UNPAID') ? 'UNPAID'
                       : g.items.some(i => i.status === 'PARTIAL') ? 'PARTIAL' : 'FULL',
             }));
-    }, [itemSearch, transactions, consignees]);
+    }, [itemSearch, visibleTransactions, allConsignees]);
 
     const toggleGroup = (orderId) => {
         setExpandedGroups(prev => {
@@ -336,7 +447,7 @@ const ConsigneesPage = () => {
     };
 
     // ── Derived state for selected consignee summary ──────────────────────────
-    const selectedConsignee = consignees.find(c => c.id === selectedConsigneeId);
+    const selectedConsignee = allConsignees.find(c => c.id === selectedConsigneeId);
     const totalOutstanding = groupedTransactions.reduce((s, g) => s + g.totalUnpaid, 0);
     const totalValue = groupedTransactions.reduce((s, g) => s + g.totalPrice, 0);
 
@@ -352,17 +463,96 @@ const ConsigneesPage = () => {
             )}
 
             {/* ── Left Panel: Consignees List ──────────────────────────── */}
-            <div className="w-full md:w-72 bg-white border-r border-stone-200 flex flex-col h-[40vh] md:h-full shrink-0">
+            <div className="w-full md:w-80 min-w-0 bg-white border-r border-stone-200 flex flex-col h-[45vh] md:h-full shrink-0">
+                {/* Header */}
                 <div className="p-4 border-b border-stone-200 bg-stone-50 flex justify-between items-center shrink-0">
                     <h2 className="font-bold text-zinc-800 flex items-center gap-2 text-base">
                         <Users size={17} className="text-zinc-500" /> Consignees
                     </h2>
                     <button
-                        onClick={() => setShowAddConsignee(true)}
-                        className="p-1.5 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors"
+                        onClick={() => {
+                            setNewConsigneeBranchId(selectedBranchFilter !== 'ALL' ? Number(selectedBranchFilter) : (branches[0]?.id || 1));
+                            setShowAddConsignee(true);
+                        }}
+                        className="px-2.5 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-bold shadow-sm"
+                        title="Add Consignee"
                     >
-                        <UserPlus size={15} />
+                        <UserPlus size={14} />
+                        <span>Add</span>
                     </button>
+                </div>
+
+                {/* ── Dedicated Branch Filter ──────────────────────── */}
+                <div className="px-3.5 py-2.5 border-b border-stone-200 bg-stone-50/70 shrink-0">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black text-stone-500 uppercase tracking-wider flex items-center gap-1">
+                            <Store size={12} className="text-stone-400" /> Branch Filter
+                        </span>
+                        {isBranch ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                <Lock size={10} /> Locked
+                            </span>
+                        ) : (
+                            <span className="text-[10px] font-bold text-stone-400">
+                                {visibleConsignees.length} showing
+                            </span>
+                        )}
+                    </div>
+
+                    {isBranch ? (
+                        <div className="px-3 py-2 bg-white rounded-xl border border-stone-200 text-xs font-bold text-stone-800 flex items-center justify-between shadow-sm">
+                            <div className="flex items-center gap-1.5 truncate">
+                                <Store size={14} className="text-blue-600 shrink-0" />
+                                <span className="truncate">{user?.branchName || branches.find(b => b.id === user?.branchId)?.name || 'Branch'}</span>
+                            </div>
+                            <span className="text-[10px] bg-stone-100 px-2 py-0.5 rounded-md font-mono text-stone-600 font-bold shrink-0">
+                                {visibleConsignees.length}
+                            </span>
+                        </div>
+                    ) : (
+                        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedBranchFilter('ALL')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm ${
+                                    selectedBranchFilter === 'ALL'
+                                        ? 'bg-zinc-900 text-white'
+                                        : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                                }`}
+                            >
+                                <span>All</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                    selectedBranchFilter === 'ALL' ? 'bg-zinc-700 text-white' : 'bg-stone-100 text-stone-500'
+                                }`}>
+                                    {allConsignees.length}
+                                </span>
+                            </button>
+
+                            {branches.map(branch => {
+                                const count = branchCounts[branch.id] || 0;
+                                const isSelected = String(selectedBranchFilter) === String(branch.id);
+                                return (
+                                    <button
+                                        key={branch.id}
+                                        type="button"
+                                        onClick={() => setSelectedBranchFilter(branch.id)}
+                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm ${
+                                            isSelected
+                                                ? 'bg-zinc-900 text-white'
+                                                : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                                        }`}
+                                    >
+                                        <span className="truncate max-w-[110px]">{branch.name}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                            isSelected ? 'bg-zinc-700 text-white' : 'bg-stone-100 text-stone-500'
+                                        }`}>
+                                            {count}
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
 
                 {/* Sort toggle */}
@@ -386,37 +576,61 @@ const ConsigneesPage = () => {
                     ))}
                 </div>
 
+                {/* Consignee List */}
                 <div className="flex-1 overflow-y-auto p-2">
                     {loading ? (
-                        <div className="p-4 text-center text-zinc-400 flex flex-col items-center gap-2">
-                            <Loader2 className="animate-spin" size={20} /> Loading...
+                        <div className="p-6 text-center text-zinc-400 flex flex-col items-center gap-2">
+                            <Loader2 className="animate-spin" size={20} /> Loading consignees...
                         </div>
                     ) : sortedConsignees.length === 0 ? (
-                        <div className="p-8 text-center text-zinc-400 text-sm">No consignees yet. Add one!</div>
+                        <div className="p-8 text-center text-zinc-400 text-xs">
+                            No consignees found for this branch filter.
+                        </div>
                     ) : (
-                        sortedConsignees.map(c => (
-                            <button
-                                key={c.id}
-                                onClick={() => setSelectedConsigneeId(c.id)}
-                                className={`group w-full text-left px-4 py-3 mb-1 rounded-xl font-medium text-sm flex items-center justify-between transition-colors ${
-                                    selectedConsigneeId === c.id
-                                        ? 'bg-zinc-900 text-white shadow-md'
-                                        : 'hover:bg-stone-100 text-zinc-700'
-                                }`}
-                            >
-                                <span>{c.name}</span>
-                                <div
-                                    onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.id); }}
-                                    className={`p-1.5 rounded-lg transition-opacity ${
-                                        selectedConsigneeId === c.id 
-                                            ? 'text-zinc-400 hover:text-white hover:bg-zinc-700 opacity-100' 
-                                            : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-600 hover:bg-red-50'
+                        sortedConsignees.map(c => {
+                            const isSelected = selectedConsigneeId === c.id;
+                            const branchName = c.branch?.name || (c.branch?.id === 2 ? 'BAYABAS' : 'Cebu Main');
+                            return (
+                                <button
+                                    key={c.id}
+                                    onClick={() => setSelectedConsigneeId(c.id)}
+                                    className={`group w-full text-left px-3.5 py-2.5 mb-1.5 rounded-xl font-medium text-sm flex flex-col gap-1 transition-all ${
+                                        isSelected
+                                            ? 'bg-zinc-900 text-white shadow-md'
+                                            : 'bg-white hover:bg-stone-50 text-zinc-700 border border-stone-200/60'
                                     }`}
                                 >
-                                    <Trash2 size={14} />
-                                </div>
-                            </button>
-                        ))
+                                    <div className="flex items-center justify-between w-full">
+                                        <span className="font-bold text-sm truncate">{c.name}</span>
+                                        <div
+                                            onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.id); }}
+                                            className={`p-1 rounded-lg transition-opacity ${
+                                                isSelected 
+                                                    ? 'text-zinc-400 hover:text-white hover:bg-zinc-800 opacity-80 group-hover:opacity-100' 
+                                                    : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-600 hover:bg-red-50'
+                                            }`}
+                                            title="Delete Consignee"
+                                        >
+                                            <Trash2 size={13} />
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                            isSelected 
+                                                ? 'bg-zinc-800 text-zinc-200 border border-zinc-700' 
+                                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                        }`}>
+                                            <Store size={10} /> {branchName}
+                                        </span>
+                                        {c.contactInfo && (
+                                            <span className={`text-[10px] truncate ${isSelected ? 'text-zinc-400' : 'text-zinc-400'}`}>
+                                                {c.contactInfo}
+                                            </span>
+                                        )}
+                                    </div>
+                                </button>
+                            );
+                        })
                     )}
                 </div>
             </div>
@@ -465,9 +679,14 @@ const ConsigneesPage = () => {
                                 <div key={group.orderId} className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
                                     <div className="px-5 py-3 bg-stone-50 border-b border-stone-100 flex items-center justify-between">
                                         <div>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-mono text-xs text-zinc-400">#{shortId}</span>
                                                 <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">{group.consigneeName}</span>
+                                                {group.branchName && (
+                                                    <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                                        <Store size={10} /> {group.branchName}
+                                                    </span>
+                                                )}
                                             </div>
                                             <div className="text-xs text-zinc-500 mt-0.5">
                                                 {group.date.toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}
@@ -560,10 +779,15 @@ const ConsigneesPage = () => {
                         <div className="p-5 bg-white border-b border-stone-200 shrink-0">
                             <div className="flex items-start justify-between gap-4 flex-wrap">
                                 <div>
-                                    <h2 className="text-xl font-black text-zinc-900">
-                                        {selectedConsignee?.name}'s Consignments
-                                    </h2>
-                                    <p className="text-xs text-zinc-500 mt-0.5">Manage items assigned to this consignee.</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h2 className="text-xl font-black text-zinc-900">
+                                            {selectedConsignee?.name}'s Consignments
+                                        </h2>
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                            <Store size={12} /> {selectedConsignee?.branch?.name || (selectedConsignee?.branch?.id === 2 ? 'BAYABAS' : 'Cebu Main')}
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-zinc-500 mt-1">Manage consigned items strictly assigned to this consignee.</p>
                                 </div>
                                 <div className="flex items-center gap-4 text-right text-xs font-bold text-zinc-500">
                                     <div>
@@ -722,7 +946,7 @@ const ConsigneesPage = () => {
             {/* ── Add Consignee Modal ─────────────────────────────────── */}
             {showAddConsignee && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-fade-in-up">
                         <div className="p-4 bg-stone-50 border-b border-stone-100 flex justify-between items-center">
                             <h3 className="font-bold text-zinc-800 flex items-center gap-2">
                                 <UserPlus size={16} className="text-blue-500" /> Add Consignee
@@ -733,18 +957,79 @@ const ConsigneesPage = () => {
                         </div>
                         <form onSubmit={handleAddConsignee} className="p-6 flex flex-col gap-4">
                             <div>
-                                <label className="text-xs font-bold text-zinc-500 mb-1.5 block uppercase tracking-wider">Name</label>
+                                <label className="text-xs font-bold text-zinc-600 mb-1.5 block uppercase tracking-wider">
+                                    Consignee Name *
+                                </label>
                                 <input
                                     type="text" autoFocus required
                                     value={newConsigneeName}
                                     onChange={e => setNewConsigneeName(e.target.value)}
-                                    className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all"
-                                    placeholder="Enter consignee name..."
+                                    className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-medium"
+                                    placeholder="e.g. Coach Dennis, Mark Consignment..."
                                 />
                             </div>
-                            <button type="submit" className="w-full py-2.5 bg-zinc-900 text-white font-bold rounded-xl hover:bg-zinc-700 transition-colors">
-                                Save Consignee
-                            </button>
+
+                            <div>
+                                <label className="text-xs font-bold text-zinc-600 mb-1.5 block uppercase tracking-wider">
+                                    Contact Info / Phone (Optional)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newConsigneeContact}
+                                    onChange={e => setNewConsigneeContact(e.target.value)}
+                                    className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-medium"
+                                    placeholder="e.g. 0917-123-4567"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-xs font-bold text-zinc-600 mb-1.5 flex items-center justify-between uppercase tracking-wider">
+                                    <span>Assigned Branch *</span>
+                                    {isBranch && (
+                                        <span className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
+                                            <Lock size={10} /> Strict Branch
+                                        </span>
+                                    )}
+                                </label>
+                                {isBranch ? (
+                                    <div className="w-full px-3 py-2.5 bg-stone-100 border-2 border-stone-200 rounded-xl text-stone-700 text-sm font-bold flex items-center gap-2">
+                                        <Store size={15} className="text-stone-500" />
+                                        <span>{user?.branchName || branches.find(b => b.id === user?.branchId)?.name || 'Current Branch'}</span>
+                                    </div>
+                                ) : (
+                                    <select
+                                        value={newConsigneeBranchId}
+                                        onChange={e => setNewConsigneeBranchId(Number(e.target.value))}
+                                        className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-bold bg-white"
+                                    >
+                                        {branches.map(b => (
+                                            <option key={b.id} value={b.id}>
+                                                🏬 {b.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                <p className="text-[11px] text-stone-400 mt-1">
+                                    Consignees strictly belong to their assigned branch.
+                                </p>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAddConsignee(false)}
+                                    className="flex-1 py-2.5 border border-stone-200 text-stone-600 font-bold rounded-xl hover:bg-stone-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={!newConsigneeName.trim()}
+                                    className="flex-1 py-2.5 bg-zinc-900 text-white font-bold rounded-xl hover:bg-zinc-700 transition-colors disabled:opacity-50 shadow-sm"
+                                >
+                                    Save Consignee
+                                </button>
+                            </div>
                         </form>
                     </div>
                 </div>

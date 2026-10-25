@@ -58,12 +58,10 @@ const Dashboard = () => {
     const navigate = useNavigate();
     const { user, logout, isAdmin, isBranch, selectedBranchId, setSelectedBranchId, currentBranchId } = useAuth();
 
-    // Display scale / fit density mode (defaults to 'fit' matching the 80% unzoom look)
-    const [fitScale, setFitScale] = useState(() => localStorage.getItem('cpm_fit_scale') || 'fit');
+    // Ensure html zoom is clean and reset
     useEffect(() => {
-        document.documentElement.style.zoom = fitScale === 'fit' ? '82%' : '100%';
-        localStorage.setItem('cpm_fit_scale', fitScale);
-    }, [fitScale]);
+        document.documentElement.style.zoom = '';
+    }, []);
 
     // Branch list for Admin dropdown
     const [branchList, setBranchList] = useState([]);
@@ -340,31 +338,7 @@ const Dashboard = () => {
                             </div>
                         )}
 
-                        {/* Display Scale Fit Toggle */}
-                        <div className="flex items-center bg-stone-100 p-0.5 rounded-xl border border-stone-200 shadow-inner">
-                            <button
-                                onClick={() => setFitScale('fit')}
-                                title="Fit View (matches 80% unzoomed density)"
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                    fitScale === 'fit'
-                                        ? 'bg-stone-900 text-white shadow-sm'
-                                        : 'text-stone-600 hover:text-stone-900'
-                                }`}
-                            >
-                                Fit (80%)
-                            </button>
-                            <button
-                                onClick={() => setFitScale('100')}
-                                title="Standard 100% scale"
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                    fitScale === '100'
-                                        ? 'bg-stone-900 text-white shadow-sm'
-                                        : 'text-stone-600 hover:text-stone-900'
-                                }`}
-                            >
-                                100%
-                            </button>
-                        </div>
+
 
                         <button
                             onClick={() => navigate('/tablet')}

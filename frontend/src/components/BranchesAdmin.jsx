@@ -36,6 +36,24 @@ const BranchesAdmin = () => {
 
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+    const [deleteConfirmBranch, setDeleteConfirmBranch] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+
+    const handleDeleteBranch = async () => {
+        if (!deleteConfirmBranch) return;
+        setDeleting(true);
+        setError('');
+        try {
+            await axios.delete(`/api/admin/branches/${deleteConfirmBranch.id}`);
+            setDeleteConfirmBranch(null);
+            fetchBranches();
+        } catch (err) {
+            console.error('Failed to delete branch:', err);
+            setError(err.response?.data?.error || err.response?.data?.message || 'Failed to delete branch.');
+        } finally {
+            setDeleting(false);
+        }
+    };
 
     const fetchBranches = async () => {
         setLoading(true);
@@ -196,6 +214,17 @@ const BranchesAdmin = () => {
                                                         title="Edit branch details"
                                                     >
                                                         <Edit2 size={14} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setDeleteConfirmBranch(b);
+                                                        }}
+                                                        className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                                        title="Delete branch"
+                                                    >
+                                                        <Trash2 size={14} />
                                                     </button>
                                                 </div>
                                             </div>
@@ -367,24 +396,102 @@ const BranchesAdmin = () => {
                                 </label>
                             </div>
 
-                            <div className="flex items-center justify-end gap-3 pt-4 border-t border-stone-100 mt-6">
-                                <button
-                                    type="button"
-                                    onClick={() => setModalOpen(false)}
-                                    className="px-4 py-2.5 text-stone-600 hover:text-stone-900 text-xs font-bold"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={saving}
-                                    className="px-5 py-2.5 bg-stone-900 hover:bg-black text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-2 disabled:opacity-50"
-                                >
-                                    {saving && <Loader2 size={14} className="animate-spin" />}
-                                    <span>{editingBranch ? 'Update Branch' : 'Create Branch'}</span>
-                                </button>
+                            <div className="flex items-center justify-between gap-3 pt-4 border-t border-stone-100 mt-6">
+                                {editingBranch ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const b = editingBranch;
+                                            setModalOpen(false);
+                                            setDeleteConfirmBranch(b);
+                                        }}
+                                        className="px-3 py-2 text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                                    >
+                                        <Trash2 size={14} />
+                                        <span>Delete Branch</span>
+                                    </button>
+                                ) : <div />}
+
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => setModalOpen(false)}
+                                        className="px-4 py-2.5 text-stone-600 hover:text-stone-900 text-xs font-bold"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={saving}
+                                        className="px-5 py-2.5 bg-stone-900 hover:bg-black text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-2 disabled:opacity-50"
+                                    >
+                                        {saving && <Loader2 size={14} className="animate-spin" />}
+                                        <span>{editingBranch ? 'Update Branch' : 'Create Branch'}</span>
+                                    </button>
+                                </div>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Branch Confirmation Modal */}
+            {deleteConfirmBranch && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl border border-stone-200">
+                        <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-100 text-rose-600 flex items-center justify-center mb-4">
+                            <Trash2 size={24} />
+                        </div>
+
+                        <h3 className="font-black text-lg text-stone-900 tracking-tight">
+                            Delete Branch Store?
+                        </h3>
+                        <p className="text-xs text-stone-600 mt-2 leading-relaxed">
+                            Are you sure you want to delete <span className="font-black text-stone-900">"{deleteConfirmBranch.name}"</span>?
+                        </p>
+
+                        <div className="mt-4 p-3.5 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-600 space-y-1.5">
+                            <div className="flex items-center gap-2 text-stone-800 font-bold">
+                                <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                                <span>Safe Deletion Guarantee:</span>
+                            </div>
+                            <p className="leading-relaxed">
+                                • Any remaining in-stock inventory will automatically return to <strong>Master Storage (Admin Holding Pool)</strong>.
+                            </p>
+                            <p className="leading-relaxed">
+                                • Past sales and order history remain completely intact without losing any financial reporting.
+                            </p>
+                        </div>
+
+                        {error && (
+                            <div className="mt-3 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+                                <AlertCircle size={16} />
+                                <span>{error}</span>
+                            </div>
+                        )}
+
+                        <div className="flex items-center justify-end gap-3 pt-5 mt-5 border-t border-stone-100">
+                            <button
+                                type="button"
+                                disabled={deleting}
+                                onClick={() => {
+                                    setDeleteConfirmBranch(null);
+                                    setError('');
+                                }}
+                                className="px-4 py-2.5 text-stone-600 hover:text-stone-900 text-xs font-bold rounded-xl hover:bg-stone-100 transition-colors cursor-pointer"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                disabled={deleting}
+                                onClick={handleDeleteBranch}
+                                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center gap-2 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                            >
+                                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                                <span>{deleting ? 'Deleting...' : 'Yes, Delete Branch'}</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

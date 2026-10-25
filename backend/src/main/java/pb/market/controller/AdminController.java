@@ -107,13 +107,43 @@ public class AdminController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
+    @org.springframework.transaction.annotation.Transactional
     @DeleteMapping("/branches/{id}")
     public ResponseEntity<?> deleteBranch(@PathVariable Long id) {
-        return branchRepository.findById(id).map(branch -> {
-            branch.setActive(false);
-            branchRepository.save(branch);
-            return ResponseEntity.ok(Map.of("message", "Branch deactivated"));
-        }).orElse(ResponseEntity.notFound().build());
+        if (!branchRepository.existsById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // Return all stock batches to Master Storage (Admin Holding Pool)
+        entityManager.createNativeQuery("UPDATE stock_batches SET branch_id = NULL WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+
+        // Safely detach all references so historical orders/records are not lost
+        entityManager.createNativeQuery("UPDATE consignees SET branch_id = NULL WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+        entityManager.createNativeQuery("UPDATE transactions SET branch_id = NULL WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+        entityManager.createNativeQuery("UPDATE users SET branch_id = NULL WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+        entityManager.createNativeQuery("UPDATE expenses SET branch_id = NULL WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+        entityManager.createNativeQuery("UPDATE stock_adjustments SET branch_id = NULL WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+
+        // Clean up branch allocations and branch selling prices
+        entityManager.createNativeQuery("DELETE FROM branch_stock_allocations WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM branch_selling_prices WHERE branch_id = :id")
+                .setParameter("id", id).executeUpdate();
+
+        // Permanently delete the branch
+        entityManager.createNativeQuery("DELETE FROM branches WHERE id = :id")
+                .setParameter("id", id).executeUpdate();
+
+        return ResponseEntity.ok(Map.of("message", "Branch deleted successfully and all items returned to Master Storage."));
     }
 
     @GetMapping("/branches/overview")

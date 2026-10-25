@@ -32,7 +32,7 @@ const ConsigneesPage = () => {
     const [newConsigneeContact, setNewConsigneeContact] = useState('');
     const [newConsigneeBranchId, setNewConsigneeBranchId] = useState(() => {
         if (isBranch && user?.branchId) return user.branchId;
-        return (selectedBranchFilter !== 'ALL' && selectedBranchFilter) ? Number(selectedBranchFilter) : 1;
+        return (selectedBranchFilter !== 'ALL' && selectedBranchFilter) ? Number(selectedBranchFilter) : '';
     });
 
     const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -88,10 +88,7 @@ const ConsigneesPage = () => {
                 const res2 = await axios.get(`${BASE}/api/admin/branches`);
                 if (Array.isArray(res2.data)) setBranches(res2.data);
             } catch {
-                setBranches([
-                    { id: 1, name: 'Cebu Main' },
-                    { id: 2, name: 'BAYABAS, BASAK SAN NICHOLAS' }
-                ]);
+                setBranches([]);
             }
         }
     };
@@ -251,7 +248,7 @@ const ConsigneesPage = () => {
         const branchMap = {};
         allConsignees.forEach(c => {
             consigneeMap[c.id] = c.name;
-            branchMap[c.id] = c.branch?.name || (c.branch?.id === 2 ? 'BAYABAS' : 'Cebu Main');
+            branchMap[c.id] = c.branch?.name || 'Master Storage';
         });
         const matched = visibleTransactions.filter(t => {
             const brand = t.variant?.product?.brandName || '';
@@ -589,7 +586,7 @@ const ConsigneesPage = () => {
                     ) : (
                         sortedConsignees.map(c => {
                             const isSelected = selectedConsigneeId === c.id;
-                            const branchName = c.branch?.name || (c.branch?.id === 2 ? 'BAYABAS' : 'Cebu Main');
+                            const branchName = c.branch?.name || 'Master Storage';
                             return (
                                 <button
                                     key={c.id}
@@ -784,7 +781,7 @@ const ConsigneesPage = () => {
                                             {selectedConsignee?.name}'s Consignments
                                         </h2>
                                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                            <Store size={12} /> {selectedConsignee?.branch?.name || (selectedConsignee?.branch?.id === 2 ? 'BAYABAS' : 'Cebu Main')}
+                                            <Store size={12} /> {selectedConsignee?.branch?.name || 'Master Storage'}
                                         </span>
                                     </div>
                                     <p className="text-xs text-zinc-500 mt-1">Manage consigned items strictly assigned to this consignee.</p>

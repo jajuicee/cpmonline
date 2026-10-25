@@ -43,12 +43,14 @@ public class ConsigneeController {
             resolvedBranchId = consignee.getBranch().getId();
         }
 
-        if (resolvedBranchId == null) {
-            // Default to Cebu Main (branch_id = 1) if no branch specified
-            resolvedBranchId = 1L;
+        if (resolvedBranchId != null) {
+            branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+        } else {
+            branchRepository.findAll().stream()
+                    .filter(pb.market.entity.Branch::isActive)
+                    .findFirst()
+                    .ifPresent(consignee::setBranch);
         }
-
-        branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
         return consigneeRepository.save(consignee);
     }
 

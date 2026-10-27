@@ -221,12 +221,25 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
     );
 };
 
-const Analytics = () => {
+const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) => {
     const { currentBranchId, selectedBranchId, setSelectedBranchId, user, isAdmin, isBranch } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
-    const mode = (isAdmin && searchParams.get('tab') === 'batch-profit')
+
+    // Strict branch scope: when propBranchId is explicitly passed or logged in as a branch account
+    const isExplicitBranchScope = propBranchId !== undefined || isBranch;
+
+    // Effective branch:
+    // 1) propBranchId if explicitly passed (e.g. from BranchDetail or wrapper)
+    // 2) user?.branchId if logged in as branch user
+    // 3) selectedBranchId for Admin (or null for Consolidated All Branches)
+    const effectiveBranch = propBranchId !== undefined
+        ? propBranchId
+        : (isBranch ? user?.branchId : selectedBranchId);
+
+    const mode = (isAdmin && !isExplicitBranchScope && searchParams.get('tab') === 'batch-profit')
         ? 'batch-profit'
-        : (isAdmin && searchParams.get('mode') === 'hq' ? 'hq' : 'retail');
+        : (isAdmin && !isExplicitBranchScope && searchParams.get('mode') === 'hq' ? 'hq' : 'retail');
+
     const [branches, setBranches] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [expenses, setExpenses] = useState([]);
@@ -242,10 +255,7 @@ const Analytics = () => {
     const [customRange, setCustomRange] = useState(null);
     const calendarRef = useRef(null);
 
-    // Effective branch: branch user locked to their branch; admin can select a branch or null for Consolidated All Branches
-    const effectiveBranch = isBranch ? user?.branchId : selectedBranchId;
-
-    // Fetch branches for admin filter dropdown
+    // Fetch branches for admin filter dropdown / name resolution
     useEffect(() => {
         if (isAdmin) {
             axios.get('/api/admin/branches')
@@ -253,6 +263,17 @@ const Analytics = () => {
                 .catch(err => console.error('Failed to load branches for analytics:', err));
         }
     }, [isAdmin]);
+
+    // Resolved display branch name
+    const currentBranchName = useMemo(() => {
+        if (propBranchName) return propBranchName;
+        if (effectiveBranch) {
+            const found = branches.find(b => String(b.id) === String(effectiveBranch));
+            if (found?.name) return found.name;
+        }
+        if (isBranch && user?.branchName) return user.branchName;
+        return effectiveBranch ? `Branch #${effectiveBranch}` : null;
+    }, [propBranchName, effectiveBranch, branches, isBranch, user]);
 
     useEffect(() => {
         const handler = (e) => { if (calendarRef.current && !calendarRef.current.contains(e.target)) setShowCalendar(false); };
@@ -617,7 +638,7 @@ const Analytics = () => {
         <div className="flex flex-col h-full space-y-6 w-full">
 
             {/* ─── Admin Master Operational Mode Switcher (Wholesale B2B vs Store Retail vs Direct Sales) ─── */}
-            {isAdmin && (
+            {isAdmin && !isExplicitBranchScope && (
                 <div className="flex flex-wrap items-center gap-1.5 p-1 bg-stone-100/90 rounded-2xl border border-stone-200/90 w-fit shrink-0 shadow-2xs">
                     <button
                         onClick={() => setSearchParams({ tab: 'batch-profit' })}
@@ -671,13 +692,26 @@ const Analytics = () => {
                 <>
             {/* Header & Controls */}
             <div className="flex flex-wrap justify-between items-center gap-4 shrink-0">
-                <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
-                    <BarChart3 className="text-zinc-500" /> Performance Analytics & P&L
-                </h2>
+                <div className="flex items-center gap-3">
+                    <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
+                        <BarChart3 className="text-zinc-500" />
+                        <span>
+                            {isExplicitBranchScope
+                                ? `${currentBranchName || 'Branch'} Performance Analytics & P&L`
+                                : 'Performance Analytics & P&L'}
+                        </span>
+                    </h2>
+                    {isExplicitBranchScope && (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs flex items-center gap-1.5">
+                            <Store size={12} className="text-emerald-600" />
+                            <span>{currentBranchName || 'Assigned Branch Scope'}</span>
+                        </span>
+                    )}
+                </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                    {/* Branch Filter Selector (for Admin) */}
-                    {isAdmin && (
+                    {/* Branch Filter Selector (for Admin in consolidated mode only) */}
+                    {isAdmin && !isExplicitBranchScope && (
                         <div className="relative">
                             <select
                                 value={effectiveBranch ? String(effectiveBranch) : 'ALL'}
@@ -787,8 +821,8 @@ const Analytics = () => {
                     {effectiveBranch && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
                             <Store size={11} className="text-emerald-600" />
-                            {branches.find(b => String(b.id) === String(effectiveBranch))?.name || `Branch #${effectiveBranch}`}
-                            {isAdmin && (
+                            {currentBranchName || `Branch #${effectiveBranch}`}
+                            {isAdmin && !isExplicitBranchScope && (
                                 <button onClick={() => setSelectedBranchId(null)} title="Clear branch filter" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
                                     <X size={11} />
                                 </button>
@@ -838,7 +872,7 @@ const Analytics = () => {
 
                     <button
                         onClick={() => {
-                            if (isAdmin) setSelectedBranchId(null);
+                            if (isAdmin && !isExplicitBranchScope) setSelectedBranchId(null);
                             setTypeFilter('All');
                             setPaymentFilter('All');
                             setCategoryFilter('All');
@@ -1247,11 +1281,13 @@ const Analytics = () => {
                                     </div>
                                     <h3 className="text-xl font-black text-stone-900 tracking-tight">
                                         {effectiveBranch
-                                            ? `${branches.find(b => String(b.id) === String(effectiveBranch))?.name || 'Branch'} P&L Statement`
+                                            ? `${currentBranchName || 'Branch'} P&L Statement`
                                             : 'Consolidated P&L Statement (All Locations)'}
                                     </h3>
                                     <p className="text-xs text-stone-500 mt-0.5">
-                                        Income from sales collections minus inventory cost and branch operating overhead
+                                        {effectiveBranch
+                                            ? `Comprehensive financial breakdown strictly for ${currentBranchName || 'this store branch'}`
+                                            : 'Income from sales collections minus inventory cost and branch operating overhead'}
                                     </p>
                                 </div>
 

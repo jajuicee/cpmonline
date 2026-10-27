@@ -428,6 +428,7 @@ const Dashboard = () => {
                                         <Route path="/branch-prices" element={<BranchPrices products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/branch-dues" element={<BranchDues />} />
                                         <Route path="/branch-analytics" element={<BranchAnalytics />} />
+                                        <Route path="/analytics" element={<BranchAnalytics />} />
                                         <Route path="/expenses" element={<Expenses />} />
                                         <Route path="/history" element={<OrderHistory />} />
                                         <Route path="/consignees" element={<ConsigneesPage />} />

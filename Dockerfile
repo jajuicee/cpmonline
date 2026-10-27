@@ -24,7 +24,7 @@ USER spring:spring
 
 # Environment variables optimized for Render (RAM limits, random generator)
 ENV PORT=8080
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=40.0 -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
+ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=50.0 -XX:InitialRAMPercentage=25.0 -XX:+UseSerialGC -Xss256k -XX:MaxMetaspaceSize=112m -XX:+ExitOnOutOfMemoryError -Djava.security.egd=file:/dev/./urandom"
 
 # Copy built JAR from builder
 COPY --from=builder /app/target/*.jar app.jar

@@ -297,7 +297,7 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                             <th className="px-3 py-2">Name</th>
                             <th className="px-3 py-2">Color</th>
                             <th className="px-3 py-2">Variant</th>
-                            <th className="px-3 py-2">Supplier</th>
+                            {isAdmin && <th className="px-3 py-2">Supplier</th>}
                             <th className="px-3 py-2">Type</th>
                             <th className="px-3 py-2 text-right">Price</th>
                             <th className="px-3 py-2 text-right">Total Value</th>
@@ -308,7 +308,7 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                         {loading ? (
                             Array.from({ length: 8 }).map((_, i) => (
                                 <tr key={i} className="animate-pulse">
-                                    {Array.from({ length: 10 }).map((_, j) => (
+                                    {Array.from({ length: isAdmin ? 10 : 9 }).map((_, j) => (
                                         <td key={j} className="px-3 py-2">
                                             <div className="h-3.5 bg-stone-200 rounded w-3/4" />
                                         </td>
@@ -323,13 +323,15 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                                     <td className="px-3 py-2 font-bold text-zinc-800">{row.name}</td>
                                     <td className="px-3 py-2 text-zinc-600">{row.color}</td>
                                     <td className="px-3 py-2 text-zinc-600">{row.variantDetails}</td>
-                                    <td className="px-3 py-2">
-                                        {row.defaultSupplier ? (
-                                            <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-md text-[11px] font-bold w-fit">
-                                                <Building2 size={10} /> {row.defaultSupplier.name}
-                                            </span>
-                                        ) : <span className="text-zinc-300 text-xs">—</span>}
-                                    </td>
+                                    {isAdmin && (
+                                        <td className="px-3 py-2">
+                                            {row.defaultSupplier ? (
+                                                <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-200/80 px-2 py-0.5 rounded-md text-[11px] font-bold w-fit">
+                                                    <Building2 size={10} /> {row.defaultSupplier.name}
+                                                </span>
+                                            ) : <span className="text-zinc-300 text-xs">—</span>}
+                                        </td>
+                                    )}
                                     <td className="px-3 py-2">
                                         {row.category === 'Paddles'
                                             ? row.consigned
@@ -384,7 +386,7 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                             ))
                         ) : (
                             <tr>
-                                <td colSpan="10" className="px-6 py-10 text-center text-zinc-500 border-dashed border-t text-xs">
+                                <td colSpan={isAdmin ? 10 : 9} className="px-6 py-10 text-center text-zinc-500 border-dashed border-t text-xs">
                                     No products match the current filter.
                                 </td>
                             </tr>

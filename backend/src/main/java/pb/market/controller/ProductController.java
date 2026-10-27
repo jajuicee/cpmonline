@@ -43,7 +43,17 @@ public class ProductController {
         if (user != null && "BRANCH".equals(user.getRole())) {
             branchId = user.getBranchId();
         }
-        return productService.getAllProducts(branchId);
+        List<Product> products = productService.getAllProducts(branchId);
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            for (Product p : products) {
+                if (p.getVariants() != null) {
+                    for (ProductVariant v : p.getVariants()) {
+                        v.setDefaultSupplier(null);
+                    }
+                }
+            }
+        }
+        return products;
     }
 
     @PostMapping

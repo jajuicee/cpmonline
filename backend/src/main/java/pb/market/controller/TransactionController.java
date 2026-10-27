@@ -672,6 +672,9 @@ public class TransactionController {
             if (reqMethod != null && !reqMethod.isBlank()) {
                 tx.setPaymentMethod(reqMethod);
             }
+            if (tx.getBranch() == null && tx.getConsignee() != null && tx.getConsignee().getBranch() != null) {
+                tx.setBranch(tx.getConsignee().getBranch());
+            }
 
             java.math.BigDecimal finalPrice = tx.getFinalPrice() != null ? tx.getFinalPrice() : java.math.BigDecimal.ZERO;
             java.math.BigDecimal downpayment = tx.getDownpayment() != null ? tx.getDownpayment() : java.math.BigDecimal.ZERO;

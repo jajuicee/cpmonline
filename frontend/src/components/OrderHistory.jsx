@@ -648,7 +648,7 @@ const OrderHistory = () => {
         return null;
     }, [activePreset, customRange]);
 
-    const timelineItems = useMemo(() => {
+    const { timelineItems, counts } = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
         
         // We use transactions directly since the backend now returns all active orders (created OR paid in range)
@@ -696,35 +696,34 @@ const OrderHistory = () => {
         let items = [];
 
         Object.values(groups).forEach(g => {
-            // Check if order was placed in date window
             const orderDate = new Date(g.date);
-            const inWindow = (!dateWindow || (orderDate >= dateWindow.start && orderDate <= dateWindow.end));
-            if (inWindow || isSearching) {
+            const orderInWindow = (!dateWindow || (orderDate >= dateWindow.start && orderDate <= dateWindow.end));
+
+            // Check if this order received any payments in the date window
+            const paymentsInWindow = g.paymentLogs.filter(p => {
+                const payDate = new Date(p.paymentDate);
+                return (!dateWindow || (payDate >= dateWindow.start && payDate <= dateWindow.end));
+            });
+            const hasPaymentInWindow = paymentsInWindow.length > 0;
+
+            if (orderInWindow || hasPaymentInWindow || isSearching) {
+                // Determine effective sort date: if payment happened in this window, prioritize payment timestamp
+                let effectiveSortDate = orderDate;
+                if (!orderInWindow && hasPaymentInWindow) {
+                    effectiveSortDate = new Date(paymentsInWindow[0].paymentDate);
+                } else if (orderInWindow && hasPaymentInWindow) {
+                    const latestPayDate = new Date(paymentsInWindow[0].paymentDate);
+                    effectiveSortDate = latestPayDate > orderDate ? latestPayDate : orderDate;
+                }
+
                 items.push({
                     type: 'ORDER',
-                    sortDate: orderDate,
-                    data: g
+                    sortDate: effectiveSortDate,
+                    data: g,
+                    paymentsInPeriod: paymentsInWindow,
+                    isPaymentActivityOnly: !orderInWindow && hasPaymentInWindow
                 });
             }
-
-            // Only inject LATE_PAYMENT_REF items (ORDER + LATE_PAYMENT_REF is all we need in the
-            // sorted array — PAYMENT rows are rendered inline inside each ORDER's Fragment so they
-            // never bloat the sort/filter loop).
-            g.paymentLogs.forEach(p => {
-                const payDate = new Date(p.paymentDate);
-                const orderDateLocal = new Date(g.date);
-                const isLate = (payDate.getTime() - orderDateLocal.getTime()) > 30_000;
-                const payInWindow = (!dateWindow || (payDate >= dateWindow.start && payDate <= dateWindow.end));
-
-                if (isLate && (payInWindow || isSearching)) {
-                    items.push({
-                        type: 'LATE_PAYMENT_REF',
-                        sortDate: payDate,
-                        data: g,
-                        paymentLog: p
-                    });
-                }
-            });
         });
 
         if (isSearching) {
@@ -748,13 +747,24 @@ const OrderHistory = () => {
         }
 
         if (paymentFilter !== 'All') {
-            // Only ORDER items carry paymentMethod at the group level;
-            // LATE_PAYMENT_REF items pass through so they stay visible.
+            const pf = paymentFilter.toLowerCase();
             items = items.filter(item => {
-                if (item.type === 'ORDER') return item.data.paymentMethod === paymentFilter;
+                if (item.type === 'ORDER') {
+                    const matchGroupMethod = (item.data.paymentMethod || '').toLowerCase() === pf;
+                    const matchLogMethod = item.paymentsInPeriod?.some(p => (p.paymentMethod || '').toLowerCase() === pf)
+                        || item.data.paymentLogs?.some(p => (p.paymentMethod || '').toLowerCase() === pf);
+                    return matchGroupMethod || matchLogMethod;
+                }
                 return true;
             });
         }
+
+        const baseOrders = items.filter(item => item.type === 'ORDER');
+        const countsResult = {
+            all: baseOrders.length,
+            full: baseOrders.filter(item => item.data.status === 'FULL').length,
+            partial_unpaid: baseOrders.filter(item => item.data.status === 'PARTIAL' || item.data.status === 'UNPAID').length,
+        };
 
         if (filter !== STATUS_ALL) {
             if (filter === STATUS_UNPAID) {
@@ -764,33 +774,13 @@ const OrderHistory = () => {
             }
         }
 
-        // Simple descending sort — only ORDER and LATE_PAYMENT_REF items remain,
-        // each carrying their own meaningful sortDate, so no anchoring needed.
-        return items.sort((a, b) => b.sortDate - a.sortDate);
-    }, [filter, transactions, dateWindow, searchQuery, isSearching, paymentFilter, paymentLogs]);
+        items.sort((a, b) => b.sortDate - a.sortDate);
 
-    const counts = useMemo(() => {
-        const windowedTxs = dateWindow
-            ? transactions.filter(t => {
-                const d = new Date(t.transactionDate);
-                return d >= dateWindow.start && d <= dateWindow.end;
-            })
-            : transactions;
-
-        const groups = windowedTxs.reduce((acc, t) => {
-            const key = t.transactionId || `LEGACY-${t.id}`;
-            if (!acc[key]) acc[key] = t.status;
-            if (t.status === 'PARTIAL') acc[key] = 'PARTIAL';
-            if (t.status === 'UNPAID') acc[key] = 'UNPAID';
-            return acc;
-        }, {});
-        const arr = Object.values(groups);
         return {
-            all: arr.length,
-            full: arr.filter(s => s === 'FULL').length,
-            partial_unpaid: arr.filter(s => s === 'PARTIAL' || s === 'UNPAID').length,
+            timelineItems: items,
+            counts: countsResult
         };
-    }, [transactions, dateWindow]);
+    }, [filter, transactions, dateWindow, searchQuery, isSearching, paymentFilter, paymentLogs]);
 
     // Unique payment methods in data — mirrors Analytics PaymentFilter options
     const paymentMethods = useMemo(() => {
@@ -1365,6 +1355,12 @@ const OrderHistory = () => {
                                                                 CONSIGNMENT
                                                             </span>
                                                         )}
+                                                        {item.isPaymentActivityOnly && (
+                                                            <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                                                Paid in Period
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     {group.paymentDetails && (
                                                         <div
@@ -1459,6 +1455,14 @@ const OrderHistory = () => {
                                                             )}
                                                         </div>
                                                     )}
+                                                    {item.paymentsInPeriod && item.paymentsInPeriod.length > 0 && (
+                                                        <div className="mt-1">
+                                                            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded inline-flex items-center gap-1 shadow-xs">
+                                                                <span>+{formatCurrency(item.paymentsInPeriod.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0))}</span>
+                                                                <span className="text-[9px] text-emerald-700 font-bold uppercase">({item.paymentsInPeriod[0]?.paymentMethod || 'Paid'})</span>
+                                                            </span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </td>
                                             <td className="px-3 py-2">
@@ -1488,12 +1492,29 @@ const OrderHistory = () => {
                                                 )}
                                             </td>
                                             <td className="px-3 py-2 text-xs">
-                                                <div className="font-bold text-zinc-700 leading-tight">
-                                                    {formatDateTwoLines(group.date).date}
-                                                </div>
-                                                <div className="text-[10px] text-zinc-400 font-semibold mt-0.5">
-                                                    {formatDateTwoLines(group.date).time}
-                                                </div>
+                                                {item.isPaymentActivityOnly ? (
+                                                    <div>
+                                                        <div className="font-black text-emerald-700 leading-tight flex items-center gap-1">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                                            {formatDateTwoLines(item.sortDate).date}
+                                                        </div>
+                                                        <div className="text-[10px] text-emerald-600 font-bold">
+                                                            {formatDateTwoLines(item.sortDate).time} (Paid)
+                                                        </div>
+                                                        <div className="text-[9px] text-stone-400 font-medium mt-0.5">
+                                                            Ordered: {formatDateTwoLines(group.date).date}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <div className="font-bold text-zinc-700 leading-tight">
+                                                            {formatDateTwoLines(group.date).date}
+                                                        </div>
+                                                        <div className="text-[10px] text-zinc-400 font-semibold mt-0.5">
+                                                            {formatDateTwoLines(group.date).time}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="px-3 py-2 text-center">
                                                 <div className="flex items-center justify-center gap-1 flex-wrap">

@@ -15,7 +15,7 @@ public interface PaymentLogRepository extends JpaRepository<PaymentLog, Long> {
     @Query("SELECT pl FROM PaymentLog pl WHERE pl.paymentDate BETWEEN :from AND :to ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findByPaymentDateBetween(LocalDateTime from, LocalDateTime to);
 
-    @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t WHERE pl.paymentDate BETWEEN :from AND :to AND t.branch.id = :branchId ORDER BY pl.paymentDate DESC")
+    @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t LEFT JOIN t.consignee c WHERE pl.paymentDate BETWEEN :from AND :to AND (:branchId IS NULL OR t.branch.id = :branchId OR (c IS NOT NULL AND c.branch.id = :branchId)) ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findByPaymentDateBetweenAndBranch(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, @Param("branchId") Long branchId);
 
     void deleteByOrderId(String orderId);
@@ -23,7 +23,7 @@ public interface PaymentLogRepository extends JpaRepository<PaymentLog, Long> {
     @Query("SELECT pl FROM PaymentLog pl ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findAllOrdered();
 
-    @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t WHERE t.branch.id = :branchId ORDER BY pl.paymentDate DESC")
+    @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t LEFT JOIN t.consignee c WHERE (:branchId IS NULL OR t.branch.id = :branchId OR (c IS NOT NULL AND c.branch.id = :branchId)) ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findAllOrderedByBranch(@Param("branchId") Long branchId);
 
     // Check if backfill has already been done (to avoid duplicate logs)

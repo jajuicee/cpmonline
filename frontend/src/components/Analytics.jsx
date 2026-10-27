@@ -474,7 +474,52 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             return inDate && inPayment && isPaid && inType;
         });
 
-        // ── Dynamic Category Breakdown from validTxs (ensures all filters apply to category view) ──
+        // ── Dynamic Category Breakdown & Product Rankings from validTxs ──
+        // Ensure revenue and profit from payments made in this period are accurately attributed
+        const paidAmountByOrderId = {};
+        const paidCostByOrderId = {};
+        const paidAmountByTxId = {};
+        const paidCostByTxId = {};
+
+        validLogs.forEach(pl => {
+            if (pl.orderId) {
+                paidAmountByOrderId[pl.orderId] = (paidAmountByOrderId[pl.orderId] || 0) + pl.revenue;
+                paidCostByOrderId[pl.orderId] = (paidCostByOrderId[pl.orderId] || 0) + pl.cost;
+            }
+            if (pl.transaction?.id) {
+                paidAmountByTxId[pl.transaction.id] = (paidAmountByTxId[pl.transaction.id] || 0) + pl.revenue;
+                paidCostByTxId[pl.transaction.id] = (paidCostByTxId[pl.transaction.id] || 0) + pl.cost;
+            }
+        });
+
+        const getTxRevenueAndCost = (t) => {
+            const orderId = t.transactionId || `LEGACY-${t.id}`;
+            const hasTxLog = paidAmountByTxId[t.id] !== undefined;
+            const hasOrderLog = paidAmountByOrderId[orderId] !== undefined;
+            
+            let selling;
+            let cost;
+            if (hasTxLog) {
+                selling = paidAmountByTxId[t.id];
+                cost = paidCostByTxId[t.id] || 0;
+            } else if (hasOrderLog) {
+                const orderItems = transactions.filter(tx => (tx.transactionId || `LEGACY-${tx.id}`) === orderId);
+                if (orderItems.length <= 1) {
+                    selling = paidAmountByOrderId[orderId];
+                    cost = paidCostByOrderId[orderId] || Number(t.costPrice || t.variant?.acquisitionPrice || 0);
+                } else {
+                    const totalOrderPrice = orderItems.reduce((s, it) => s + Number(it.finalPrice || 0), 0) || 1;
+                    const ratio = Number(t.finalPrice || 0) / totalOrderPrice;
+                    selling = Math.round((paidAmountByOrderId[orderId] * ratio) * 100) / 100;
+                    cost = Math.round(((paidCostByOrderId[orderId] || 0) * ratio) * 100) / 100;
+                }
+            } else {
+                selling = t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0);
+                cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
+            }
+            return { selling, cost, profit: selling - cost };
+        };
+
         const catMap = {};
         let totalCatRevenue = 0;
         let totalCatUnits = 0;
@@ -482,9 +527,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
 
         validTxs.forEach(t => {
             const catName = t.variant?.product?.category || 'Uncategorized';
-            const selling = t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0);
-            const cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
-            const profit = selling - cost;
+            const { selling, cost, profit } = getTxRevenueAndCost(t);
 
             if (!catMap[catName]) {
                 catMap[catName] = {
@@ -537,12 +580,11 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             const p = t.variant.product;
             const name = `${p.brandName} ${p.modelName} ${t.variant.color ? `(${t.variant.color})` : ''}`.trim();
             const key = t.variant.sku;
-            const selling = t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0);
-            const cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
+            const { selling, cost, profit } = getTxRevenueAndCost(t);
             if (!acc[key]) acc[key] = { name, sku: t.variant.sku, category: p.category || 'Uncategorized', units: 0, revenue: 0, profit: 0 };
             acc[key].units += 1;
             acc[key].revenue += selling;
-            acc[key].profit += selling - cost;
+            acc[key].profit += profit;
             return acc;
         }, {});
 

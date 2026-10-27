@@ -42,7 +42,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
            "WHERE ((t.transactionDate >= :from AND t.transactionDate <= :to) " +
            "OR t.transactionId IN (SELECT p.orderId FROM PaymentLog p WHERE p.paymentDate >= :from AND p.paymentDate <= :to) " +
            "OR CONCAT('LEGACY-', CAST(t.id AS string)) IN (SELECT p.orderId FROM PaymentLog p WHERE p.paymentDate >= :from AND p.paymentDate <= :to)) " +
-           "AND (:branchId IS NULL OR t.branch.id = :branchId) " +
+           "AND (:branchId IS NULL OR t.branch.id = :branchId OR (t.consignee IS NOT NULL AND t.consignee.branch.id = :branchId)) " +
            "ORDER BY t.transactionDate DESC")
     List<Transaction> findAllWithDetailsByActivityDateAndBranch(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, @Param("branchId") Long branchId, org.springframework.data.domain.Pageable pageable);
 

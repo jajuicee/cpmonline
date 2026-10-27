@@ -652,10 +652,12 @@ public class TransactionController {
             itemIds.stream().map(Number::longValue).collect(java.util.stream.Collectors.toList())
         );
 
-        // Sort by final price ascending to ensure the cheapest paddles are fully paid first, matching the frontend's greedy logic
-        itemsToPay.sort(java.util.Comparator.comparing(t -> 
-            t.getFinalPrice() != null ? t.getFinalPrice() : java.math.BigDecimal.ZERO
-        ));
+        // Sort by remaining balance ascending to ensure the paddles closest to being fully paid or cheapest are settled first
+        itemsToPay.sort(java.util.Comparator.comparing(t -> {
+            java.math.BigDecimal fp = t.getFinalPrice() != null ? t.getFinalPrice() : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal dp = t.getDownpayment() != null ? t.getDownpayment() : java.math.BigDecimal.ZERO;
+            return fp.subtract(dp);
+        }));
 
         String reqMethod = body.containsKey("paymentMethod") ? body.get("paymentMethod").toString() : null;
 

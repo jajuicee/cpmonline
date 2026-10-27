@@ -59,6 +59,8 @@ const ConsigneesPage = () => {
     const [expandedGroups, setExpandedGroups] = useState(new Set());
     const [consigneeSort, setConsigneeSort] = useState('DATE_DESC'); // 'DATE_DESC' | 'DATE_ASC' | 'NAME'
     const [itemSearch, setItemSearch] = useState('');
+    const [searchScope, setSearchScope] = useState('SELECTED'); // 'SELECTED' | 'ALL'
+    const [consigneeSearch, setConsigneeSearch] = useState('');
 
     const showToast = (message, type = 'success') => {
         setToast({ message, type });
@@ -240,7 +242,17 @@ const ConsigneesPage = () => {
         });
     }, [visibleConsignees, visibleTransactions, consigneeSort]);
 
-    // ── Global item search across visible consignees ───────────────────────────
+    // ── Consignees filtered by sidebar search ──────────────────────────────────
+    const filteredConsignees = useMemo(() => {
+        if (!consigneeSearch.trim()) return sortedConsignees;
+        const q = consigneeSearch.trim().toLowerCase();
+        return sortedConsignees.filter(c =>
+            c.name.toLowerCase().includes(q) ||
+            (c.contactInfo && c.contactInfo.toLowerCase().includes(q))
+        );
+    }, [sortedConsignees, consigneeSearch]);
+
+    // ── Item search (scoped to selected consignee by default or across all) ──
     const searchResults = useMemo(() => {
         const q = itemSearch.trim().toLowerCase();
         if (!q) return [];
@@ -250,7 +262,14 @@ const ConsigneesPage = () => {
             consigneeMap[c.id] = c.name;
             branchMap[c.id] = c.branch?.name || 'Master Storage';
         });
-        const matched = visibleTransactions.filter(t => {
+
+        // When searchScope is 'SELECTED' and a consignee is selected, search ONLY that consignee's items!
+        const isScopedToConsignee = searchScope === 'SELECTED' && selectedConsigneeId;
+        const targetPool = isScopedToConsignee
+            ? visibleTransactions.filter(t => t.consignee?.id === selectedConsigneeId)
+            : visibleTransactions;
+
+        const matched = targetPool.filter(t => {
             const brand = t.variant?.product?.brandName || '';
             const model = t.variant?.product?.modelName || '';
             const color = t.variant?.color || '';
@@ -285,7 +304,7 @@ const ConsigneesPage = () => {
                 status: g.items.some(i => i.status === 'UNPAID') ? 'UNPAID'
                       : g.items.some(i => i.status === 'PARTIAL') ? 'PARTIAL' : 'FULL',
             }));
-    }, [itemSearch, visibleTransactions, allConsignees]);
+    }, [itemSearch, visibleTransactions, allConsignees, searchScope, selectedConsigneeId]);
 
     const toggleGroup = (orderId) => {
         setExpandedGroups(prev => {
@@ -318,15 +337,33 @@ const ConsigneesPage = () => {
             setItemPaySelections(next);
             return;
         }
-        // Greedily select paddles (sorted cheapest-first so more paddles fit)
+
+        // Sort paddles by remaining balance ascending (cheapest / closest to done first)
+        const sorted = [...unpaidItems].sort((a, b) => {
+            const balA = Math.max(0, Number(a.finalPrice || 0) - Number(a.downpayment || 0));
+            const balB = Math.max(0, Number(b.finalPrice || 0) - Number(b.downpayment || 0));
+            return balA - balB;
+        });
+
         let remaining = budget;
-        const sorted = [...unpaidItems].sort((a, b) => a.finalPrice - b.finalPrice);
         const next = {};
         unpaidItems.forEach(i => { next[i.id] = false; });
+
         for (const item of sorted) {
-            if (remaining >= item.finalPrice) {
-                next[item.id] = true;
-                remaining -= item.finalPrice;
+            if (remaining <= 0) break;
+            const itemBalance = Math.max(0, Number(item.finalPrice || 0) - Number(item.downpayment || 0));
+            if (itemBalance <= 0) continue;
+
+            // Select this item
+            next[item.id] = true;
+
+            if (remaining >= itemBalance) {
+                // Fully pays this item
+                remaining -= itemBalance;
+            } else {
+                // The remaining payment amount partially covers this item!
+                remaining = 0;
+                break;
             }
         }
         setItemPaySelections(next);
@@ -336,32 +373,49 @@ const ConsigneesPage = () => {
     const handlePaySubmit = async (e) => {
         e.preventDefault();
         const group = payingGroup;
-        const selectedIds = Object.entries(itemPaySelections)
+        let selectedIds = Object.entries(itemPaySelections)
             .filter(([, v]) => v)
             .map(([id]) => Number(id));
+
         if (selectedIds.length === 0) {
             showToast('Please select at least one item to pay.', 'error');
             return;
         }
 
-        // Calculate the balance of selected items
         const unpaidItems = group.items.filter(i => i.status !== 'FULL');
-        // Round the total balance to 2 decimal places to avoid JS floating point errors
-        const selectedTotalBalance = parseFloat(
+
+        // Sum the true remaining balance of selected items (finalPrice - downpayment)
+        let selectedTotalBalance = parseFloat(
             unpaidItems
                 .filter(i => itemPaySelections[i.id])
-                .reduce((s, i) => s + (i.finalPrice - i.downpayment), 0)
+                .reduce((s, i) => s + Math.max(0, Number(i.finalPrice || 0) - Number(i.downpayment || 0)), 0)
                 .toFixed(2)
         );
 
-        // If custom amount is provided, use it. Otherwise, fully pay the selected items.
-        const amountToPay = customAmount && parseFloat(customAmount) > 0 
+        let amountToPay = customAmount && parseFloat(customAmount) > 0 
             ? parseFloat(parseFloat(customAmount).toFixed(2))
             : selectedTotalBalance;
 
+        // If the entered payment amount is larger than the selected items' balance:
+        // Automatically include the next unpaid items in this order so the extra funds are absorbed!
         if (amountToPay > selectedTotalBalance) {
-            showToast(`Payment amount (${fmt(amountToPay)}) exceeds the total balance of selected items (${fmt(selectedTotalBalance)}). Please select more items.`, 'error');
-            return;
+            const unselectedItems = unpaidItems.filter(i => !itemPaySelections[i.id]);
+            let needed = amountToPay - selectedTotalBalance;
+            const newSelectedIds = [...selectedIds];
+
+            for (const item of unselectedItems) {
+                if (needed <= 0) break;
+                const bal = Math.max(0, Number(item.finalPrice || 0) - Number(item.downpayment || 0));
+                newSelectedIds.push(item.id);
+                selectedTotalBalance += bal;
+                needed -= bal;
+            }
+            selectedIds = newSelectedIds;
+
+            // If amountToPay still exceeds ALL unpaid items in this order, cap it to the full balance
+            if (amountToPay > selectedTotalBalance) {
+                amountToPay = selectedTotalBalance;
+            }
         }
 
         setPayingGroup(null);
@@ -373,7 +427,7 @@ const ConsigneesPage = () => {
                 paymentMethod: selectedPaymentMethod
             });
             await fetchData();
-            showToast(`Applied payment of ${fmt(amountToPay)} to selected item(s).`, 'success');
+            showToast(`Applied payment of ${fmt(amountToPay)} successfully.`, 'success');
         } catch {
             await fetchData();
             showToast('Network error — could not apply payment.', 'error');
@@ -573,24 +627,46 @@ const ConsigneesPage = () => {
                     ))}
                 </div>
 
+                {/* Consignee search input */}
+                <div className="px-3 py-2 border-b border-stone-100 bg-stone-50/50 shrink-0">
+                    <div className="relative">
+                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={consigneeSearch}
+                            onChange={e => setConsigneeSearch(e.target.value)}
+                            placeholder="Filter consignees by name..."
+                            className="w-full pl-8 pr-7 py-1.5 text-xs border border-stone-200 rounded-lg outline-none bg-white focus:border-zinc-400 transition-colors"
+                        />
+                        {consigneeSearch && (
+                            <button onClick={() => setConsigneeSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600">
+                                <X size={12} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
                 {/* Consignee List */}
                 <div className="flex-1 overflow-y-auto p-2">
                     {loading ? (
                         <div className="p-6 text-center text-zinc-400 flex flex-col items-center gap-2">
                             <Loader2 className="animate-spin" size={20} /> Loading consignees...
                         </div>
-                    ) : sortedConsignees.length === 0 ? (
+                    ) : filteredConsignees.length === 0 ? (
                         <div className="p-8 text-center text-zinc-400 text-xs">
-                            No consignees found for this branch filter.
+                            {consigneeSearch.trim() ? `No consignees matching "${consigneeSearch}".` : 'No consignees found for this branch filter.'}
                         </div>
                     ) : (
-                        sortedConsignees.map(c => {
+                        filteredConsignees.map(c => {
                             const isSelected = selectedConsigneeId === c.id;
                             const branchName = c.branch?.name || 'Master Storage';
                             return (
                                 <button
                                     key={c.id}
-                                    onClick={() => setSelectedConsigneeId(c.id)}
+                                    onClick={() => {
+                                        setSelectedConsigneeId(c.id);
+                                        setSearchScope('SELECTED');
+                                    }}
                                     className={`group w-full text-left px-3.5 py-2.5 mb-1.5 rounded-xl font-medium text-sm flex flex-col gap-1 transition-all ${
                                         isSelected
                                             ? 'bg-zinc-900 text-white shadow-md'
@@ -635,15 +711,17 @@ const ConsigneesPage = () => {
             {/* ── Right Panel ──────────────────────────────────────── */}
             <div className="flex-1 flex flex-col h-[60vh] md:h-full overflow-hidden bg-stone-100">
 
-                {/* Global search bar — always visible */}
-                <div className="px-4 py-3 bg-white border-b border-stone-200 shrink-0">
+                {/* Search bar — with scope toggle */}
+                <div className="px-4 py-3 bg-white border-b border-stone-200 shrink-0 flex flex-col gap-2">
                     <div className="relative">
                         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
                         <input
                             type="text"
                             value={itemSearch}
                             onChange={e => setItemSearch(e.target.value)}
-                            placeholder="Search paddles across all consignees…"
+                            placeholder={selectedConsignee && searchScope === 'SELECTED'
+                                ? `Search paddles for ${selectedConsignee.name}…`
+                                : 'Search paddles across all consignees…'}
                             className="w-full pl-9 pr-8 py-2 text-sm border border-stone-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-400 outline-none bg-stone-50 transition-all"
                         />
                         {itemSearch && (
@@ -652,13 +730,46 @@ const ConsigneesPage = () => {
                             </button>
                         )}
                     </div>
-                    {itemSearch.trim() && (
-                        <p className="text-[11px] text-zinc-400 mt-1.5 pl-1">
-                            {searchResults.length === 0
-                                ? 'No matching paddles found.'
-                                : `${searchResults.reduce((s, g) => s + g.items.length, 0)} item(s) across ${searchResults.length} order(s)`
-                            }
-                        </p>
+
+                    {/* Scope toggle buttons if a consignee is selected */}
+                    {selectedConsignee && (
+                        <div className="flex items-center justify-between text-xs pt-0.5">
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider">Search in:</span>
+                                <div className="inline-flex bg-stone-100 p-0.5 rounded-lg border border-stone-200">
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchScope('SELECTED')}
+                                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${
+                                            searchScope === 'SELECTED'
+                                                ? 'bg-zinc-900 text-white shadow-xs'
+                                                : 'text-zinc-500 hover:text-zinc-800'
+                                        }`}
+                                    >
+                                        👤 {selectedConsignee.name} only
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSearchScope('ALL')}
+                                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-all ${
+                                            searchScope === 'ALL'
+                                                ? 'bg-zinc-900 text-white shadow-xs'
+                                                : 'text-zinc-500 hover:text-zinc-800'
+                                        }`}
+                                    >
+                                        🌐 All Consignees
+                                    </button>
+                                </div>
+                            </div>
+
+                            {itemSearch.trim() && (
+                                <span className="text-[11px] text-zinc-400">
+                                    {searchResults.length === 0
+                                        ? 'No matching paddles'
+                                        : `${searchResults.reduce((s, g) => s + g.items.length, 0)} paddle(s) found`}
+                                </span>
+                            )}
+                        </div>
                     )}
                 </div>
 
@@ -1036,8 +1147,11 @@ const ConsigneesPage = () => {
             {payingGroup && (() => {
                 const unpaidItems = payingGroup.items.filter(i => i.status !== 'FULL');
                 const selectedIds = Object.entries(itemPaySelections).filter(([, v]) => v).map(([id]) => Number(id));
-                const selectedTotal = unpaidItems.filter(i => itemPaySelections[i.id]).reduce((s, i) => s + i.finalPrice, 0);
+                const selectedBalance = unpaidItems
+                    .filter(i => itemPaySelections[i.id])
+                    .reduce((s, i) => s + Math.max(0, Number(i.finalPrice || 0) - Number(i.downpayment || 0)), 0);
                 const allSelected = unpaidItems.length > 0 && unpaidItems.every(i => itemPaySelections[i.id]);
+                const parsedCustomAmount = customAmount && parseFloat(customAmount) > 0 ? parseFloat(customAmount) : 0;
 
                 return (
                     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -1117,6 +1231,7 @@ const ConsigneesPage = () => {
                                 <div className="overflow-y-auto flex-1">
                                     {unpaidItems.map(item => {
                                         const isChecked = !!itemPaySelections[item.id];
+                                        const itemRemaining = Math.max(0, Number(item.finalPrice || 0) - Number(item.downpayment || 0));
                                         const productName = item.variant?.product
                                             ? `${item.variant.product.brandName} ${item.variant.product.modelName}${item.variant?.color ? ` (${item.variant.color})` : ''}`
                                             : (item.variant?.sku || '—');
@@ -1140,10 +1255,10 @@ const ConsigneesPage = () => {
                                                 </div>
                                                 <div className="text-right shrink-0">
                                                     <div className={`text-sm font-black font-mono ${isChecked ? 'text-green-700' : 'text-zinc-800'}`}>
-                                                        {fmt(item.finalPrice)}
+                                                        {fmt(itemRemaining)}
                                                     </div>
                                                     {item.downpayment > 0 && (
-                                                        <div className="text-[10px] text-amber-600 font-bold">DP: {fmt(item.downpayment)}</div>
+                                                        <div className="text-[10px] text-amber-600 font-bold">Paid: {fmt(item.downpayment)} of {fmt(item.finalPrice)}</div>
                                                     )}
                                                 </div>
                                             </label>
@@ -1154,10 +1269,22 @@ const ConsigneesPage = () => {
                                 {/* Running total + actions */}
                                 <div className="shrink-0 border-t border-stone-200 bg-stone-50">
                                     <div className="px-5 py-3 flex items-center justify-between">
-                                        <span className="text-xs font-bold text-stone-500">
-                                            {selectedIds.length} selected
-                                        </span>
-                                        <span className="text-lg font-black text-green-700 font-mono">{fmt(selectedTotal)}</span>
+                                        <div>
+                                            <span className="text-xs font-bold text-stone-500 block">
+                                                {selectedIds.length} paddle{selectedIds.length !== 1 ? 's' : ''} selected
+                                            </span>
+                                            {parsedCustomAmount > 0 && (
+                                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 inline-block mt-0.5">
+                                                    {parsedCustomAmount < selectedBalance 
+                                                        ? `⚡ Partial payment to apply: ${fmt(parsedCustomAmount)}`
+                                                        : `Full payment to apply: ${fmt(Math.min(parsedCustomAmount, selectedBalance))}`}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="text-right">
+                                            <span className="text-[10px] uppercase font-bold text-stone-400 block">Total Balance Due</span>
+                                            <span className="text-lg font-black text-green-700 font-mono">{fmt(selectedBalance)}</span>
+                                        </div>
                                     </div>
                                     <div className="px-5 pb-4 flex gap-2">
                                         <button

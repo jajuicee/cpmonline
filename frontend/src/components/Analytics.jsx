@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
+import AdminBatchProfitAnalytics from './AdminBatchProfitAnalytics';
+import AdminHqDirectAnalytics from './AdminHqDirectAnalytics';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
     Legend, LabelList, PieChart, Pie, Cell
@@ -8,7 +11,7 @@ import {
 import {
     BarChart3, TrendingUp, DollarSign, Package, AlertCircle, RefreshCw, Trophy, Calendar,
     X, ChevronLeft, ChevronRight, CreditCard, ChevronDown, Store, PieChart as PieIcon, Layers,
-    Receipt, Sparkles
+    Receipt, Sparkles, ShoppingCart
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
@@ -220,6 +223,10 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
 
 const Analytics = () => {
     const { currentBranchId, selectedBranchId, setSelectedBranchId, user, isAdmin, isBranch } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const mode = (isAdmin && searchParams.get('tab') === 'batch-profit')
+        ? 'batch-profit'
+        : (isAdmin && searchParams.get('mode') === 'hq' ? 'hq' : 'retail');
     const [branches, setBranches] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [expenses, setExpenses] = useState([]);
@@ -609,6 +616,59 @@ const Analytics = () => {
     return (
         <div className="flex flex-col h-full space-y-6 w-full">
 
+            {/* ─── Admin Master Operational Mode Switcher (Wholesale B2B vs Store Retail vs Direct Sales) ─── */}
+            {isAdmin && (
+                <div className="flex flex-wrap items-center gap-1.5 p-1 bg-stone-100/90 rounded-2xl border border-stone-200/90 w-fit shrink-0 shadow-2xs">
+                    <button
+                        onClick={() => setSearchParams({ tab: 'batch-profit' })}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                            mode === 'batch-profit'
+                                ? 'bg-stone-900 text-white shadow-sm'
+                                : 'text-stone-500 hover:text-stone-900'
+                        }`}
+                    >
+                        <DollarSign size={14} className={mode === 'batch-profit' ? "text-emerald-400" : ""} />
+                        <span>Wholesale Batch Profit & P&L</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-400 font-bold uppercase tracking-wider">Spread P&L</span>
+                    </button>
+
+                    <button
+                        onClick={() => setSearchParams({})}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                            mode === 'retail'
+                                ? 'bg-stone-900 text-white shadow-sm'
+                                : 'text-stone-500 hover:text-stone-900'
+                        }`}
+                    >
+                        <Store size={14} className={mode === 'retail' ? "text-indigo-400" : ""} />
+                        <span>Consolidated Branch Retail Sales</span>
+                    </button>
+
+                    <button
+                        onClick={() => setSearchParams({ mode: 'hq' })}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                            mode === 'hq'
+                                ? 'bg-stone-900 text-white shadow-sm'
+                                : 'text-stone-500 hover:text-stone-900'
+                        }`}
+                    >
+                        <ShoppingCart size={14} className={mode === 'hq' ? "text-amber-400" : ""} />
+                        <span>HQ Direct Retail Sales</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold uppercase tracking-wider">Master Storage</span>
+                    </button>
+                </div>
+            )}
+
+            {mode === 'batch-profit' && (
+                <AdminBatchProfitAnalytics branches={branches} />
+            )}
+
+            {mode === 'hq' && (
+                <AdminHqDirectAnalytics />
+            )}
+
+            {mode === 'retail' && (
+                <>
             {/* Header & Controls */}
             <div className="flex flex-wrap justify-between items-center gap-4 shrink-0">
                 <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
@@ -1387,6 +1447,8 @@ const Analytics = () => {
                     </div>
                 )}
             </div>
+            </>
+            )}
 
             <style>{`
                 @keyframes fadeSlideIn {

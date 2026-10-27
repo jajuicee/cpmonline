@@ -40,6 +40,10 @@ public class BranchStockAllocation {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal costPerUnit;
 
+    /** Admin's acquisition cost per unit (e.g. ₱37.50) */
+    @Column(name = "admin_cost_per_unit", precision = 12, scale = 2)
+    private BigDecimal adminCostPerUnit;
+
     /** quantity × costPerUnit — convenience field, computed on save */
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal totalCost;

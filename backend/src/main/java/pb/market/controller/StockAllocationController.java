@@ -106,13 +106,22 @@ public class StockAllocationController {
             BigDecimal costPerUnit = item.getCostPerUnit();
             BigDecimal totalCost = costPerUnit.multiply(BigDecimal.valueOf(qty));
 
-            // 1. Deduct from holding inventory (FIFO)
+            // 1. Deduct from holding inventory (FIFO) & capture admin acquisition cost
             List<StockBatch> holdingBatches = stockBatchRepository.findReceivableForHoldingForUpdate(item.getVariantId());
 
             int remaining = qty;
+            BigDecimal totalAdminAcqCost = BigDecimal.ZERO;
+            int totalDeductedUnits = 0;
+
             for (StockBatch hBatch : holdingBatches) {
                 if (remaining <= 0) break;
                 int avail = hBatch.getRemainingQuantity() != null ? hBatch.getRemainingQuantity() : 0;
+                int deduct = Math.min(avail, remaining);
+                BigDecimal batchCost = hBatch.getAcquisitionPrice() != null ? hBatch.getAcquisitionPrice()
+                        : (variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO);
+                totalAdminAcqCost = totalAdminAcqCost.add(batchCost.multiply(BigDecimal.valueOf(deduct)));
+                totalDeductedUnits += deduct;
+
                 if (avail >= remaining) {
                     hBatch.setRemainingQuantity(avail - remaining);
                     remaining = 0;
@@ -121,6 +130,13 @@ public class StockAllocationController {
                     remaining -= avail;
                 }
                 stockBatchRepository.save(hBatch);
+            }
+
+            BigDecimal adminCostPerUnit;
+            if (totalDeductedUnits > 0) {
+                adminCostPerUnit = totalAdminAcqCost.divide(BigDecimal.valueOf(totalDeductedUnits), 2, java.math.RoundingMode.HALF_UP);
+            } else {
+                adminCostPerUnit = variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO;
             }
 
             // 2. Record stock adjustment (from holding)
@@ -150,6 +166,7 @@ public class StockAllocationController {
             allocation.setVariant(variant);
             allocation.setQuantity(qty);
             allocation.setCostPerUnit(costPerUnit);
+            allocation.setAdminCostPerUnit(adminCostPerUnit);
             allocation.setTotalCost(totalCost);
             allocation.setDeadline(request.getDeadline());
             allocation.setAmountPaid(BigDecimal.ZERO);
@@ -252,6 +269,166 @@ public class StockAllocationController {
 
         return ResponseEntity.ok(result);
     }
+
+    // ─── GET /api/admin/allocations/batch-profit ──────────────────────────────
+    // Wholesale Batch Profit & P&L Analysis: Spread per unit (₱37.50 cost vs ₱40.00 branch price)
+    @GetMapping({"/batch-profit", "/analytics/batch-profit"})
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<?> getBatchProfitAnalytics(
+            @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String status) {
+
+        List<BranchStockAllocation> list = (branchId != null)
+                ? allocationRepo.findByBranchIdWithDetails(branchId)
+                : allocationRepo.findAllWithDetails();
+
+        // Optional date filtering on allocatedAt
+        LocalDateTime fromDt = (from != null && !from.isBlank()) ? LocalDateTime.parse(from) : null;
+        LocalDateTime toDt   = (to != null && !to.isBlank())     ? LocalDateTime.parse(to)   : null;
+
+        if (fromDt != null || toDt != null || (status != null && !status.equalsIgnoreCase("ALL"))) {
+            list = list.stream().filter(a -> {
+                if (status != null && !status.equalsIgnoreCase("ALL") && !status.equalsIgnoreCase(a.getStatus())) {
+                    return false;
+                }
+                if (a.getAllocatedAt() == null) return true;
+                if (fromDt != null && a.getAllocatedAt().isBefore(fromDt)) return false;
+                if (toDt != null && a.getAllocatedAt().isAfter(toDt)) return false;
+                return true;
+            }).toList();
+        }
+
+        List<Long> sbIds = list.stream()
+                .map(BranchStockAllocation::getStockBatchId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Integer> remainingQtyMap = new HashMap<>();
+        if (!sbIds.isEmpty()) {
+            stockBatchRepository.findAllById(sbIds).forEach(sb -> {
+                remainingQtyMap.put(sb.getId(), sb.getRemainingQuantity() != null ? sb.getRemainingQuantity() : 0);
+            });
+        }
+
+        List<Map<String, Object>> batchRows = list.stream().map(a -> toMap(a, remainingQtyMap)).toList();
+
+        // Summary Aggregates
+        int totalAllocatedUnits = 0;
+        BigDecimal totalBilledRevenue = BigDecimal.ZERO;
+        BigDecimal totalAdminCost = BigDecimal.ZERO;
+        BigDecimal totalAmountPaid = BigDecimal.ZERO;
+        BigDecimal totalOutstanding = BigDecimal.ZERO;
+        int paidCount = 0;
+        int partialCount = 0;
+        int pendingCount = 0;
+
+        Map<Long, Map<String, Object>> branchAgg = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> timelineAgg = new TreeMap<>();
+
+        for (Map<String, Object> row : batchRows) {
+            int q = ((Number) row.getOrDefault("quantity", 0)).intValue();
+            BigDecimal billed = (BigDecimal) row.getOrDefault("totalCost", BigDecimal.ZERO);
+            BigDecimal adminC = (BigDecimal) row.getOrDefault("totalAdminCost", BigDecimal.ZERO);
+            BigDecimal paid = (BigDecimal) row.getOrDefault("amountPaid", BigDecimal.ZERO);
+            BigDecimal bal = (BigDecimal) row.getOrDefault("remainingBalance", BigDecimal.ZERO);
+            String st = String.valueOf(row.getOrDefault("status", "PENDING"));
+
+            totalAllocatedUnits += q;
+            totalBilledRevenue = totalBilledRevenue.add(billed != null ? billed : BigDecimal.ZERO);
+            totalAdminCost = totalAdminCost.add(adminC != null ? adminC : BigDecimal.ZERO);
+            totalAmountPaid = totalAmountPaid.add(paid != null ? paid : BigDecimal.ZERO);
+            totalOutstanding = totalOutstanding.add(bal != null ? bal : BigDecimal.ZERO);
+
+            if ("PAID".equalsIgnoreCase(st)) paidCount++;
+            else if ("PARTIAL".equalsIgnoreCase(st)) partialCount++;
+            else pendingCount++;
+
+            // Branch Breakdown
+            Long bId = (Long) row.get("branchId");
+            if (bId != null) {
+                Map<String, Object> bm = branchAgg.computeIfAbsent(bId, k -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("branchId", bId);
+                    m.put("branchName", row.get("branchName"));
+                    m.put("units", 0);
+                    m.put("billedRevenue", BigDecimal.ZERO);
+                    m.put("adminCost", BigDecimal.ZERO);
+                    m.put("grossProfit", BigDecimal.ZERO);
+                    m.put("amountPaid", BigDecimal.ZERO);
+                    m.put("outstanding", BigDecimal.ZERO);
+                    return m;
+                });
+                bm.put("units", ((int) bm.get("units")) + q);
+                bm.put("billedRevenue", ((BigDecimal) bm.get("billedRevenue")).add(billed != null ? billed : BigDecimal.ZERO));
+                bm.put("adminCost", ((BigDecimal) bm.get("adminCost")).add(adminC != null ? adminC : BigDecimal.ZERO));
+                bm.put("amountPaid", ((BigDecimal) bm.get("amountPaid")).add(paid != null ? paid : BigDecimal.ZERO));
+                bm.put("outstanding", ((BigDecimal) bm.get("outstanding")).add(bal != null ? bal : BigDecimal.ZERO));
+            }
+
+            // Timeline (by date string YYYY-MM-DD)
+            String allocAt = (String) row.get("allocatedAt");
+            String dateKey = (allocAt != null && allocAt.length() >= 10) ? allocAt.substring(0, 10) : "Undated";
+            Map<String, Object> tm = timelineAgg.computeIfAbsent(dateKey, k -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("date", dateKey);
+                m.put("units", 0);
+                m.put("billedRevenue", BigDecimal.ZERO);
+                m.put("adminCost", BigDecimal.ZERO);
+                m.put("grossProfit", BigDecimal.ZERO);
+                return m;
+            });
+            tm.put("units", ((int) tm.get("units")) + q);
+            tm.put("billedRevenue", ((BigDecimal) tm.get("billedRevenue")).add(billed != null ? billed : BigDecimal.ZERO));
+            tm.put("adminCost", ((BigDecimal) tm.get("adminCost")).add(adminC != null ? adminC : BigDecimal.ZERO));
+        }
+
+        BigDecimal totalGrossProfit = totalBilledRevenue.subtract(totalAdminCost);
+        BigDecimal averageMarginPct = totalBilledRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? totalGrossProfit.divide(totalBilledRevenue, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                : BigDecimal.ZERO;
+
+        // Finalize branch summaries
+        for (Map<String, Object> bm : branchAgg.values()) {
+            BigDecimal bBilled = (BigDecimal) bm.get("billedRevenue");
+            BigDecimal bCost = (BigDecimal) bm.get("adminCost");
+            BigDecimal bProfit = bBilled.subtract(bCost);
+            bm.put("grossProfit", bProfit);
+            bm.put("marginPct", bBilled.compareTo(BigDecimal.ZERO) > 0
+                    ? bProfit.divide(bBilled, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                    : BigDecimal.ZERO);
+        }
+
+        // Finalize timeline
+        for (Map<String, Object> tm : timelineAgg.values()) {
+            BigDecimal tBilled = (BigDecimal) tm.get("billedRevenue");
+            BigDecimal tCost = (BigDecimal) tm.get("adminCost");
+            tm.put("grossProfit", tBilled.subtract(tCost));
+        }
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalAllocatedUnits", totalAllocatedUnits);
+        summary.put("totalBilledRevenue", totalBilledRevenue);
+        summary.put("totalAdminCost", totalAdminCost);
+        summary.put("totalGrossProfit", totalGrossProfit);
+        summary.put("averageMarginPct", averageMarginPct);
+        summary.put("totalAmountPaid", totalAmountPaid);
+        summary.put("totalOutstanding", totalOutstanding);
+        summary.put("totalBatchesCount", batchRows.size());
+        summary.put("paidCount", paidCount);
+        summary.put("partialCount", partialCount);
+        summary.put("pendingCount", pendingCount);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("summary", summary);
+        response.put("branchesBreakdown", new ArrayList<>(branchAgg.values()));
+        response.put("timeline", new ArrayList<>(timelineAgg.values()));
+        response.put("batches", batchRows);
+
+        return ResponseEntity.ok(response);
+    }
+
 
     // ─── GET /api/admin/allocations/branch-dues ───────────────────────────────
     // Branch user: see their own allocations / dues (fast eager-fetch, 0 N+1 queries)
@@ -522,6 +699,28 @@ public class StockAllocationController {
         } else {
             m.put("overdue", false);
         }
+
+        // Admin acquisition cost & wholesale margin spread
+        BigDecimal adminCost = a.getAdminCostPerUnit();
+        if (adminCost == null && a.getVariant() != null && a.getVariant().getAcquisitionPrice() != null) {
+            adminCost = a.getVariant().getAcquisitionPrice();
+        }
+        if (adminCost == null) adminCost = BigDecimal.ZERO;
+
+        BigDecimal costPerUnit = a.getCostPerUnit() != null ? a.getCostPerUnit() : BigDecimal.ZERO;
+        BigDecimal unitSpread = costPerUnit.subtract(adminCost);
+        BigDecimal totalCostVal = a.getTotalCost() != null ? a.getTotalCost() : costPerUnit.multiply(BigDecimal.valueOf(totalUnits));
+        BigDecimal totalAdminCost = adminCost.multiply(BigDecimal.valueOf(totalUnits));
+        BigDecimal totalBatchProfit = totalCostVal.subtract(totalAdminCost);
+        BigDecimal profitMarginPct = totalCostVal.compareTo(BigDecimal.ZERO) > 0
+                ? totalBatchProfit.divide(totalCostVal, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                : BigDecimal.ZERO;
+
+        m.put("adminCostPerUnit", adminCost);
+        m.put("unitSpread", unitSpread);
+        m.put("totalAdminCost", totalAdminCost);
+        m.put("totalBatchProfit", totalBatchProfit);
+        m.put("profitMarginPct", profitMarginPct);
 
         return m;
     }

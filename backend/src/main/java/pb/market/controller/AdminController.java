@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 @RestController
 @RequestMapping("/api/admin")
@@ -474,5 +475,98 @@ public class AdminController {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // ─── GET /api/admin/analytics/hq-direct ───────────────────────────────────
+    // Direct retail sales & margin made directly from Central HQ Master Inventory
+    @GetMapping("/analytics/hq-direct")
+    public ResponseEntity<?> getHqDirectAnalytics(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+
+        LocalDateTime fromDt = parseDateTime(from, false);
+        LocalDateTime toDt = parseDateTime(to, true);
+
+        org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, 50000);
+        List<Transaction> txs;
+        if (fromDt != null && toDt != null) {
+            txs = transactionRepository.findAllWithDetailsByActivityDateHq(fromDt, toDt, page);
+        } else {
+            txs = transactionRepository.findAllWithDetailsHq(page);
+        }
+
+        BigDecimal totalRevenue = BigDecimal.ZERO;
+        BigDecimal totalCost = BigDecimal.ZERO;
+        int totalUnits = 0;
+        Map<String, BigDecimal> paymentMethods = new LinkedHashMap<>();
+        Map<String, Object[]> productsMap = new LinkedHashMap<>();
+        Map<String, BigDecimal> dailyRevenue = new TreeMap<>();
+
+        for (Transaction t : txs) {
+            if ("UNPAID".equalsIgnoreCase(t.getStatus())) continue;
+            BigDecimal rev = t.getFinalPrice() != null ? t.getFinalPrice() : BigDecimal.ZERO;
+            BigDecimal cost = t.getCostPrice() != null ? t.getCostPrice() : BigDecimal.ZERO;
+            totalRevenue = totalRevenue.add(rev);
+            totalCost = totalCost.add(cost);
+            totalUnits++;
+
+            // Method
+            String pm = t.getPaymentMethod() != null ? t.getPaymentMethod() : "OTHER";
+            paymentMethods.put(pm, paymentMethods.getOrDefault(pm, BigDecimal.ZERO).add(rev));
+
+            // Product
+            if (t.getVariant() != null) {
+                String sku = t.getVariant().getSku();
+                String name = (t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : sku);
+                Object[] pArr = productsMap.computeIfAbsent(sku, k -> new Object[]{name, 0, BigDecimal.ZERO, BigDecimal.ZERO});
+                pArr[1] = ((int) pArr[1]) + 1;
+                pArr[2] = ((BigDecimal) pArr[2]).add(rev);
+                pArr[3] = ((BigDecimal) pArr[3]).add(rev.subtract(cost));
+            }
+
+            // Daily trend
+            if (t.getTransactionDate() != null) {
+                String dayKey = t.getTransactionDate().toLocalDate().toString();
+                dailyRevenue.put(dayKey, dailyRevenue.getOrDefault(dayKey, BigDecimal.ZERO).add(rev));
+            }
+        }
+
+        BigDecimal grossProfit = totalRevenue.subtract(totalCost);
+        BigDecimal marginPct = totalRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? grossProfit.divide(totalRevenue, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                : BigDecimal.ZERO;
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalRevenue", totalRevenue);
+        summary.put("totalCost", totalCost);
+        summary.put("grossProfit", grossProfit);
+        summary.put("marginPct", marginPct);
+        summary.put("unitsSold", totalUnits);
+
+        List<Map<String, Object>> topProducts = productsMap.entrySet().stream()
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("sku", e.getKey());
+                    m.put("name", e.getValue()[0]);
+                    m.put("units", e.getValue()[1]);
+                    m.put("revenue", e.getValue()[2]);
+                    m.put("profit", e.getValue()[3]);
+                    return m;
+                })
+                .sorted((a, b) -> ((BigDecimal) b.get("revenue")).compareTo((BigDecimal) a.get("revenue")))
+                .toList();
+
+        List<Map<String, Object>> trend = dailyRevenue.entrySet().stream()
+                .map(e -> Map.of("date", (Object) e.getKey(), "revenue", (Object) e.getValue()))
+                .toList();
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("summary", summary);
+        res.put("paymentMethods", paymentMethods);
+        res.put("topProducts", topProducts);
+        res.put("trend", trend);
+        res.put("totalTransactionsCount", txs.size());
+
+        return ResponseEntity.ok(res);
     }
 }

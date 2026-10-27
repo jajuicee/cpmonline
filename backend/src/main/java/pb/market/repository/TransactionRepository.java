@@ -46,6 +46,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
            "ORDER BY t.transactionDate DESC")
     List<Transaction> findAllWithDetailsByActivityDateAndBranch(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, @Param("branchId") Long branchId, org.springframework.data.domain.Pageable pageable);
 
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.variant v JOIN FETCH v.product LEFT JOIN FETCH v.defaultSupplier LEFT JOIN FETCH t.supplier LEFT JOIN FETCH t.stockBatch LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.branch " +
+           "WHERE t.branch IS NULL ORDER BY t.transactionDate DESC")
+    List<Transaction> findAllWithDetailsHq(org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT DISTINCT t FROM Transaction t JOIN FETCH t.variant v JOIN FETCH v.product LEFT JOIN FETCH v.defaultSupplier LEFT JOIN FETCH t.supplier LEFT JOIN FETCH t.stockBatch LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.branch " +
+           "WHERE ((t.transactionDate >= :from AND t.transactionDate <= :to) " +
+           "OR t.transactionId IN (SELECT p.orderId FROM PaymentLog p WHERE p.paymentDate >= :from AND p.paymentDate <= :to) " +
+           "OR CONCAT('LEGACY-', CAST(t.id AS string)) IN (SELECT p.orderId FROM PaymentLog p WHERE p.paymentDate >= :from AND p.paymentDate <= :to)) " +
+           "AND t.branch IS NULL " +
+           "ORDER BY t.transactionDate DESC")
+    List<Transaction> findAllWithDetailsByActivityDateHq(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, org.springframework.data.domain.Pageable pageable);
+
+
     @Query("SELECT t.variant.id, COUNT(t) FROM Transaction t WHERE t.status != 'UNPAID' GROUP BY t.variant.id")
     List<Object[]> countByVariantId();
 

@@ -130,46 +130,57 @@ const Dashboard = () => {
         ]
         : [
             {
-                title: 'Store Operations',
+                title: 'HQ Direct Operations',
                 items: [
-                    { name: 'POS System',       path: '/orders',           icon: ShoppingCart },
-                    { name: 'Branch Sales',     path: '/branch-sales',     icon: TrendingUp },
-                    { name: 'Product Sales',    path: '/product-sales',    icon: BarChart2 },
+                    { name: 'HQ Direct POS',        path: '/orders?mode=hq',          icon: ShoppingCart },
+                    { name: 'Master Inventory',     path: '/manage-inventory',        icon: ClipboardList },
+                    { name: 'Direct Order History', path: '/history?mode=hq',         icon: History },
+                    { name: 'HQ Direct Analytics',  path: '/analytics?mode=hq',       icon: TrendingUp },
                 ]
             },
             {
-                title: 'Inventory & Supplies',
+                title: 'Branch Network & Wholesale',
                 items: [
-                    { name: 'Add Products',     path: '/add-product',      icon: PackagePlus },
-                    { name: 'View Inventory',   path: '/inventory',        icon: Boxes },
-                    { name: 'Stock Requests',   path: '/stock-requests',   icon: Send },
-                    { name: 'Master Inventory', path: '/manage-inventory', icon: ClipboardList },
-                    { name: 'Supplies',         path: '/supplies',         icon: Truck },
-                    { name: 'Suppliers',        path: '/suppliers',        icon: Building2 },
+                    { name: 'Branch Stores',        path: '/branches',                icon: Store },
+                    { name: 'Stock Allocations',    path: '/branches?tab=allocations',icon: Boxes },
+                    { name: 'Batch Profit & P&L',   path: '/analytics?tab=batch-profit', icon: DollarSign },
+                    { name: 'Branch Sales',         path: '/branch-sales',            icon: BarChart2 },
                 ]
             },
             {
-                title: 'Financials & Reports',
+                title: 'Procurement & Supply',
                 items: [
-                    { name: 'Money Tracker',    path: '/money-tracker',    icon: Wallet },
-                    { name: 'Order History',    path: '/history',          icon: History },
-                    { name: 'Reporting',        path: '/reporting',        icon: Activity },
-                    { name: 'Analytics',        path: '/analytics',        icon: TrendingUp },
-                    { name: 'Expenses',         path: '/expenses',         icon: Receipt },
+                    { name: 'Add Products',         path: '/add-product',             icon: PackagePlus },
+                    { name: 'Store Inventory',      path: '/inventory',               icon: Boxes },
+                    { name: 'Supplies Restock',     path: '/supplies',                icon: Truck },
+                    { name: 'Suppliers',            path: '/suppliers',               icon: Building2 },
+                    { name: 'Consignees',           path: '/consignees',              icon: Users },
                 ]
             },
             {
-                title: 'System & Users',
+                title: 'Financials & System',
                 items: [
-                    { name: 'Consignees',       path: '/consignees',       icon: Users },
-                    { name: 'Branches',         path: '/branches',         icon: Store },
-                    { name: 'User Accounts',    path: '/accounts',         icon: ShieldCheck },
+                    { name: 'Money Tracker',        path: '/money-tracker',           icon: Wallet },
+                    { name: 'Financial Reporting',  path: '/reporting',               icon: Activity },
+                    { name: 'Operating Expenses',   path: '/expenses',                icon: Receipt },
+                    { name: 'User Accounts',        path: '/accounts',                icon: ShieldCheck },
                 ]
             }
         ];
 
     const navItems = navSections.flatMap(s => s.items);
-    const currentTab = navItems.find(item => location.pathname.startsWith(item.path))?.name || 'Dashboard';
+    const currentFullPath = location.pathname + location.search;
+    const isItemActive = (item) => {
+        if (item.path.includes('?')) {
+            return currentFullPath === item.path || currentFullPath.startsWith(item.path);
+        }
+        if (location.pathname === item.path) {
+            const hasMoreSpecific = navItems.some(other => other.path !== item.path && other.path.startsWith(item.path) && other.path.includes('?') && currentFullPath.startsWith(other.path));
+            return !hasMoreSpecific;
+        }
+        return location.pathname.startsWith(item.path + '/');
+    };
+    const currentTab = navItems.find(item => isItemActive(item))?.name || 'Dashboard';
 
     return (
         <div className="flex h-screen bg-[#F8F7F4] font-sans text-brand-black overflow-hidden">
@@ -221,7 +232,7 @@ const Dashboard = () => {
                             <div className="space-y-1 pt-1">
                                 {sec.items.map((item) => {
                                     const Icon = item.icon;
-                                    const isActive = location.pathname.startsWith(item.path);
+                                    const isActive = isItemActive(item);
                                     return (
                                         <Link
                                             key={item.name}

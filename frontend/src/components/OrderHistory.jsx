@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
     History, CheckCircle2, Clock, CreditCard,
     AlertCircle, Loader2, RefreshCw, ChevronDown, Package,
     Calendar, X, ChevronLeft, ChevronRight, Search, MessageSquare, XCircle, Pen,
-    Store, MapPin
+    Store, MapPin, Building2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import PasswordModal from './PasswordModal';
@@ -357,6 +358,8 @@ const EditPaymentModal = ({ group, methods, onSave, onClose }) => {
 
 const OrderHistory = () => {
     const { user, isAdmin, isBranch, currentBranchId, selectedBranchId, setSelectedBranchId } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const isHqMode = isAdmin && searchParams.get('mode') === 'hq';
     const [branchList, setBranchList] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [paymentLogs, setPaymentLogs] = useState([]);
@@ -466,7 +469,9 @@ const OrderHistory = () => {
     const buildFetchUrl = (preset, custom) => {
         const base = `/api/transactions`;
         const now = new Date();
-        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
+        const branchParam = isHqMode
+            ? '&onlyHq=true'
+            : (currentBranchId ? `&branchId=${currentBranchId}` : '');
         // Convert to local time string matching LocalDateTime (YYYY-MM-DDTHH:mm:ss)
         const fmt = (d) => {
             const pad = (n) => n.toString().padStart(2, '0');
@@ -514,10 +519,12 @@ const OrderHistory = () => {
         const urlObj = new URL(url, 'http://localhost');
         const plFrom = urlObj.searchParams.get('from');
         const plTo   = urlObj.searchParams.get('to');
-        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
+        const branchParam = isHqMode
+            ? '&onlyHq=true'
+            : (currentBranchId ? `&branchId=${currentBranchId}` : '');
         const plUrl  = plFrom && plTo
             ? `/api/payment-logs?from=${plFrom}&to=${plTo}${branchParam}`
-            : (currentBranchId ? `/api/payment-logs?branchId=${currentBranchId}` : `/api/payment-logs`);
+            : (branchParam ? `/api/payment-logs?${branchParam.substring(1)}` : `/api/payment-logs`);
 
         Promise.all([
             axios.get(url),
@@ -532,7 +539,7 @@ const OrderHistory = () => {
     };
 
     // Re-fetch whenever the active preset, custom range, or branch filter changes
-    useEffect(() => { fetchTransactions(activePreset, customRange); }, [activePreset, customRange, currentBranchId]);
+    useEffect(() => { fetchTransactions(activePreset, customRange); }, [activePreset, customRange, currentBranchId, isHqMode]);
 
     const handleCompleteItem = async (item) => {
         setCompleting(item.id);
@@ -874,36 +881,72 @@ const OrderHistory = () => {
                 </div>
             )}
 
-            {/* ROW 1 — Title + count + period */}
-            <div className="flex items-baseline gap-2 mb-2 shrink-0">
-                <h2 className="text-xl font-black text-zinc-900 flex items-center gap-2 shrink-0">
-                    <History className="text-zinc-600" size={19} /> Order History
-                </h2>
-                <span
-                    className="text-xs font-bold text-zinc-500"
-                    style={{
-                        opacity: loading ? 0 : 1,
-                        transition: 'opacity 300ms ease',
-                    }}
-                >
-                    {isSearching ? (
-                        <>
-                            <span className="text-zinc-800">{timelineItems.length} items</span>
-                            <span className="mx-1.5 text-zinc-300">·</span>
-                            <span>Searching all dates for "{searchQuery.trim()}"</span>
-                        </>
-                    ) : (
-                        <>
-                            <span className="text-zinc-800">{timelineItems.filter(i => i.type === 'ORDER').length} orders</span>
-                            {periodLabel && (
-                                <>
-                                    <span className="mx-1.5 text-zinc-300">·</span>
-                                    <span className="text-zinc-500">{periodLabel}</span>
-                                </>
-                            )}
-                        </>
+            {/* ROW 1 — Title + mode switcher + count + period */}
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-2 shrink-0">
+                <div className="flex items-baseline gap-2">
+                    <h2 className="text-xl font-black text-zinc-900 flex items-center gap-2 shrink-0">
+                        <History className="text-zinc-600" size={19} />
+                        {isHqMode ? 'Central HQ Direct Order History' : 'Order History'}
+                    </h2>
+                    {isHqMode && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Master Storage Direct Sales
+                        </span>
                     )}
-                </span>
+                    <span
+                        className="text-xs font-bold text-zinc-500"
+                        style={{
+                            opacity: loading ? 0 : 1,
+                            transition: 'opacity 300ms ease',
+                        }}
+                    >
+                        {isSearching ? (
+                            <>
+                                <span className="text-zinc-800">{timelineItems.length} items</span>
+                                <span className="mx-1.5 text-zinc-300">·</span>
+                                <span>Searching all dates for "{searchQuery.trim()}"</span>
+                            </>
+                        ) : (
+                            <>
+                                <span className="text-zinc-800">{timelineItems.filter(i => i.type === 'ORDER').length} orders</span>
+                                {periodLabel && (
+                                    <>
+                                        <span className="mx-1.5 text-zinc-300">·</span>
+                                        <span className="text-zinc-500">{periodLabel}</span>
+                                    </>
+                                )}
+                            </>
+                        )}
+                    </span>
+                </div>
+
+                {/* HQ Direct vs All Store Orders Mode Switcher (Admin Only) */}
+                {isAdmin && (
+                    <div className="flex items-center gap-1 p-1 bg-stone-100 rounded-xl border border-stone-200">
+                        <button
+                            onClick={() => setSearchParams({ mode: 'hq' })}
+                            className={`px-3 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1.5 ${
+                                isHqMode
+                                    ? 'bg-stone-900 text-white shadow-sm'
+                                    : 'text-stone-500 hover:text-stone-800'
+                            }`}
+                        >
+                            <Store size={13} className={isHqMode ? "text-emerald-400" : ""} />
+                            <span>HQ Direct Orders</span>
+                        </button>
+                        <button
+                            onClick={() => setSearchParams({})}
+                            className={`px-3 py-1 text-xs font-black rounded-lg transition-all flex items-center gap-1.5 ${
+                                !isHqMode
+                                    ? 'bg-stone-900 text-white shadow-sm'
+                                    : 'text-stone-500 hover:text-stone-800'
+                            }`}
+                        >
+                            <Building2 size={13} />
+                            <span>All Store Orders</span>
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* ROW 2 — Controls bar */}

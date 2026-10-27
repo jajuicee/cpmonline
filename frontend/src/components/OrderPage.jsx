@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
     ShoppingCart, Search, User, CreditCard, Tag, X,
@@ -47,8 +48,10 @@ const newTicketNumber = () =>
     'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
 const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
-    const { user, isBranch, currentBranchId } = useAuth();
-    const activeBranchId = isBranch ? user?.branchId : (currentBranchId || user?.branchId || 1);
+    const { user, isBranch, isAdmin, currentBranchId } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const isHqDirectMode = isAdmin && searchParams.get('mode') === 'hq';
+    const activeBranchId = isHqDirectMode ? null : (isBranch ? user?.branchId : (currentBranchId || user?.branchId || 1));
     const [searchQuery, setSearchQuery]         = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [cart, setCart]                       = useState([]); // Array of { variant, qty, finalPrice, paymentStatus, downpayment }
@@ -168,16 +171,20 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 v.shape && v.shape !== 'N/A' ? v.shape : ''
             ].filter(Boolean).join(' • ') || 'Standard';
 
+            const effectiveStock = isHqDirectMode ? (v.mainStock ?? 0) : (v.stockQuantity ?? 0);
+
             return {
                 ...v,
                 productCategory: p.category || 'General',
                 productBrand: p.brandName,
                 productModel: p.modelName,
                 variantSpecs: specs,
+                effectiveStock,
+                stockQuantity: effectiveStock,
                 displayName: `${p.brandName} ${p.modelName}${v.color && v.color !== 'N/A' ? ` (${v.color})` : ''}${isShoe && v.shape ? ` Size ${v.shape}` : ''}`
             };
         })).sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true }));
-    }, [products]);
+    }, [products, isHqDirectMode]);
 
     // Unique Categories
     const categories = useMemo(() => {
@@ -371,6 +378,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 payloads.push({
                     transactionId: generatedTransactionId,
                     variant: { id: item.variant.id },
+                    branch: isHqDirectMode ? null : (activeBranchId ? { id: activeBranchId } : null),
                     customerName: orderMode === 'CONSIGNMENT'
                         ? (consignees.find(c => c.id.toString() === selectedConsigneeId)?.name || '')
                         : formData.customerName,
@@ -428,7 +436,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     cartTotal,
                     amountPaid,
                     amountUnpaid,
-                    branchName: user?.branchName || 'Cebu Pickleball Market'
+                    branchName: isHqDirectMode ? 'Central HQ Direct Store (Master Inventory)' : (user?.branchName || 'Cebu Pickleball Market')
                 };
 
                 setCompletedReceipt(receiptData);
@@ -585,14 +593,50 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 <div>
                     <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700">
                         <Store size={16} />
-                        <span>{user?.branchName || 'Point of Sale'}</span>
+                        <span>{isHqDirectMode ? 'Central HQ — Master Holding Storage' : (user?.branchName || 'Point of Sale')}</span>
+                        {isHqDirectMode && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                Direct Retail Sale
+                            </span>
+                        )}
                     </div>
                     <h1 className="text-2xl font-black text-stone-900 tracking-tight mt-1">
-                        POS Multi-Item Checkout
+                        {isHqDirectMode ? 'Central HQ Direct POS' : 'POS Multi-Item Checkout'}
                     </h1>
                     <p className="text-xs text-stone-500 mt-1">
-                        Select items from the catalog on the left to build the order cart, then configure payment and finalize receipt.
+                        {isHqDirectMode
+                            ? 'Selling directly to walk-ins and direct buyers from unallocated Central Master Inventory (Holding Pool).'
+                            : 'Select items from the catalog on the left to build the order cart, then configure payment and finalize receipt.'}
                     </p>
+
+                    {/* Mode Switcher for Admin */}
+                    {isAdmin && (
+                        <div className="flex items-center gap-1.5 p-1 bg-stone-100 rounded-xl border border-stone-200 mt-2.5 w-fit">
+                            <button
+                                onClick={() => setSearchParams({ mode: 'hq' })}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                                    isHqDirectMode
+                                        ? 'bg-stone-900 text-white shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                <ShoppingCart size={13} />
+                                <span>HQ Direct POS</span>
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold">Master Storage</span>
+                            </button>
+                            <button
+                                onClick={() => setSearchParams({})}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 ${
+                                    !isHqDirectMode
+                                        ? 'bg-stone-900 text-white shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                <Store size={13} />
+                                <span>Branch POS Terminal</span>
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex items-center gap-2.5">
@@ -742,7 +786,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                                 <span>{item.variantSpecs}</span>
                                                 <span className="text-stone-300">•</span>
                                                 <span className={hasStock ? 'text-emerald-600 font-bold' : 'text-rose-500 font-bold'}>
-                                                    {hasStock ? `${maxStock} in stock` : 'Out of stock'}
+                                                    {hasStock ? `${maxStock} ${isHqDirectMode ? 'in master pool' : 'in stock'}` : (isHqDirectMode ? 'Out of stock in master pool' : 'Out of stock')}
                                                 </span>
                                             </div>
                                         </div>

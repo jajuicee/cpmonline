@@ -63,16 +63,23 @@ public class TransactionController {
             branchId = transaction.getBranch().getId();
         }
 
+        List<StockBatch> batches;
         if (branchId != null) {
             branchRepository.findById(branchId).ifPresent(transaction::setBranch);
-        }
-
-        // Find oldest stock batch for FIFO in this branch using a PESSIMISTIC WRITE lock.
-        List<StockBatch> batches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
-        if (batches.isEmpty()) {
-            // No sellable stock — reject the transaction
-            return ResponseEntity.badRequest()
-                    .body(Map.of("error", "This item is out of stock in this branch."));
+            // Find oldest stock batch for FIFO in this branch using a PESSIMISTIC WRITE lock.
+            batches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
+            if (batches.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "This item is out of stock in this branch."));
+            }
+        } else {
+            // HQ Direct Sale: deduct strictly from Central HQ Master Inventory (Holding Pool: branch IS NULL)
+            transaction.setBranch(null);
+            batches = stockBatchRepository.findReceivableForHoldingForUpdate(variantId);
+            if (batches.isEmpty()) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "This item is out of stock in Central Master Inventory."));
+            }
         }
 
         // Deduct 1 from the oldest batch (FIFO)
@@ -139,11 +146,21 @@ public class TransactionController {
             @RequestParam(value = "to",   required = false) String toStr,
             @RequestParam(value = "limit", required = false, defaultValue = "100000") int limit,
             @RequestParam(value = "branchId", required = false) Long branchId,
+            @RequestParam(value = "onlyHq", required = false, defaultValue = "false") boolean onlyHq,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (user != null && "BRANCH".equals(user.getRole())) {
             branchId = user.getBranchId();
+            onlyHq = false;
         }
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
+        if (onlyHq) {
+            if (fromStr != null && toStr != null) {
+                java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
+                java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+                return transactionRepository.findAllWithDetailsByActivityDateHq(from, to, page);
+            }
+            return transactionRepository.findAllWithDetailsHq(page);
+        }
         if (fromStr != null && toStr != null) {
             java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
             java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
@@ -151,6 +168,22 @@ public class TransactionController {
         }
         return transactionRepository.findAllWithDetailsByBranch(branchId, page);
     }
+
+    // ── Get only HQ Direct transactions (Admin retail sales from Master Holding Pool) ──
+    @GetMapping("/hq")
+    public List<Transaction> getHqDirectTransactions(
+            @RequestParam(value = "from", required = false) String fromStr,
+            @RequestParam(value = "to",   required = false) String toStr,
+            @RequestParam(value = "limit", required = false, defaultValue = "100000") int limit) {
+        org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
+        if (fromStr != null && toStr != null) {
+            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
+            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+            return transactionRepository.findAllWithDetailsByActivityDateHq(from, to, page);
+        }
+        return transactionRepository.findAllWithDetailsHq(page);
+    }
+
 
     // ── Get only CONSIGNMENT transactions (for ConsigneesPage) ───────────────
     @GetMapping("/consignment")

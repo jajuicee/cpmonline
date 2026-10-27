@@ -23,18 +23,32 @@ import {
     Sparkles,
     ShieldAlert,
     Receipt,
-    Wallet
+    Wallet,
+    Store,
+    ChevronDown,
+    Layers,
+    ArrowDownRight,
+    Tag,
+    RefreshCw
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
     `₱${Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const PIE_COLORS = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b'];
+const PIE_COLORS = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#06b6d4', '#64748b'];
 
 const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName }) => {
-    const { currentBranchId: authBranchId, user } = useAuth();
-    const effectiveBranchId = propBranchId !== undefined ? propBranchId : authBranchId;
-    const displayName = propBranchName || user?.branchName || 'Store';
+    const { currentBranchId: authBranchId, user, isAdmin, isBranch } = useAuth();
+    
+    // Admin branch selector state when viewing standalone /branch-analytics
+    const [branches, setBranches] = useState([]);
+    const [adminSelectedBranchId, setAdminSelectedBranchId] = useState(authBranchId || null);
+
+    // If propBranchId is passed (e.g. inside BranchDetail.jsx), strictly use it
+    // Otherwise, if admin, use adminSelectedBranchId; if branch user, use user.branchId
+    const effectiveBranchId = propBranchId !== undefined
+        ? propBranchId
+        : (isBranch ? user?.branchId : adminSelectedBranchId);
 
     const [transactions, setTransactions] = useState([]);
     const [categorySales, setCategorySales] = useState(null);
@@ -42,7 +56,32 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
     const [duesData, setDuesData] = useState({ totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] });
     const [expenses, setExpenses] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [timeRange, setTimeRange] = useState('30D'); // '7D', '30D', 'ALL'
+    const [timeRange, setTimeRange] = useState('30D'); // '7D', '30D', '90D', 'ALL'
+
+    // Fetch branches list for admin dropdown
+    useEffect(() => {
+        if (isAdmin && propBranchId === undefined) {
+            axios.get('/api/admin/branches')
+                .then(res => {
+                    const list = Array.isArray(res.data) ? res.data.filter(b => b.active) : [];
+                    setBranches(list);
+                })
+                .catch(err => console.error('Failed to load branches:', err));
+        }
+    }, [isAdmin, propBranchId]);
+
+    // Resolved display name
+    const activeBranchObj = useMemo(() => {
+        if (effectiveBranchId && branches.length > 0) {
+            return branches.find(b => String(b.id) === String(effectiveBranchId));
+        }
+        return null;
+    }, [effectiveBranchId, branches]);
+
+    const displayName = propBranchName
+        || activeBranchObj?.name
+        || user?.branchName
+        || (effectiveBranchId ? `Branch #${effectiveBranchId}` : 'All Branches');
 
     const fetchBranchData = async () => {
         setLoading(true);
@@ -96,20 +135,32 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
         let totalRev = 0;
         let totalUnits = 0;
 
-        // Daily bucket map for trend chart
+        // Daily bucket map for trend chart with exact YYYY-MM-DD keys to prevent cross-year collisions
         const dayMap = {};
-        const daysBack = timeRange === '7D' ? 7 : timeRange === '30D' ? 30 : 90;
-        const cutoffTime = now.getTime() - (daysBack * 24 * 60 * 60 * 1000);
+        const daysBack = timeRange === '7D' ? 7 : timeRange === '30D' ? 30 : timeRange === '90D' ? 90 : 365;
+        const cutoffTime = timeRange === 'ALL' ? 0 : now.getTime() - (daysBack * 24 * 60 * 60 * 1000);
 
+        const pad = (n) => String(n).padStart(2, '0');
         for (let i = daysBack - 1; i >= 0; i--) {
             const d = new Date(now);
             d.setDate(now.getDate() - i);
-            const key = `${d.getMonth() + 1}/${d.getDate()}`;
-            dayMap[key] = { date: key, revenue: 0, units: 0 };
+            const isoKey = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            const displayKey = `${d.getMonth() + 1}/${d.getDate()}`;
+            dayMap[isoKey] = {
+                iso: isoKey,
+                date: displayKey,
+                revenue: 0,
+                units: 0,
+                orders: new Set()
+            };
         }
 
-        // Product ranking map
+        // Product ranking & Category maps for the active time range
         const prodRankMap = {};
+        const catMap = {};
+        const paymentMap = {};
+        const periodOrdersSet = new Set();
+        let periodUnits = 0;
 
         transactions.forEach(t => {
             const price = parseFloat(t.finalPrice || t.totalPrice || 0);
@@ -131,25 +182,44 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                 monthUnits += qty;
             }
 
-            // Fill trend chart bucket
+            // Trend chart bucket (exact ISO date match)
             if (t.transactionDate) {
                 const txD = new Date(t.transactionDate);
-                const k = `${txD.getMonth() + 1}/${txD.getDate()}`;
-                if (dayMap[k]) {
-                    dayMap[k].revenue += price;
-                    dayMap[k].units += qty;
+                const isoKey = `${txD.getFullYear()}-${pad(txD.getMonth() + 1)}-${pad(txD.getDate())}`;
+                if (dayMap[isoKey]) {
+                    dayMap[isoKey].revenue += price;
+                    dayMap[isoKey].units += qty;
+                    if (t.transactionId) dayMap[isoKey].orders.add(t.transactionId);
                 }
             }
 
-            // Fill product rank
-            const v = t.variant;
-            const p = v?.product;
-            const prodName = p ? `${p.brandName} ${p.modelName}` : (t.productName || 'Unknown Product');
-            if (!prodRankMap[prodName]) {
-                prodRankMap[prodName] = { name: prodName, units: 0, revenue: 0 };
+            // Scoped to active timeRange cutoff
+            if (txTime >= cutoffTime) {
+                periodUnits += qty;
+                if (t.transactionId) periodOrdersSet.add(t.transactionId);
+
+                // Product rank
+                const v = t.variant;
+                const p = v?.product;
+                const prodName = p ? `${p.brandName} ${p.modelName}` : (t.productName || 'Unknown Product');
+                if (!prodRankMap[prodName]) {
+                    prodRankMap[prodName] = { name: prodName, sku: v?.sku || '', units: 0, revenue: 0 };
+                }
+                prodRankMap[prodName].units += qty;
+                prodRankMap[prodName].revenue += price;
+
+                // Category distribution
+                const cat = p?.category || t.category || 'General';
+                if (!catMap[cat]) {
+                    catMap[cat] = { name: cat, value: 0, units: 0 };
+                }
+                catMap[cat].value += price;
+                catMap[cat].units += qty;
+
+                // Payment distribution
+                const pMethod = t.paymentMethod || 'Other';
+                paymentMap[pMethod] = (paymentMap[pMethod] || 0) + price;
             }
-            prodRankMap[prodName].units += qty;
-            prodRankMap[prodName].revenue += price;
         });
 
         // Compute Branch Expenses in period
@@ -158,7 +228,7 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
         const expensesByCategory = {};
 
         expenses.forEach(e => {
-            if ("EXPENSE".equalsIgnoreCase ? !"EXPENSE".equalsIgnoreCase(e.type) : (e.type && e.type.toUpperCase() !== 'EXPENSE')) return;
+            if (e.type && e.type.toUpperCase() !== 'EXPENSE') return;
             const cost = parseFloat(e.cost || 0);
             totalExpenses += cost;
             const expTime = e.expenseDate ? new Date(e.expenseDate).getTime() : 0;
@@ -169,7 +239,13 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
             expensesByCategory[cat] = (expensesByCategory[cat] || 0) + cost;
         });
 
-        const trendData = Object.values(dayMap);
+        const trendData = Object.values(dayMap).map(d => ({
+            date: d.date,
+            revenue: d.revenue,
+            units: d.units,
+            orders: d.orders.size
+        }));
+
         const topProducts = Object.values(prodRankMap)
             .sort((a, b) => b.revenue - a.revenue)
             .slice(0, 6);
@@ -185,6 +261,7 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                         id: v.id,
                         name: `${p.brandName} ${p.modelName}`,
                         sku: v.sku,
+                        color: v.color && v.color !== 'N/A' ? v.color : '',
                         stock,
                         threshold,
                         isOut: stock === 0
@@ -196,6 +273,10 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
         // Period Sales in the trend days
         const periodRevenue = trendData.reduce((acc, d) => acc + d.revenue, 0);
         const periodNetProfit = periodRevenue - periodExpenses;
+        const periodOrdersCount = periodOrdersSet.size || Math.min(periodUnits, transactions.filter(t => (t.transactionDate ? new Date(t.transactionDate).getTime() : 0) >= cutoffTime).length);
+        const aov = periodOrdersCount > 0 ? (periodRevenue / periodOrdersCount) : 0;
+
+        const dynamicCategories = Object.values(catMap).filter(c => c.value > 0).sort((a, b) => b.value - a.value);
 
         return {
             todayRev,
@@ -208,23 +289,51 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
             periodRevenue,
             periodExpenses,
             periodNetProfit,
+            periodUnits,
+            periodOrdersCount,
+            aov,
             totalExpenses,
             expensesByCategory,
             trendData,
             topProducts,
-            lowStockItems
+            lowStockItems,
+            dynamicCategories,
+            paymentMap
         };
     }, [transactions, products, expenses, timeRange]);
 
-    // Format category pie data
+    // Format category pie data: prioritize live transactions in selected period, fallback to categorySales endpoint
     const categoryPieData = useMemo(() => {
+        if (metrics.dynamicCategories && metrics.dynamicCategories.length > 0) {
+            return metrics.dynamicCategories;
+        }
+
         if (!categorySales) return [];
-        return Object.entries(categorySales).map(([name, data]) => ({
-            name,
-            value: parseFloat(data.revenue || data.totalSales || data.amount || 0),
-            units: data.quantity || data.unitsSold || 0
-        })).filter(c => c.value > 0);
-    }, [categorySales]);
+
+        const list = Array.isArray(categorySales.categories)
+            ? categorySales.categories
+            : Array.isArray(categorySales)
+                ? categorySales
+                : null;
+
+        if (list) {
+            return list.map(c => ({
+                name: c.category || c.name || 'Uncategorized',
+                value: parseFloat(c.revenue || c.totalSales || c.amount || 0),
+                units: c.unitsSold || c.quantity || 0
+            })).filter(c => c.value > 0);
+        }
+
+        if (typeof categorySales === 'object') {
+            return Object.entries(categorySales).map(([name, data]) => ({
+                name,
+                value: typeof data === 'number' ? data : parseFloat(data?.revenue || data?.totalSales || data?.amount || 0),
+                units: data?.quantity || data?.unitsSold || 0
+            })).filter(c => c.value > 0);
+        }
+
+        return [];
+    }, [metrics.dynamicCategories, categorySales]);
 
     return (
         <div className="space-y-6 max-w-7xl mx-auto min-w-0 pb-12">
@@ -245,25 +354,60 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                         </p>
                     </div>
 
-                    {/* Time Range Selector */}
-                    <div className="flex items-center gap-1.5 bg-stone-800/80 p-1.5 rounded-2xl border border-stone-700">
-                        {[
-                            { id: '7D', label: 'Last 7 Days' },
-                            { id: '30D', label: 'Last 30 Days' },
-                            { id: 'ALL', label: '90 Days' },
-                        ].map(t => (
-                            <button
-                                key={t.id}
-                                onClick={() => setTimeRange(t.id)}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                                    timeRange === t.id
-                                        ? 'bg-emerald-600 text-white shadow-sm'
-                                        : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
-                                }`}
-                            >
-                                {t.label}
-                            </button>
-                        ))}
+                    <div className="flex flex-wrap items-center gap-3">
+                        {/* Admin Branch Selector (when viewing standalone page) */}
+                        {isAdmin && propBranchId === undefined && branches.length > 0 && (
+                            <div className="flex items-center gap-2 bg-stone-800/90 border border-stone-700 px-3 py-1.5 rounded-2xl">
+                                <Store size={14} className="text-emerald-400" />
+                                <span className="text-xs font-bold text-stone-300">Branch:</span>
+                                <select
+                                    value={adminSelectedBranchId || ''}
+                                    onChange={(e) => setAdminSelectedBranchId(e.target.value ? Number(e.target.value) : null)}
+                                    className="bg-transparent text-xs font-black text-white focus:outline-none cursor-pointer"
+                                >
+                                    <option value="" className="bg-stone-900 text-white">All Branches Consolidated</option>
+                                    {branches.map(b => (
+                                        <option key={b.id} value={b.id} className="bg-stone-900 text-white">
+                                            {b.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        {/* Refresh Button */}
+                        <button
+                            type="button"
+                            onClick={fetchBranchData}
+                            disabled={loading}
+                            className="p-2 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white rounded-xl border border-stone-700 transition-colors cursor-pointer"
+                            title="Refresh data"
+                        >
+                            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                        </button>
+
+                        {/* Time Range Selector */}
+                        <div className="flex items-center gap-1 bg-stone-800/80 p-1.5 rounded-2xl border border-stone-700">
+                            {[
+                                { id: '7D', label: '7 Days' },
+                                { id: '30D', label: '30 Days' },
+                                { id: '90D', label: '90 Days' },
+                                { id: 'ALL', label: 'All Time' },
+                            ].map(t => (
+                                <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => setTimeRange(t.id)}
+                                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                        timeRange === t.id
+                                            ? 'bg-emerald-600 text-white shadow-sm'
+                                            : 'text-stone-300 hover:text-white hover:bg-stone-700/50'
+                                    }`}
+                                >
+                                    {t.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -283,8 +427,9 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     <div className="text-2xl font-black text-stone-900 mt-2 font-mono">
                         {formatCurrency(metrics.periodRevenue)}
                     </div>
-                    <div className="text-xs text-stone-500 mt-1 font-medium flex items-center gap-1.5">
+                    <div className="text-xs text-stone-500 mt-1.5 font-medium flex items-center justify-between">
                         <span className="font-bold text-emerald-600">Today: {formatCurrency(metrics.todayRev)}</span>
+                        <span className="text-stone-400">{metrics.periodUnits} units sold</span>
                     </div>
                 </div>
 
@@ -301,7 +446,7 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     <div className="text-2xl font-black text-rose-600 mt-2 font-mono">
                         {formatCurrency(metrics.periodExpenses)}
                     </div>
-                    <div className="text-xs text-stone-500 mt-1 font-medium">
+                    <div className="text-xs text-stone-500 mt-1.5 font-medium">
                         Rent, utilities, local branch costs
                     </div>
                 </div>
@@ -325,8 +470,11 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     }`}>
                         {formatCurrency(metrics.periodNetProfit)}
                     </div>
-                    <div className="text-xs text-stone-500 mt-1 font-medium">
-                        Sales minus Operating Expenses
+                    <div className="text-xs text-stone-500 mt-1.5 font-medium flex items-center justify-between">
+                        <span>Sales minus Expenses</span>
+                        {metrics.aov > 0 && (
+                            <span className="font-bold text-stone-600">AOV: {formatCurrency(metrics.aov)}</span>
+                        )}
                     </div>
                 </div>
 
@@ -343,13 +491,15 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     <div className="text-2xl font-black text-amber-700 mt-2 font-mono">
                         {formatCurrency(duesData.totalOutstanding || 0)}
                     </div>
-                    <div className="text-xs text-amber-800 mt-1 font-medium flex items-center gap-1.5">
+                    <div className="text-xs text-amber-800 mt-1.5 font-medium flex items-center gap-1.5">
                         {duesData.overdueCount > 0 ? (
                             <span className="text-rose-600 font-bold flex items-center gap-1">
-                                <AlertTriangle size={12} /> {duesData.overdueCount} overdue
+                                <AlertTriangle size={12} /> {duesData.overdueCount} overdue batch(es)
                             </span>
                         ) : (
-                            <span>All deadlines current</span>
+                            <span className="text-emerald-600 font-bold flex items-center gap-1">
+                                <CheckCircle2 size={12} /> All deadlines current
+                            </span>
                         )}
                     </div>
                 </div>
@@ -358,18 +508,18 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
             {/* Charts Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Revenue Trend Chart */}
-                <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-stone-200 shadow-sm">
+                <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-stone-200 shadow-sm flex flex-col">
                     <div className="flex items-center justify-between mb-5">
                         <div>
-                            <h3 className="font-black text-stone-900 text-base">Revenue Trend</h3>
-                            <p className="text-xs text-stone-400 mt-0.5">Daily gross sales over the selected period</p>
+                            <h3 className="font-black text-stone-900 text-base">Revenue & Velocity Trend</h3>
+                            <p className="text-xs text-stone-400 mt-0.5">Daily gross sales over the selected period ({timeRange})</p>
                         </div>
                         <div className="text-xs font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">
                             Daily Flow
                         </div>
                     </div>
 
-                    <div className="h-64 w-full">
+                    <div className="h-64 w-full flex-1 min-h-[250px]">
                         {loading ? (
                             <div className="h-full flex items-center justify-center text-stone-400">
                                 <Loader2 className="w-6 h-6 animate-spin text-stone-500" />
@@ -391,12 +541,16 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                                         tickFormatter={(v) => `₱${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`}
                                     />
                                     <RechartsTooltip
-                                        formatter={(val) => [formatCurrency(val), 'Revenue']}
+                                        formatter={(val, name) => [
+                                            name === 'revenue' ? formatCurrency(val) : val,
+                                            name === 'revenue' ? 'Sales Revenue' : 'Units Sold'
+                                        ]}
                                         contentStyle={{ backgroundColor: '#0f172a', borderRadius: '12px', border: 'none', color: '#fff', fontSize: '12px' }}
                                     />
                                     <Line
                                         type="monotone"
                                         dataKey="revenue"
+                                        name="revenue"
                                         stroke="#10b981"
                                         strokeWidth={3}
                                         dot={{ fill: '#10b981', r: 3 }}
@@ -413,16 +567,16 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     <div className="flex items-center justify-between mb-4">
                         <div>
                             <h3 className="font-black text-stone-900 text-base">Sales by Category</h3>
-                            <p className="text-xs text-stone-400 mt-0.5">Revenue share breakdown</p>
+                            <p className="text-xs text-stone-400 mt-0.5">Revenue share breakdown ({timeRange})</p>
                         </div>
                         <PieIcon size={18} className="text-stone-400" />
                     </div>
 
-                    <div className="h-56 w-full flex-1 flex items-center justify-center">
+                    <div className="h-56 w-full flex-1 flex items-center justify-center min-h-[220px]">
                         {loading ? (
                             <Loader2 className="w-6 h-6 animate-spin text-stone-500" />
                         ) : categoryPieData.length === 0 ? (
-                            <div className="text-xs text-stone-400 text-center">No category data yet.</div>
+                            <div className="text-xs text-stone-400 text-center py-8">No category sales in this period.</div>
                         ) : (
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
@@ -450,10 +604,11 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     </div>
 
                     <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                        {categoryPieData.slice(0, 4).map((c, i) => (
+                        {categoryPieData.slice(0, 6).map((c, i) => (
                             <div key={c.name} className="flex items-center gap-1.5 truncate">
                                 <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
                                 <span className="text-stone-600 font-semibold truncate">{c.name}</span>
+                                <span className="text-stone-400 text-[10px] ml-auto font-mono">{formatCurrency(c.value)}</span>
                             </div>
                         ))}
                     </div>
@@ -463,33 +618,37 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
             {/* Bottom Row: Top Selling Products & Low Stock Alerts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Top Moving Products */}
-                <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm flex flex-col">
                     <div className="flex items-center justify-between mb-4">
                         <div>
                             <h3 className="font-black text-stone-900 text-base">Top Performing Products</h3>
-                            <p className="text-xs text-stone-400 mt-0.5">Ranked by total revenue at this branch</p>
+                            <p className="text-xs text-stone-400 mt-0.5">Ranked by revenue at this branch ({timeRange})</p>
                         </div>
                         <BarChart3 size={18} className="text-stone-400" />
                     </div>
 
                     {metrics.topProducts.length === 0 ? (
-                        <div className="p-8 text-center text-xs text-stone-400">
-                            No product sales recorded yet.
+                        <div className="p-12 text-center text-xs text-stone-400 bg-stone-50 rounded-xl my-auto">
+                            No product sales recorded in this period.
                         </div>
                     ) : (
-                        <div className="space-y-3">
+                        <div className="space-y-3 flex-1">
                             {metrics.topProducts.map((p, idx) => (
                                 <div key={p.name} className="flex items-center justify-between p-3 rounded-xl bg-stone-50 hover:bg-stone-100/70 transition-colors">
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-6 h-6 rounded-lg bg-stone-900 text-white font-black text-xs flex items-center justify-center shrink-0">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <span className={`w-6 h-6 rounded-lg text-white font-black text-xs flex items-center justify-center shrink-0 ${
+                                            idx === 0 ? 'bg-amber-500' : idx === 1 ? 'bg-stone-500' : idx === 2 ? 'bg-amber-700' : 'bg-stone-900'
+                                        }`}>
                                             {idx + 1}
                                         </span>
-                                        <div>
-                                            <div className="font-black text-stone-900 text-xs">{p.name}</div>
-                                            <div className="text-[11px] text-stone-400 font-semibold">{p.units} units sold</div>
+                                        <div className="min-w-0">
+                                            <div className="font-black text-stone-900 text-xs truncate">{p.name}</div>
+                                            <div className="text-[11px] text-stone-400 font-semibold">
+                                                {p.units} units sold {p.sku && `• ${p.sku}`}
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="font-black text-stone-900 text-xs font-mono">
+                                    <div className="font-black text-stone-900 text-xs font-mono shrink-0 ml-3">
                                         {formatCurrency(p.revenue)}
                                     </div>
                                 </div>
@@ -499,28 +658,30 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                 </div>
 
                 {/* Inventory Health & Low Stock */}
-                <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-6 border border-stone-200 shadow-sm flex flex-col">
                     <div className="flex items-center justify-between mb-4">
                         <div>
-                            <h3 className="font-black text-stone-900 text-base">Inventory Health & Low Stock</h3>
-                            <p className="text-xs text-stone-400 mt-0.5">Variants that need replenishment from Admin</p>
+                            <h3 className="font-black text-stone-900 text-base">Inventory Health & Stock Alerts</h3>
+                            <p className="text-xs text-stone-400 mt-0.5">Variants that need replenishment from Admin HQ</p>
                         </div>
                         <Boxes size={18} className="text-stone-400" />
                     </div>
 
                     {metrics.lowStockItems.length === 0 ? (
-                        <div className="p-8 text-center text-xs text-emerald-600 font-bold bg-emerald-50 rounded-xl">
-                            All paddle variants have healthy stock levels!
+                        <div className="p-12 text-center text-xs text-emerald-700 font-bold bg-emerald-50 rounded-xl my-auto border border-emerald-100">
+                            ✓ All paddle variants have healthy stock levels!
                         </div>
                     ) : (
-                        <div className="space-y-2.5">
+                        <div className="space-y-2.5 max-h-80 overflow-y-auto custom-scrollbar pr-1 flex-1">
                             {metrics.lowStockItems.map(item => (
-                                <div key={item.id} className="flex items-center justify-between p-2.5 rounded-xl border border-stone-100 bg-stone-50/50">
-                                    <div>
-                                        <div className="font-black text-stone-900 text-xs">{item.name}</div>
-                                        <div className="text-[11px] font-mono text-stone-400">{item.sku}</div>
+                                <div key={item.id} className="flex items-center justify-between p-2.5 rounded-xl border border-stone-100 bg-stone-50/50 hover:bg-stone-50 transition-colors">
+                                    <div className="min-w-0 pr-2">
+                                        <div className="font-black text-stone-900 text-xs truncate">{item.name}</div>
+                                        <div className="text-[11px] font-mono text-stone-400">
+                                            {item.sku} {item.color && `• ${item.color}`}
+                                        </div>
                                     </div>
-                                    <div className="text-right">
+                                    <div className="text-right shrink-0">
                                         <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black ${
                                             item.isOut
                                                 ? 'bg-rose-100 text-rose-700'
@@ -528,7 +689,7 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                                         }`}>
                                             {item.isOut ? 'Out of Stock' : `${item.stock} left`}
                                         </span>
-                                        <div className="text-[10px] text-stone-400 mt-0.5">Threshold: {item.threshold}</div>
+                                        <div className="text-[10px] text-stone-400 mt-0.5">Alert &le; {item.threshold}</div>
                                     </div>
                                 </div>
                             ))}

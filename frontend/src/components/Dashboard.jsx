@@ -389,6 +389,7 @@ const Dashboard = () => {
                                         <Route path="/money-tracker" element={<MoneyTracker />} />
                                         <Route path="/branches" element={<BranchesAdmin />} />
                                         <Route path="/branches/:branchId" element={<BranchDetail />} />
+                                        <Route path="/branch-analytics" element={<BranchAnalytics />} />
                                         <Route path="/accounts" element={<AccountsAdmin />} />
                                     </>
                                 ) : (

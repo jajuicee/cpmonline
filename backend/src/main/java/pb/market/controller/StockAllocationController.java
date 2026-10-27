@@ -202,9 +202,22 @@ public class StockAllocationController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> listAllocations(@RequestParam(required = false) Long branchId) {
         List<BranchStockAllocation> list = (branchId != null)
-                ? allocationRepo.findByBranchIdOrderByAllocatedAtDesc(branchId)
-                : allocationRepo.findAllByOrderByAllocatedAtDesc();
-        return ResponseEntity.ok(list.stream().map(this::toMap).toList());
+                ? allocationRepo.findByBranchIdWithDetails(branchId)
+                : allocationRepo.findAllWithDetails();
+
+        List<Long> sbIds = list.stream()
+                .map(BranchStockAllocation::getStockBatchId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Integer> remainingQtyMap = new HashMap<>();
+        if (!sbIds.isEmpty()) {
+            stockBatchRepository.findAllById(sbIds).forEach(sb -> {
+                remainingQtyMap.put(sb.getId(), sb.getRemainingQuantity() != null ? sb.getRemainingQuantity() : 0);
+            });
+        }
+
+        return ResponseEntity.ok(list.stream().map(a -> toMap(a, remainingQtyMap)).toList());
     }
 
     // ─── GET /api/admin/allocations/summary ───────────────────────────────────
@@ -241,7 +254,7 @@ public class StockAllocationController {
     }
 
     // ─── GET /api/admin/allocations/branch-dues ───────────────────────────────
-    // Branch user: see their own allocations / dues
+    // Branch user: see their own allocations / dues (fast eager-fetch, 0 N+1 queries)
 
     @GetMapping({"/branch-dues", "/my-dues"})
     public ResponseEntity<?> branchDues(
@@ -263,16 +276,48 @@ public class StockAllocationController {
         LocalDate today = LocalDate.now();
         LocalDate cutoff = today.plusDays(7);
 
-        List<BranchStockAllocation> all = allocationRepo.findByBranchIdOrderByAllocatedAtDesc(effectiveBranchId);
-        BigDecimal totalOutstanding = allocationRepo.sumOutstandingByBranchId(effectiveBranchId);
-        List<BranchStockAllocation> overdue = allocationRepo.findOverdueByBranch(effectiveBranchId, today);
-        List<BranchStockAllocation> upcoming = allocationRepo.findUpcomingByBranch(effectiveBranchId, today, cutoff);
+        // 1 single query eager-fetching variant, product, and branch
+        List<BranchStockAllocation> all = allocationRepo.findByBranchIdWithDetails(effectiveBranchId);
+
+        // 1 batch query for remaining quantities
+        List<Long> sbIds = all.stream()
+                .map(BranchStockAllocation::getStockBatchId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, Integer> remainingQtyMap = new HashMap<>();
+        if (!sbIds.isEmpty()) {
+            stockBatchRepository.findAllById(sbIds).forEach(sb -> {
+                remainingQtyMap.put(sb.getId(), sb.getRemainingQuantity() != null ? sb.getRemainingQuantity() : 0);
+            });
+        }
+
+        BigDecimal totalOutstanding = BigDecimal.ZERO;
+        int overdueCount = 0;
+        int upcomingCount = 0;
+
+        for (BranchStockAllocation a : all) {
+            BigDecimal cost = a.getTotalCost() != null ? a.getTotalCost() : BigDecimal.ZERO;
+            BigDecimal paid = a.getAmountPaid() != null ? a.getAmountPaid() : BigDecimal.ZERO;
+            BigDecimal rem = cost.subtract(paid);
+
+            if (!"PAID".equalsIgnoreCase(a.getStatus()) && rem.compareTo(BigDecimal.ZERO) > 0) {
+                totalOutstanding = totalOutstanding.add(rem);
+                if (a.getDeadline() != null) {
+                    if (a.getDeadline().isBefore(today)) {
+                        overdueCount++;
+                    } else if (!a.getDeadline().isAfter(cutoff)) {
+                        upcomingCount++;
+                    }
+                }
+            }
+        }
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("totalOutstanding", totalOutstanding != null ? totalOutstanding : BigDecimal.ZERO);
-        result.put("overdueCount", overdue.size());
-        result.put("upcomingCount", upcoming.size());
-        result.put("allocations", all.stream().map(this::toMap).toList());
+        result.put("totalOutstanding", totalOutstanding);
+        result.put("overdueCount", overdueCount);
+        result.put("upcomingCount", upcomingCount);
+        result.put("allocations", all.stream().map(a -> toMap(a, remainingQtyMap)).toList());
 
         return ResponseEntity.ok(result);
     }
@@ -412,6 +457,10 @@ public class StockAllocationController {
     // ─── Helper: serialize allocation to map ──────────────────────────────────
 
     private Map<String, Object> toMap(BranchStockAllocation a) {
+        return toMap(a, null);
+    }
+
+    private Map<String, Object> toMap(BranchStockAllocation a, Map<Long, Integer> remainingQtyMap) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", a.getId());
         m.put("branchId", a.getBranch() != null ? a.getBranch().getId() : null);
@@ -451,9 +500,15 @@ public class StockAllocationController {
         m.put("stockBatchId", a.getStockBatchId());
         m.put("allocatedAt", a.getAllocatedAt() != null ? a.getAllocatedAt().toString() : null);
 
-        // Live item tracking at the destination branch
-        StockBatch sb = a.getStockBatchId() != null ? stockBatchRepository.findById(a.getStockBatchId()).orElse(null) : null;
-        int remainingUnits = (sb != null && sb.getRemainingQuantity() != null) ? sb.getRemainingQuantity() : 0;
+        // Live item tracking at the destination branch - fast memory lookup
+        int remainingUnits = 0;
+        if (remainingQtyMap != null && a.getStockBatchId() != null) {
+            remainingUnits = remainingQtyMap.getOrDefault(a.getStockBatchId(), 0);
+        } else if (a.getStockBatchId() != null) {
+            StockBatch sb = stockBatchRepository.findById(a.getStockBatchId()).orElse(null);
+            remainingUnits = (sb != null && sb.getRemainingQuantity() != null) ? sb.getRemainingQuantity() : 0;
+        }
+
         int totalUnits = a.getQuantity() != null ? a.getQuantity() : 0;
         int soldUnits = Math.max(0, totalUnits - remainingUnits);
         m.put("remainingQuantity", remainingUnits);

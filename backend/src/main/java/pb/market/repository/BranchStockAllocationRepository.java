@@ -13,6 +13,23 @@ public interface BranchStockAllocationRepository extends JpaRepository<BranchSto
     /** All allocations for a specific branch, newest first */
     List<BranchStockAllocation> findByBranchIdOrderByAllocatedAtDesc(Long branchId);
 
+    /** Eager-load allocations with variant, product, and branch in a single query */
+    @Query("SELECT DISTINCT a FROM BranchStockAllocation a " +
+           "JOIN FETCH a.variant v " +
+           "JOIN FETCH v.product p " +
+           "JOIN FETCH a.branch b " +
+           "WHERE b.id = :branchId " +
+           "ORDER BY a.allocatedAt DESC")
+    List<BranchStockAllocation> findByBranchIdWithDetails(@Param("branchId") Long branchId);
+
+    /** All allocations across all branches with eager details */
+    @Query("SELECT DISTINCT a FROM BranchStockAllocation a " +
+           "JOIN FETCH a.variant v " +
+           "JOIN FETCH v.product p " +
+           "JOIN FETCH a.branch b " +
+           "ORDER BY a.allocatedAt DESC")
+    List<BranchStockAllocation> findAllWithDetails();
+
     /** Allocations filtered by payment status */
     List<BranchStockAllocation> findByBranchIdAndStatusOrderByDeadlineAsc(Long branchId, String status);
 

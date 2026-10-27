@@ -56,6 +56,9 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
     const [duesData, setDuesData] = useState({ totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] });
     const [expenses, setExpenses] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadingCharts, setLoadingCharts] = useState(true);
+    const [loadingDues, setLoadingDues] = useState(true);
+    const [loadingInventory, setLoadingInventory] = useState(true);
     const [timeRange, setTimeRange] = useState('30D'); // '7D', '30D', '90D', 'ALL'
 
     // Fetch branches list for admin dropdown
@@ -83,8 +86,12 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
         || user?.branchName
         || (effectiveBranchId ? `Branch #${effectiveBranchId}` : 'All Branches');
 
-    const fetchBranchData = async () => {
+    const fetchBranchData = () => {
         setLoading(true);
+        setLoadingCharts(true);
+        setLoadingDues(true);
+        setLoadingInventory(true);
+
         const branchParam = effectiveBranchId ? `&branchId=${effectiveBranchId}` : '';
         const txUrl = `/api/transactions?limit=10000${branchParam}`;
         const catUrl = `/api/transactions/category-sales${branchParam ? `?${branchParam.substring(1)}` : ''}`;
@@ -92,25 +99,32 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
         const duesUrl = effectiveBranchId ? `/api/allocations/branch-dues?branchId=${effectiveBranchId}` : `/api/allocations/branch-dues`;
         const expUrl = effectiveBranchId ? `/api/expenses?branchId=${effectiveBranchId}` : `/api/expenses`;
 
-        try {
-            const [txRes, catRes, prodRes, duesRes, expRes] = await Promise.all([
-                axios.get(txUrl).catch(() => ({ data: [] })),
-                axios.get(catUrl).catch(() => ({ data: null })),
-                axios.get(prodUrl).catch(() => ({ data: [] })),
-                axios.get(duesUrl).catch(() => ({ data: { totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] } })),
-                axios.get(expUrl).catch(() => ({ data: [] }))
-            ]);
+        const pTx = axios.get(txUrl)
+            .then(res => setTransactions(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setTransactions([]))
+            .finally(() => setLoadingCharts(false));
 
-            setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
-            setCategorySales(catRes.data || null);
-            setProducts(Array.isArray(prodRes.data) ? prodRes.data : []);
-            setDuesData(duesRes.data || {});
-            setExpenses(Array.isArray(expRes.data) ? expRes.data : []);
-        } catch (err) {
-            console.error('Failed to load branch analytics data:', err);
-        } finally {
+        const pCat = axios.get(catUrl)
+            .then(res => setCategorySales(res.data || null))
+            .catch(() => setCategorySales(null));
+
+        const pDues = axios.get(duesUrl)
+            .then(res => setDuesData(res.data || {}))
+            .catch(() => setDuesData({ totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] }))
+            .finally(() => setLoadingDues(false));
+
+        const pExp = axios.get(expUrl)
+            .then(res => setExpenses(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setExpenses([]));
+
+        const pProd = axios.get(prodUrl)
+            .then(res => setProducts(Array.isArray(res.data) ? res.data : []))
+            .catch(() => setProducts([]))
+            .finally(() => setLoadingInventory(false));
+
+        Promise.allSettled([pTx, pCat, pDues, pExp, pProd]).finally(() => {
             setLoading(false);
-        }
+        });
     };
 
     useEffect(() => {
@@ -489,7 +503,11 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                         </div>
                     </div>
                     <div className="text-2xl font-black text-amber-700 mt-2 font-mono">
-                        {formatCurrency(duesData.totalOutstanding || 0)}
+                        {loadingDues ? (
+                            <span className="text-amber-400 text-lg animate-pulse">Loading...</span>
+                        ) : (
+                            formatCurrency(duesData.totalOutstanding || 0)
+                        )}
                     </div>
                     <div className="text-xs text-amber-800 mt-1.5 font-medium flex items-center gap-1.5">
                         {duesData.overdueCount > 0 ? (
@@ -520,7 +538,7 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     </div>
 
                     <div className="h-64 w-full flex-1 min-h-[250px]">
-                        {loading ? (
+                        {loadingCharts ? (
                             <div className="h-full flex items-center justify-center text-stone-400">
                                 <Loader2 className="w-6 h-6 animate-spin text-stone-500" />
                             </div>
@@ -573,7 +591,7 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                     </div>
 
                     <div className="h-56 w-full flex-1 flex items-center justify-center min-h-[220px]">
-                        {loading ? (
+                        {loadingCharts ? (
                             <Loader2 className="w-6 h-6 animate-spin text-stone-500" />
                         ) : categoryPieData.length === 0 ? (
                             <div className="text-xs text-stone-400 text-center py-8">No category sales in this period.</div>
@@ -627,7 +645,11 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                         <BarChart3 size={18} className="text-stone-400" />
                     </div>
 
-                    {metrics.topProducts.length === 0 ? (
+                    {loadingCharts ? (
+                        <div className="p-12 text-center text-xs text-stone-400 bg-stone-50 rounded-xl my-auto flex items-center justify-center">
+                            <Loader2 className="w-5 h-5 animate-spin text-stone-400" />
+                        </div>
+                    ) : metrics.topProducts.length === 0 ? (
                         <div className="p-12 text-center text-xs text-stone-400 bg-stone-50 rounded-xl my-auto">
                             No product sales recorded in this period.
                         </div>
@@ -667,7 +689,11 @@ const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName })
                         <Boxes size={18} className="text-stone-400" />
                     </div>
 
-                    {metrics.lowStockItems.length === 0 ? (
+                    {loadingInventory ? (
+                        <div className="p-12 text-center text-xs text-stone-400 bg-stone-50 rounded-xl my-auto flex items-center justify-center">
+                            <Loader2 className="w-5 h-5 animate-spin text-stone-400" />
+                        </div>
+                    ) : metrics.lowStockItems.length === 0 ? (
                         <div className="p-12 text-center text-xs text-emerald-700 font-bold bg-emerald-50 rounded-xl my-auto border border-emerald-100">
                             ✓ All paddle variants have healthy stock levels!
                         </div>

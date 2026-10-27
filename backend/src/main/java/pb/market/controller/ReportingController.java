@@ -232,7 +232,13 @@ public class ReportingController {
     @GetMapping("/income-summary")
     public ResponseEntity<?> getIncomeSummary(
             @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) Long branchId,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
+
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            branchId = user.getBranchId();
+        }
 
         java.math.BigDecimal totalIncome;
         java.util.List<Object[]> methodRows;
@@ -240,11 +246,21 @@ public class ReportingController {
         if (from != null && to != null) {
             LocalDateTime fromDt = LocalDateTime.parse(from);
             LocalDateTime toDt   = LocalDateTime.parse(to);
-            totalIncome = transactionRepository.sumFinalPriceInRange(fromDt, toDt);
-            methodRows  = transactionRepository.sumFinalPriceByPaymentMethodInRange(fromDt, toDt);
+            if (branchId != null) {
+                totalIncome = transactionRepository.sumFinalPriceInRangeAndBranch(fromDt, toDt, branchId);
+                methodRows  = transactionRepository.sumFinalPriceByPaymentMethodInRangeAndBranch(fromDt, toDt, branchId);
+            } else {
+                totalIncome = transactionRepository.sumFinalPriceInRange(fromDt, toDt);
+                methodRows  = transactionRepository.sumFinalPriceByPaymentMethodInRange(fromDt, toDt);
+            }
         } else {
-            totalIncome = transactionRepository.sumFinalPriceAll();
-            methodRows  = transactionRepository.sumFinalPriceByPaymentMethodAll();
+            if (branchId != null) {
+                totalIncome = transactionRepository.sumFinalPriceAllByBranch(branchId);
+                methodRows  = transactionRepository.sumFinalPriceByPaymentMethodAllByBranch(branchId);
+            } else {
+                totalIncome = transactionRepository.sumFinalPriceAll();
+                methodRows  = transactionRepository.sumFinalPriceByPaymentMethodAll();
+            }
         }
 
         if (totalIncome == null) totalIncome = java.math.BigDecimal.ZERO;

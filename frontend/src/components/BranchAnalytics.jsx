@@ -21,7 +21,9 @@ import {
     PieChart as PieIcon,
     BarChart3,
     Sparkles,
-    ShieldAlert
+    ShieldAlert,
+    Receipt,
+    Wallet
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
@@ -29,35 +31,42 @@ const formatCurrency = (val) =>
 
 const PIE_COLORS = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b'];
 
-const BranchAnalytics = () => {
-    const { currentBranchId, user } = useAuth();
+const BranchAnalytics = ({ branchId: propBranchId, branchName: propBranchName }) => {
+    const { currentBranchId: authBranchId, user } = useAuth();
+    const effectiveBranchId = propBranchId !== undefined ? propBranchId : authBranchId;
+    const displayName = propBranchName || user?.branchName || 'Store';
+
     const [transactions, setTransactions] = useState([]);
     const [categorySales, setCategorySales] = useState(null);
     const [products, setProducts] = useState([]);
     const [duesData, setDuesData] = useState({ totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] });
+    const [expenses, setExpenses] = useState([]);
     const [loading, setLoading] = useState(true);
     const [timeRange, setTimeRange] = useState('30D'); // '7D', '30D', 'ALL'
 
     const fetchBranchData = async () => {
         setLoading(true);
-        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
+        const branchParam = effectiveBranchId ? `&branchId=${effectiveBranchId}` : '';
         const txUrl = `/api/transactions?limit=10000${branchParam}`;
         const catUrl = `/api/transactions/category-sales${branchParam ? `?${branchParam.substring(1)}` : ''}`;
-        const prodUrl = currentBranchId ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
-        const duesUrl = currentBranchId ? `/api/allocations/branch-dues?branchId=${currentBranchId}` : `/api/allocations/branch-dues`;
+        const prodUrl = effectiveBranchId ? `/api/products?branchId=${effectiveBranchId}` : `/api/products`;
+        const duesUrl = effectiveBranchId ? `/api/allocations/branch-dues?branchId=${effectiveBranchId}` : `/api/allocations/branch-dues`;
+        const expUrl = effectiveBranchId ? `/api/expenses?branchId=${effectiveBranchId}` : `/api/expenses`;
 
         try {
-            const [txRes, catRes, prodRes, duesRes] = await Promise.all([
+            const [txRes, catRes, prodRes, duesRes, expRes] = await Promise.all([
                 axios.get(txUrl).catch(() => ({ data: [] })),
                 axios.get(catUrl).catch(() => ({ data: null })),
                 axios.get(prodUrl).catch(() => ({ data: [] })),
-                axios.get(duesUrl).catch(() => ({ data: { totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] } }))
+                axios.get(duesUrl).catch(() => ({ data: { totalOutstanding: 0, overdueCount: 0, upcomingCount: 0, allocations: [] } })),
+                axios.get(expUrl).catch(() => ({ data: [] }))
             ]);
 
             setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
             setCategorySales(catRes.data || null);
             setProducts(Array.isArray(prodRes.data) ? prodRes.data : []);
             setDuesData(duesRes.data || {});
+            setExpenses(Array.isArray(expRes.data) ? expRes.data : []);
         } catch (err) {
             console.error('Failed to load branch analytics data:', err);
         } finally {
@@ -67,7 +76,7 @@ const BranchAnalytics = () => {
 
     useEffect(() => {
         fetchBranchData();
-    }, [currentBranchId]);
+    }, [effectiveBranchId]);
 
     // Compute key metrics
     const metrics = useMemo(() => {
@@ -90,6 +99,7 @@ const BranchAnalytics = () => {
         // Daily bucket map for trend chart
         const dayMap = {};
         const daysBack = timeRange === '7D' ? 7 : timeRange === '30D' ? 30 : 90;
+        const cutoffTime = now.getTime() - (daysBack * 24 * 60 * 60 * 1000);
 
         for (let i = daysBack - 1; i >= 0; i--) {
             const d = new Date(now);
@@ -142,6 +152,23 @@ const BranchAnalytics = () => {
             prodRankMap[prodName].revenue += price;
         });
 
+        // Compute Branch Expenses in period
+        let periodExpenses = 0;
+        let totalExpenses = 0;
+        const expensesByCategory = {};
+
+        expenses.forEach(e => {
+            if ("EXPENSE".equalsIgnoreCase ? !"EXPENSE".equalsIgnoreCase(e.type) : (e.type && e.type.toUpperCase() !== 'EXPENSE')) return;
+            const cost = parseFloat(e.cost || 0);
+            totalExpenses += cost;
+            const expTime = e.expenseDate ? new Date(e.expenseDate).getTime() : 0;
+            if (expTime >= cutoffTime) {
+                periodExpenses += cost;
+            }
+            const cat = e.category || 'General';
+            expensesByCategory[cat] = (expensesByCategory[cat] || 0) + cost;
+        });
+
         const trendData = Object.values(dayMap);
         const topProducts = Object.values(prodRankMap)
             .sort((a, b) => b.revenue - a.revenue)
@@ -166,6 +193,10 @@ const BranchAnalytics = () => {
             });
         });
 
+        // Period Sales in the trend days
+        const periodRevenue = trendData.reduce((acc, d) => acc + d.revenue, 0);
+        const periodNetProfit = periodRevenue - periodExpenses;
+
         return {
             todayRev,
             todayUnits,
@@ -174,37 +205,43 @@ const BranchAnalytics = () => {
             monthUnits,
             totalRev,
             totalUnits,
+            periodRevenue,
+            periodExpenses,
+            periodNetProfit,
+            totalExpenses,
+            expensesByCategory,
             trendData,
             topProducts,
-            lowStockItems: lowStockItems.slice(0, 8)
+            lowStockItems
         };
-    }, [transactions, products, timeRange]);
+    }, [transactions, products, expenses, timeRange]);
 
-    // Pie chart data for categories
+    // Format category pie data
     const categoryPieData = useMemo(() => {
-        if (!categorySales || typeof categorySales !== 'object') return [];
-        return Object.entries(categorySales).map(([name, val]) => ({
+        if (!categorySales) return [];
+        return Object.entries(categorySales).map(([name, data]) => ({
             name,
-            value: typeof val === 'number' ? val : (val?.revenue || 0)
-        })).filter(item => item.value > 0);
+            value: parseFloat(data.revenue || data.totalSales || data.amount || 0),
+            units: data.quantity || data.unitsSold || 0
+        })).filter(c => c.value > 0);
     }, [categorySales]);
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto">
-            {/* Header banner */}
-            <div className="bg-gradient-to-r from-stone-900 via-stone-800 to-stone-900 rounded-3xl p-7 text-white shadow-xl relative overflow-hidden border border-stone-800">
+        <div className="space-y-6 max-w-7xl mx-auto min-w-0 pb-12">
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-stone-900 via-stone-800 to-stone-900 rounded-3xl p-6 md:p-8 text-white shadow-xl relative overflow-hidden border border-stone-800">
                 <div className="absolute right-0 top-0 w-96 h-full bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
                     <div>
-                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 mb-2">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 mb-2">
                             <Sparkles size={13} />
-                            Branch Performance Dashboard
+                            {displayName} Performance & P&L
                         </div>
                         <h2 className="text-2xl md:text-3xl font-black tracking-tight text-white">
-                            Store Analytics
+                            Branch Analytics & P&L
                         </h2>
                         <p className="text-stone-300 text-sm mt-1 max-w-2xl">
-                            Real-time sales velocity, revenue trends, top-moving inventory, and outstanding dues specific to this branch.
+                            Real-time sales velocity, revenue trends, local operating costs, and net store profit.
                         </p>
                     </div>
 
@@ -233,51 +270,63 @@ const BranchAnalytics = () => {
 
             {/* KPI Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* Today's Sales */}
+                {/* Period Sales */}
                 <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm relative overflow-hidden">
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black uppercase tracking-wider text-stone-400">Today's Sales</span>
+                        <span className="text-[11px] font-black uppercase tracking-wider text-stone-400">
+                            Sales ({timeRange})
+                        </span>
                         <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
                             <TrendingUp size={16} />
                         </div>
                     </div>
-                    <div className="text-2xl font-black text-stone-900 mt-2">
-                        {formatCurrency(metrics.todayRev)}
+                    <div className="text-2xl font-black text-stone-900 mt-2 font-mono">
+                        {formatCurrency(metrics.periodRevenue)}
                     </div>
                     <div className="text-xs text-stone-500 mt-1 font-medium flex items-center gap-1.5">
-                        <span className="font-bold text-emerald-600">{metrics.todayUnits} units</span> sold today
+                        <span className="font-bold text-emerald-600">Today: {formatCurrency(metrics.todayRev)}</span>
                     </div>
                 </div>
 
-                {/* This Week */}
+                {/* Operating Expenses */}
                 <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm relative overflow-hidden">
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black uppercase tracking-wider text-stone-400">This Week's Revenue</span>
-                        <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                            <Calendar size={16} />
+                        <span className="text-[11px] font-black uppercase tracking-wider text-rose-500">
+                            Operating Expenses
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
+                            <Receipt size={16} />
                         </div>
                     </div>
-                    <div className="text-2xl font-black text-stone-900 mt-2">
-                        {formatCurrency(metrics.weekRev)}
+                    <div className="text-2xl font-black text-rose-600 mt-2 font-mono">
+                        {formatCurrency(metrics.periodExpenses)}
                     </div>
                     <div className="text-xs text-stone-500 mt-1 font-medium">
-                        Current calendar week
+                        Rent, utilities, local branch costs
                     </div>
                 </div>
 
-                {/* This Month */}
-                <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm relative overflow-hidden">
+                {/* Net Operating Profit */}
+                <div className={`bg-white rounded-2xl p-5 border shadow-sm relative overflow-hidden ${
+                    metrics.periodNetProfit >= 0 ? 'border-emerald-200 bg-emerald-50/10' : 'border-rose-200 bg-rose-50/10'
+                }`}>
                     <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black uppercase tracking-wider text-stone-400">This Month</span>
-                        <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-stone-500">
+                            Net Operating Profit
+                        </span>
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold ${
+                            metrics.periodNetProfit >= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                        }`}>
                             <DollarSign size={16} />
                         </div>
                     </div>
-                    <div className="text-2xl font-black text-stone-900 mt-2">
-                        {formatCurrency(metrics.monthRev)}
+                    <div className={`text-2xl font-black mt-2 font-mono ${
+                        metrics.periodNetProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                    }`}>
+                        {formatCurrency(metrics.periodNetProfit)}
                     </div>
                     <div className="text-xs text-stone-500 mt-1 font-medium">
-                        {metrics.monthUnits} total units this month
+                        Sales minus Operating Expenses
                     </div>
                 </div>
 
@@ -291,7 +340,7 @@ const BranchAnalytics = () => {
                             <CreditCard size={16} />
                         </div>
                     </div>
-                    <div className="text-2xl font-black text-amber-700 mt-2">
+                    <div className="text-2xl font-black text-amber-700 mt-2 font-mono">
                         {formatCurrency(duesData.totalOutstanding || 0)}
                     </div>
                     <div className="text-xs text-amber-800 mt-1 font-medium flex items-center gap-1.5">
@@ -440,7 +489,7 @@ const BranchAnalytics = () => {
                                             <div className="text-[11px] text-stone-400 font-semibold">{p.units} units sold</div>
                                         </div>
                                     </div>
-                                    <div className="font-black text-stone-900 text-xs">
+                                    <div className="font-black text-stone-900 text-xs font-mono">
                                         {formatCurrency(p.revenue)}
                                     </div>
                                 </div>

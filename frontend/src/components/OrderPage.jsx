@@ -5,7 +5,7 @@ import {
     AlertCircle, CheckCircle, Loader2, ClipboardList, Trash2,
     Printer, Receipt, Store, Layers, Plus, Minus, ArrowRight,
     RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split,
-    Pen, DollarSign, Calendar, Eye, Landmark, Smartphone, Building2
+    Pen, DollarSign, Calendar, Eye, Landmark, Smartphone, Building2, FileText
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -95,11 +95,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             return;
         }
 
+        const targetBranchId = activeBranchId || user?.branchId || 1;
+
         setSavingPrice(true);
         try {
             await axios.put(`/api/products/variants/${editingVariant.id}/branch-price`, {
                 sellingPrice: val,
-                branchId: user?.branchId
+                branchId: targetBranchId
             });
 
             // Update in active cart if present
@@ -116,7 +118,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             if (refetchProducts) refetchProducts();
         } catch (err) {
             console.error('Failed to update price:', err);
-            alert(err.response?.data?.error || 'Failed to update branch selling price.');
+            const errMsg = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to update branch selling price.';
+            alert(errMsg);
         } finally {
             setSavingPrice(false);
         }
@@ -373,6 +376,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         : formData.customerName,
                     paymentMethod: formData.paymentMethod,
                     paymentDetails: formData.orderNote,
+                    notes: formData.orderNote,
                     status: item.paymentStatus === 'PAID' ? 'FULL' : (item.paymentStatus === 'PARTIAL' ? 'PARTIAL' : 'UNPAID'),
                     downpayment: amountToPayForItem,
                     finalPrice: pricePerItem,
@@ -408,6 +412,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     splits: formData.paymentMethod === 'Split Payment' ? formData.splits : null,
                     orderMode,
                     orderNote: formData.orderNote,
+                    notes: formData.orderNote,
                     items: cart.map(item => ({
                         id: item.variant.id,
                         displayName: item.variant.displayName,
@@ -457,7 +462,6 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const activeTicketNumber = completedReceipt?.ticketNumber || ticketNumber;
     const activeCustomer = completedReceipt?.customerName || formData.customerName;
     const activePaymentMethod = completedReceipt?.paymentMethod || formData.paymentMethod;
-    const activeOrderNote = completedReceipt?.orderNote || formData.orderNote;
     const activeReceiptItems = completedReceipt?.items || cart;
     const activeTotalAmount = completedReceipt?.cartTotal ?? cartTotal;
     const activePaidAmount = completedReceipt?.amountPaid ?? amountPaid;
@@ -1089,6 +1093,36 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 </div>
                             )}
 
+                            {/* Purchase Notes / Remarks */}
+                            <div>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-[10px] font-black uppercase tracking-wider text-stone-500 flex items-center gap-1.5">
+                                        <FileText size={12} className="text-stone-400" />
+                                        <span>Purchase Notes / Remarks</span>
+                                    </label>
+                                    <span className="text-[10px] font-semibold text-stone-400">Optional</span>
+                                </div>
+                                <div className="relative">
+                                    <textarea
+                                        rows={2}
+                                        value={formData.orderNote}
+                                        onChange={(e) => setFormData({ ...formData, orderNote: e.target.value })}
+                                        placeholder="Add note (e.g. contact #, pickup date, discount reason, transfer ref#)..."
+                                        className="w-full bg-stone-50 border border-stone-200 rounded-xl p-2.5 text-xs font-medium focus:outline-none focus:border-stone-900 focus:bg-white transition-all shadow-inner resize-none text-stone-800 placeholder:text-stone-400 leading-relaxed"
+                                    />
+                                    {formData.orderNote && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setFormData({ ...formData, orderNote: '' })}
+                                            className="absolute right-2 top-2 text-stone-300 hover:text-stone-500 p-0.5 rounded transition-colors"
+                                            title="Clear note"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
                             {/* Order Total & Submit Action */}
                             <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
                                 <div>
@@ -1175,6 +1209,41 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         {amountUnpaid > 0 ? 'Partial Payment' : 'Fully Paid'}
                                     </span>
                                 </div>
+
+                                {formData.orderNote ? (
+                                    <div className="col-span-2 pt-2.5 border-t border-stone-200/70">
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                                                <FileText size={11} className="text-stone-400" />
+                                                <span>Purchase Note / Remarks</span>
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setFormData({ ...formData, orderNote: '' })}
+                                                className="text-[10px] font-bold text-rose-500 hover:underline cursor-pointer"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                        <div className="p-2.5 bg-white border border-stone-200 rounded-xl text-xs font-medium text-stone-800 leading-relaxed whitespace-pre-wrap">
+                                            {formData.orderNote}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="col-span-2 pt-2 border-t border-stone-200/60">
+                                        <label className="text-[10px] font-black uppercase tracking-wider text-stone-400 flex items-center gap-1.5 mb-1">
+                                            <FileText size={11} className="text-stone-400" />
+                                            <span>Purchase Note (Optional)</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={formData.orderNote}
+                                            onChange={(e) => setFormData({ ...formData, orderNote: e.target.value })}
+                                            placeholder="Add purchase note or customer remarks before confirming..."
+                                            className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs font-medium text-stone-800 placeholder:text-stone-400 focus:outline-none focus:border-stone-900"
+                                        />
+                                    </div>
+                                )}
                             </div>
 
                             {/* Cart Items Table */}
@@ -1322,7 +1391,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                     />
                                 </div>
                                 <p className="text-[11px] text-stone-400 mt-1">
-                                    This customized price will apply specifically to {user?.branchName || 'your branch'}.
+                                    This customized price will apply specifically to {user?.branchName || branchDisplayName || 'your branch'}.
                                 </p>
                             </div>
 
@@ -1406,12 +1475,6 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         <span className="text-stone-400">Payment:</span>
                                         <span className="font-bold text-stone-900">{completedReceipt.paymentMethod}</span>
                                     </div>
-                                    {completedReceipt.orderNote && (
-                                        <div className="flex justify-between text-stone-500 italic">
-                                            <span>Note:</span>
-                                            <span>{completedReceipt.orderNote}</span>
-                                        </div>
-                                    )}
                                 </div>
 
                                 {/* Items Breakdown */}
@@ -1602,12 +1665,6 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                             <span>UNPAID BALANCE</span>
                             <span>₱{activeUnpaidAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                         </div>
-                    </div>
-                )}
-
-                {activeOrderNote && (
-                    <div className="mt-2 text-[10px] text-zinc-600 italic ticket-divider pt-1">
-                        Note: {activeOrderNote}
                     </div>
                 )}
 

@@ -36,9 +36,11 @@ const rawEnvApiUrl = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_
 const normalizedEnvApiUrl = normalizeHttpUrl(rawEnvApiUrl);
 
 // If VITE_API_URL is provided, use its normalized version.
-// In production on Vercel, default to the live Render backend if unset.
 const defaultProdApiUrl = 'https://cpmonline-backend.onrender.com';
-export const API_BASE = normalizedEnvApiUrl || (import.meta.env.PROD ? defaultProdApiUrl : '');
+const isLocalhost = typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '0.0.0.0');
+
+export const API_BASE = normalizedEnvApiUrl || (isLocalhost ? '' : (import.meta.env.PROD ? defaultProdApiUrl : ''));
 
 export const getWebSocketBaseUrl = () => {
     const rawWsUrl = (import.meta.env.VITE_WS_BASE_URL || import.meta.env.VITE_WS_URL || '').trim();

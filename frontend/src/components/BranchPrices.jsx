@@ -129,9 +129,10 @@ const BranchPrices = ({ products = [], refetchProducts }) => {
         setSuccessMessage('');
 
         try {
+            const targetBranch = currentBranchId || user?.branchId || 1;
             await axios.put(`/api/products/variants/${item.variantId}/branch-price`, {
                 sellingPrice: numVal,
-                branchId: currentBranchId
+                branchId: targetBranch
             });
             setSavedOverrides(prev => ({ ...prev, [item.variantId]: numVal }));
             setSuccessMessage(`Custom price for ${item.modelName} (${item.sku}) saved.`);
@@ -139,7 +140,7 @@ const BranchPrices = ({ products = [], refetchProducts }) => {
             if (refetchProducts) refetchProducts();
         } catch (err) {
             console.error('Failed to update branch price:', err);
-            setErrorMessage(err.response?.data?.error || 'Failed to save selling price.');
+            setErrorMessage(err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to save selling price.');
         } finally {
             setSavingId(null);
         }

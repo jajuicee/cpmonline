@@ -38,8 +38,19 @@ import {
     Pencil,
     SlidersHorizontal,
     ChevronDown,
-    AlertCircle
+    AlertCircle,
+    Receipt,
+    Download,
+    ShoppingBag,
+    Eye,
+    FileText,
+    RefreshCw,
+    XCircle,
+    Filter,
+    ArrowRight
 } from 'lucide-react';
+import BranchAnalytics from './BranchAnalytics';
+import Expenses from './Expenses';
 
 const formatCurrency = (val) =>
     `₱${Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -96,6 +107,13 @@ const BranchDetail = () => {
     const [editingPriceValue, setEditingPriceValue] = useState('');
     const [savingInlinePrice, setSavingInlinePrice] = useState(false);
 
+    // Tab 4: Branch Inventory Tracker & Master Catalog Gap State
+    const [invSubTab, setInvSubTab] = useState('in_stock'); // 'in_stock' | 'missing' | 'all'
+    const [invSearch, setInvSearch] = useState('');
+    const [invCategory, setInvCategory] = useState('All');
+    const [invOnlyHqAvailable, setInvOnlyHqAvailable] = useState(false);
+    const [selectedMissingVariantIds, setSelectedMissingVariantIds] = useState(() => new Set());
+
     const [allocationDeadline, setAllocationDeadline] = useState(() => {
         // Default deadline: 30 days from now
         const d = new Date();
@@ -111,6 +129,16 @@ const BranchDetail = () => {
     const [selectedAllocation, setSelectedAllocation] = useState(null);
     const [paymentAmount, setPaymentAmount] = useState('');
     const [recordingPayment, setRecordingPayment] = useState(false);
+
+    // ── Remittable Sales Feature State ─────────────────────────────────────────
+    const [remittableSalesData, setRemittableSalesData] = useState({ summary: {}, items: [] });
+    const [loadingRemittableSales, setLoadingRemittableSales] = useState(false);
+    const [remittanceSearch, setRemittanceSearch] = useState('');
+    const [remittanceStatusFilter, setRemittanceStatusFilter] = useState('ALL'); // ALL, PENDING, REMITTED, PARTIAL
+    const [remittanceDatePreset, setRemittanceDatePreset] = useState('all'); // all, today, this_week, this_month, custom
+    const [remittanceCustomFrom, setRemittanceCustomFrom] = useState('');
+    const [remittanceCustomTo, setRemittanceCustomTo] = useState('');
+    const [selectedSoldItemModal, setSelectedSoldItemModal] = useState(null);
 
     // Feedback
     const [feedback, setFeedback] = useState({ type: '', message: '' });
@@ -174,14 +202,69 @@ const BranchDetail = () => {
         }
     };
 
+    // 5. Fetch Remittable Sales for this branch
+    const fetchRemittableSales = async (preset = remittanceDatePreset, customFrom = remittanceCustomFrom, customTo = remittanceCustomTo) => {
+        if (!branchId) return;
+        setLoadingRemittableSales(true);
+        try {
+            let fromStr = '';
+            let toStr = '';
+
+            const now = new Date();
+            if (preset === 'today') {
+                const todayStr = now.toISOString().split('T')[0];
+                fromStr = `${todayStr}T00:00:00`;
+                toStr = `${todayStr}T23:59:59`;
+            } else if (preset === 'this_week') {
+                const firstDayOfWeek = new Date(now);
+                const day = now.getDay() || 7;
+                firstDayOfWeek.setDate(now.getDate() - day + 1);
+                fromStr = `${firstDayOfWeek.toISOString().split('T')[0]}T00:00:00`;
+                toStr = `${now.toISOString().split('T')[0]}T23:59:59`;
+            } else if (preset === 'this_month') {
+                const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                fromStr = `${firstDayOfMonth.toISOString().split('T')[0]}T00:00:00`;
+                toStr = `${now.toISOString().split('T')[0]}T23:59:59`;
+            } else if (preset === 'custom' && customFrom && customTo) {
+                fromStr = `${customFrom}T00:00:00`;
+                toStr = `${customTo}T23:59:59`;
+            }
+
+            let url = `/api/admin/branches/${branchId}/remittable-sales`;
+            const params = [];
+            if (fromStr && toStr) {
+                params.push(`from=${encodeURIComponent(fromStr)}`);
+                params.push(`to=${encodeURIComponent(toStr)}`);
+            }
+            if (params.length > 0) {
+                url += `?${params.join('&')}`;
+            }
+
+            const res = await axios.get(url);
+            setRemittableSalesData(res.data || { summary: {}, items: [] });
+        } catch (err) {
+            console.error('Failed to load remittable sales:', err);
+            showFeedback('error', 'Failed to load branch remittable sales.');
+        } finally {
+            setLoadingRemittableSales(false);
+        }
+    };
+
     useEffect(() => {
         if (branchId) {
             fetchBranch();
             fetchAdminProducts();
             fetchBranchProducts();
             fetchAllocations();
+            fetchRemittableSales();
         }
     }, [branchId]);
+
+    useEffect(() => {
+        if (activeTab === 'remittance' && branchId) {
+            fetchRemittableSales(remittanceDatePreset, remittanceCustomFrom, remittanceCustomTo);
+        }
+    }, [activeTab, remittanceDatePreset]);
 
     // Flatten Admin Catalog into selectable variants with available stock
     const availableAdminVariants = useMemo(() => {
@@ -503,6 +586,216 @@ const BranchDetail = () => {
         }
     };
 
+    // ── Tab 4 Branch Catalog & Gap Analysis (In-Stock vs Missing Products to Add) ──
+    const branchVariantMap = useMemo(() => {
+        const map = new Map();
+        (branchProducts || []).forEach(p => {
+            (p.variants || []).forEach(v => {
+                map.set(v.id, {
+                    ...v,
+                    productId: p.id,
+                    brandName: p.brandName,
+                    modelName: p.modelName,
+                    category: p.category || 'General',
+                    branchStock: v.stockQuantity ?? 0
+                });
+            });
+        });
+        return map;
+    }, [branchProducts]);
+
+    const branchCatalogAnalysis = useMemo(() => {
+        const rows = [];
+        let inStockCount = 0;
+        let missingCount = 0;
+        let hqAvailableMissingCount = 0;
+        let totalUnitsInBranch = 0;
+
+        (adminProducts || []).forEach(p => {
+            (p.variants || []).forEach(v => {
+                const bVariant = branchVariantMap.get(v.id);
+                const branchStock = bVariant ? (bVariant.branchStock ?? 0) : 0;
+                const hasBranchHistory = Boolean(bVariant);
+                const adminStock = v.mainStock != null ? v.mainStock : (v.stockQuantity ?? 0);
+                const hasCustomPrice = bVariant?.hasCustomPrice || false;
+                const branchSellingPrice = bVariant?.branchSellingPrice != null ? bVariant.branchSellingPrice : v.sellingPrice;
+
+                let status = 'NOT_CARRIED'; // Never carried at this branch
+                if (branchStock > 0) {
+                    status = 'IN_STOCK';
+                    inStockCount++;
+                    totalUnitsInBranch += branchStock;
+                } else if (hasBranchHistory) {
+                    status = 'OUT_OF_STOCK';
+                    missingCount++;
+                    if (adminStock > 0) hqAvailableMissingCount++;
+                } else {
+                    status = 'NOT_CARRIED';
+                    missingCount++;
+                    if (adminStock > 0) hqAvailableMissingCount++;
+                }
+
+                rows.push({
+                    productId: p.id,
+                    brandName: p.brandName,
+                    modelName: p.modelName,
+                    category: p.category || 'General',
+                    variantId: v.id,
+                    sku: v.sku,
+                    color: v.color || '',
+                    shape: v.shape || '',
+                    thicknessMm: v.thicknessMm || '',
+                    acquisitionPrice: v.acquisitionPrice ?? 0,
+                    defaultSellingPrice: v.sellingPrice ?? 0,
+                    branchSellingPrice,
+                    hasCustomPrice,
+                    branchStock,
+                    adminStock,
+                    status,
+                    hasBranchHistory
+                });
+            });
+        });
+
+        // Defensive: include any branch variants not in master catalog
+        const processedIds = new Set(rows.map(r => r.variantId));
+        branchVariantMap.forEach((bv, vId) => {
+            if (!processedIds.has(vId)) {
+                const bStock = bv.branchStock ?? 0;
+                if (bStock > 0) {
+                    inStockCount++;
+                    totalUnitsInBranch += bStock;
+                } else {
+                    missingCount++;
+                }
+                rows.push({
+                    productId: bv.productId,
+                    brandName: bv.brandName,
+                    modelName: bv.modelName,
+                    category: bv.category || 'General',
+                    variantId: bv.id,
+                    sku: bv.sku,
+                    color: bv.color || '',
+                    shape: bv.shape || '',
+                    thicknessMm: bv.thicknessMm || '',
+                    acquisitionPrice: bv.acquisitionPrice ?? 0,
+                    defaultSellingPrice: bv.sellingPrice ?? 0,
+                    branchSellingPrice: bv.branchSellingPrice ?? bv.sellingPrice ?? 0,
+                    hasCustomPrice: bv.hasCustomPrice || false,
+                    branchStock: bStock,
+                    adminStock: 0,
+                    status: bStock > 0 ? 'IN_STOCK' : 'OUT_OF_STOCK',
+                    hasBranchHistory: true
+                });
+            }
+        });
+
+        return {
+            items: rows,
+            inStockCount,
+            missingCount,
+            hqAvailableMissingCount,
+            totalCatalogCount: rows.length,
+            totalUnitsInBranch
+        };
+    }, [adminProducts, branchVariantMap]);
+
+    const invCategories = useMemo(() => {
+        const set = new Set(branchCatalogAnalysis.items.map(it => it.category));
+        return ['All', ...Array.from(set).filter(Boolean)];
+    }, [branchCatalogAnalysis.items]);
+
+    const filteredInventoryItems = useMemo(() => {
+        return branchCatalogAnalysis.items.filter(item => {
+            if (invSubTab === 'in_stock' && item.status !== 'IN_STOCK') {
+                return false;
+            }
+            if (invSubTab === 'missing' && item.status === 'IN_STOCK') {
+                return false;
+            }
+            if (invOnlyHqAvailable && item.adminStock <= 0) {
+                return false;
+            }
+            if (invCategory !== 'All' && item.category !== invCategory) {
+                return false;
+            }
+            if (invSearch.trim()) {
+                const q = invSearch.toLowerCase().trim();
+                const matchBrand = item.brandName?.toLowerCase().includes(q);
+                const matchModel = item.modelName?.toLowerCase().includes(q);
+                const matchSku = item.sku?.toLowerCase().includes(q);
+                const matchColor = item.color?.toLowerCase().includes(q);
+                const matchCategory = item.category?.toLowerCase().includes(q);
+                if (!matchBrand && !matchModel && !matchSku && !matchColor && !matchCategory) {
+                    return false;
+                }
+            }
+            return true;
+        });
+    }, [branchCatalogAnalysis.items, invSubTab, invCategory, invSearch, invOnlyHqAvailable]);
+
+    const handleQuickAllocateFromInventory = (item) => {
+        addToManifest({
+            variantId: item.variantId,
+            sku: item.sku,
+            brandName: item.brandName,
+            modelName: item.modelName,
+            color: item.color,
+            shape: item.shape,
+            thicknessMm: item.thicknessMm,
+            category: item.category,
+            adminStock: item.adminStock,
+            acquisitionPrice: item.acquisitionPrice,
+            sellingPrice: item.defaultSellingPrice
+        });
+        handleTabChange('allocate');
+        showFeedback('success', `Added "${item.brandName} ${item.modelName}" to allocation manifest.`);
+    };
+
+    const toggleSelectMissingVariant = (variantId) => {
+        setSelectedMissingVariantIds(prev => {
+            const next = new Set(prev);
+            if (next.has(variantId)) next.delete(variantId);
+            else next.add(variantId);
+            return next;
+        });
+    };
+
+    const toggleSelectAllMissing = () => {
+        const selectable = filteredInventoryItems.filter(it => it.adminStock > 0);
+        if (selectedMissingVariantIds.size >= selectable.length && selectable.length > 0) {
+            setSelectedMissingVariantIds(new Set());
+        } else {
+            setSelectedMissingVariantIds(new Set(selectable.map(it => it.variantId)));
+        }
+    };
+
+    const handleBulkAllocateMissing = () => {
+        const itemsToAllocate = filteredInventoryItems.filter(it => selectedMissingVariantIds.has(it.variantId) && it.adminStock > 0);
+        if (itemsToAllocate.length === 0) {
+            showFeedback('error', 'Select at least one product with available Admin HQ stock.');
+            return;
+        }
+        itemsToAllocate.forEach(it => {
+            addToManifest({
+                variantId: it.variantId,
+                sku: it.sku,
+                brandName: it.brandName,
+                modelName: it.modelName,
+                color: it.color,
+                shape: it.shape,
+                thicknessMm: it.thicknessMm,
+                category: it.category,
+                adminStock: it.adminStock,
+                acquisitionPrice: it.acquisitionPrice,
+                sellingPrice: it.defaultSellingPrice
+            });
+        });
+        setSelectedMissingVariantIds(new Set());
+        handleTabChange('allocate');
+        showFeedback('success', `Added ${itemsToAllocate.length} items to allocation manifest.`);
+    };
+
     // Batch Accordion Expand Toggle
     const toggleBatchExpand = (batchId) => {
         setExpandedBatches(prev => {
@@ -667,6 +960,126 @@ const BranchDetail = () => {
             return timeB - timeA;
         });
     }, [allocations]);
+
+    // ── Filtered Remittable Items ──────────────────────────────────────────────
+    const filteredRemittableItems = useMemo(() => {
+        const list = remittableSalesData.items || [];
+        return list.filter(item => {
+            if (remittanceStatusFilter !== 'ALL') {
+                if (remittanceStatusFilter === 'PENDING' && item.remittanceStatus !== 'PENDING') return false;
+                if (remittanceStatusFilter === 'REMITTED' && item.remittanceStatus !== 'REMITTED') return false;
+                if (remittanceStatusFilter === 'PARTIAL' && item.remittanceStatus !== 'PARTIAL') return false;
+            }
+
+            if (remittanceSearch.trim()) {
+                const q = remittanceSearch.toLowerCase();
+                const brand = (item.variant?.brandName || '').toLowerCase();
+                const model = (item.variant?.modelName || '').toLowerCase();
+                const sku = (item.variant?.sku || '').toLowerCase();
+                const customer = (item.customerName || '').toLowerCase();
+                const ticket = (item.orderTicketId || '').toLowerCase();
+                const notes = (item.notes || '').toLowerCase();
+                const payment = (item.paymentMethod || '').toLowerCase();
+
+                const match = brand.includes(q) ||
+                    model.includes(q) ||
+                    sku.includes(q) ||
+                    customer.includes(q) ||
+                    ticket.includes(q) ||
+                    notes.includes(q) ||
+                    payment.includes(q);
+                if (!match) return false;
+            }
+
+            return true;
+        });
+    }, [remittableSalesData.items, remittanceStatusFilter, remittanceSearch]);
+
+    // ── Dynamic Filtered Remittance Summary ────────────────────────────────────
+    const filteredRemittanceSummary = useMemo(() => {
+        let totalItems = 0;
+        let totalGross = 0;
+        let totalRemittable = 0;
+        let totalRemitted = 0;
+        let totalPending = 0;
+        let totalProfit = 0;
+
+        filteredRemittableItems.forEach(item => {
+            totalItems++;
+            totalGross += Number(item.finalPrice || 0);
+            totalRemittable += Number(item.remittableCost || 0);
+            totalRemitted += Number(item.remittedAmount || 0);
+            totalPending += Number(item.pendingRemittance || 0);
+            totalProfit += Number(item.branchProfit || 0);
+        });
+
+        const margin = totalGross > 0 ? (totalProfit / totalGross) * 100 : 0;
+
+        return {
+            totalItems,
+            totalGross,
+            totalRemittable,
+            totalRemitted,
+            totalPending,
+            totalProfit,
+            margin
+        };
+    }, [filteredRemittableItems]);
+
+    // ── CSV Exporter for Remittable Sales ───────────────────────────────────────
+    const exportRemittanceCsv = () => {
+        if (!filteredRemittableItems.length) return;
+        const headers = [
+            "Date",
+            "Order Ticket",
+            "Customer",
+            "Brand",
+            "Model",
+            "Category",
+            "SKU",
+            "Specs",
+            "Payment Method",
+            "Order Notes",
+            "Selling Price (Gross)",
+            "Remittable Cost (Wholesale Base)",
+            "Branch Profit",
+            "Margin %",
+            "Remittance Status",
+            "Remitted to HQ",
+            "Pending Remittance",
+            "Allocation Batch ID"
+        ];
+
+        const rows = filteredRemittableItems.map(item => [
+            item.transactionDate ? new Date(item.transactionDate).toLocaleString('en-PH') : '',
+            item.orderTicketId || '',
+            `"${(item.customerName || 'Walk-in Customer').replace(/"/g, '""')}"`,
+            `"${(item.variant?.brandName || '').replace(/"/g, '""')}"`,
+            `"${(item.variant?.modelName || '').replace(/"/g, '""')}"`,
+            `"${(item.variant?.category || 'General').replace(/"/g, '""')}"`,
+            item.variant?.sku || '',
+            `"${[item.variant?.color, item.variant?.thicknessMm ? `${item.variant.thicknessMm}mm` : '', item.variant?.shape].filter(Boolean).join(', ')}"`,
+            item.paymentMethod || '',
+            `"${(item.notes || '').replace(/"/g, '""')}"`,
+            item.finalPrice || 0,
+            item.remittableCost || 0,
+            item.branchProfit || 0,
+            item.profitMarginPct ? item.profitMarginPct.toFixed(2) : 0,
+            item.remittanceStatus || '',
+            item.remittedAmount || 0,
+            item.pendingRemittance || 0,
+            item.adminBatchId || ''
+        ]);
+
+        const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `${(branch?.name || 'Branch').replace(/\s+/g, '_')}_Remittable_Sales_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     // Consignment-Style Batch Accordion History Renderer
     const renderAllocationBatchHistory = (
@@ -1073,7 +1486,10 @@ const BranchDetail = () => {
                     { id: 'overview', label: 'Overview', icon: Building2 },
                     { id: 'allocate', label: 'Allocate Stock', icon: PackagePlus, highlight: true },
                     { id: 'dues', label: `Dues & Payments (${allocations.length})`, icon: CreditCard },
+                    { id: 'remittance', label: `Sold Items & Remittance (${remittableSalesData.items?.length || 0})`, icon: DollarSign },
                     { id: 'inventory', label: 'Inventory Tracker', icon: Boxes },
+                    { id: 'analytics', label: 'Analytics & P&L', icon: TrendingUp },
+                    { id: 'expenses', label: 'Branch Expenses', icon: Receipt },
                 ].map(tab => {
                     const Icon = tab.icon;
                     const isActive = activeTab === tab.id;
@@ -1134,7 +1550,7 @@ const BranchDetail = () => {
                     </div>
 
                     {/* Quick Action Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div
                             onClick={() => handleTabChange('allocate')}
                             className="bg-white rounded-2xl p-6 border border-emerald-200 hover:border-emerald-400 shadow-sm transition-all cursor-pointer group"
@@ -1164,6 +1580,22 @@ const BranchDetail = () => {
                             </p>
                             <div className="mt-4 flex items-center gap-1.5 text-xs font-bold text-amber-700">
                                 View Payment Records <ArrowUpRight size={14} />
+                            </div>
+                        </div>
+
+                        <div
+                            onClick={() => handleTabChange('remittance')}
+                            className="bg-white rounded-2xl p-6 border border-blue-200 hover:border-blue-400 shadow-sm transition-all cursor-pointer group"
+                        >
+                            <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform">
+                                <DollarSign size={20} />
+                            </div>
+                            <h4 className="font-black text-stone-900 text-lg">Sold Items & Remittance</h4>
+                            <p className="text-xs text-stone-500 mt-1">
+                                See item-by-item breakdown of items bought, customer prices, remittable wholesale base to HQ, and profit margins.
+                            </p>
+                            <div className="mt-4 flex items-center gap-1.5 text-xs font-bold text-blue-700">
+                                View Remittable Sales ({remittableSalesData.items?.length || 0}) <ArrowUpRight size={14} />
                             </div>
                         </div>
                     </div>
@@ -1782,123 +2214,826 @@ const BranchDetail = () => {
                 </div>
             )}
 
-            {/* TAB 4: INVENTORY TRACKER */}
-            {activeTab === 'inventory' && (
-                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-                    <div className="p-4 border-b border-stone-100 flex items-center justify-between">
-                        <div>
-                            <h4 className="font-black text-stone-900 text-sm">Branch Inventory Tracker</h4>
-                            <p className="text-xs text-stone-400 mt-0.5">Live stock currently held at {branch.name}</p>
+            {/* TAB: SOLD ITEMS & REMITTANCE BREAKDOWN */}
+            {activeTab === 'remittance' && (
+                <div className="space-y-6">
+                    {/* Summary KPI Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                        <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-stone-400 block">Sold Units</span>
+                                <ShoppingBag size={16} className="text-stone-400" />
+                            </div>
+                            <div className="text-2xl font-black text-stone-900 mt-1">
+                                {filteredRemittanceSummary.totalItems}
+                            </div>
+                            <span className="text-xs text-stone-500 font-medium">Items bought at this branch</span>
                         </div>
-                        <span className="text-xs font-bold text-stone-600">
-                            {branchProducts.reduce((acc, p) => acc + (p.variants || []).reduce((sum, v) => sum + (v.stockQuantity ?? 0), 0), 0)} Total Units
-                        </span>
+
+                        <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-stone-400 block">Gross Sales Collected</span>
+                                <DollarSign size={16} className="text-stone-400" />
+                            </div>
+                            <div className="text-2xl font-black text-stone-900 mt-1">
+                                {formatCurrency(filteredRemittanceSummary.totalGross)}
+                            </div>
+                            <span className="text-xs text-stone-500 font-medium">Customer retail payments</span>
+                        </div>
+
+                        <div className="bg-white rounded-2xl p-5 border border-amber-200 bg-amber-50/20 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-amber-700 block">Remittable to Admin</span>
+                                <CreditCard size={16} className="text-amber-600" />
+                            </div>
+                            <div className="text-2xl font-black text-amber-600 mt-1">
+                                {formatCurrency(filteredRemittanceSummary.totalRemittable)}
+                            </div>
+                            <span className="text-xs text-amber-700/80 font-medium">Wholesale base capital due to HQ</span>
+                        </div>
+
+                        <div className="bg-white rounded-2xl p-5 border border-emerald-200 bg-emerald-50/20 shadow-sm">
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700 block">Branch Retained Profit</span>
+                                <TrendingUp size={16} className="text-emerald-600" />
+                            </div>
+                            <div className="text-2xl font-black text-emerald-600 mt-1">
+                                {formatCurrency(filteredRemittanceSummary.totalProfit)}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[11px] font-black px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
+                                    +{filteredRemittanceSummary.margin.toFixed(1)}% margin
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl p-5 border border-stone-200 shadow-sm">
+                            <span className="text-[11px] font-black uppercase tracking-wider text-stone-400 block">Remittance Status</span>
+                            <div className="mt-2 space-y-1.5">
+                                <div className="flex items-center justify-between text-xs">
+                                    <span className="text-stone-500 flex items-center gap-1">
+                                        <CheckCircle2 size={12} className="text-emerald-600" /> Remitted:
+                                    </span>
+                                    <span className="font-bold text-emerald-600">
+                                        {formatCurrency(filteredRemittanceSummary.totalRemitted)}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-xs pt-1 border-t border-stone-100">
+                                    <span className="text-stone-500 flex items-center gap-1">
+                                        <Clock size={12} className="text-amber-500" /> Pending:
+                                    </span>
+                                    <span className="font-black text-amber-600">
+                                        {formatCurrency(filteredRemittanceSummary.totalPending)}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
+                    {/* Filter, Search & Controls Bar */}
+                    <div className="bg-white rounded-3xl border border-stone-200 shadow-sm p-5 space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                            {/* Search bar */}
+                            <div className="relative flex-1 min-w-[280px]">
+                                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                                <input
+                                    type="text"
+                                    value={remittanceSearch}
+                                    onChange={(e) => setRemittanceSearch(e.target.value)}
+                                    placeholder="Search by product, model, SKU, customer, ticket ID, remarks..."
+                                    className="w-full pl-10 pr-10 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-stone-400 placeholder:text-stone-400"
+                                />
+                                {remittanceSearch && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setRemittanceSearch('')}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Date Presets */}
+                            <div className="flex flex-wrap items-center gap-1.5 bg-stone-100/80 p-1 rounded-xl">
+                                {[
+                                    { id: 'all', label: 'All Time' },
+                                    { id: 'today', label: 'Today' },
+                                    { id: 'this_week', label: 'This Week' },
+                                    { id: 'this_month', label: 'This Month' },
+                                    { id: 'custom', label: 'Custom' },
+                                ].map(p => (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => {
+                                            setRemittanceDatePreset(p.id);
+                                            if (p.id !== 'custom') {
+                                                fetchRemittableSales(p.id);
+                                            }
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                            remittanceDatePreset === p.id
+                                                ? 'bg-white text-stone-900 shadow-xs'
+                                                : 'text-stone-600 hover:text-stone-900'
+                                        }`}
+                                    >
+                                        {p.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Actions: Refresh & CSV Export */}
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => fetchRemittableSales(remittanceDatePreset, remittanceCustomFrom, remittanceCustomTo)}
+                                    disabled={loadingRemittableSales}
+                                    title="Reload remittance data"
+                                    className="p-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-stone-600 transition-colors cursor-pointer"
+                                >
+                                    <RefreshCw size={15} className={loadingRemittableSales ? 'animate-spin' : ''} />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={exportRemittanceCsv}
+                                    disabled={!filteredRemittableItems.length}
+                                    className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-bold text-stone-700 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+                                >
+                                    <Download size={14} />
+                                    <span>Export CSV</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Custom Date Range Row (if 'custom' selected) */}
+                        {remittanceDatePreset === 'custom' && (
+                            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-stone-100 text-xs">
+                                <span className="font-bold text-stone-500">Custom Date Range:</span>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        type="date"
+                                        value={remittanceCustomFrom}
+                                        onChange={(e) => setRemittanceCustomFrom(e.target.value)}
+                                        className="px-3 py-1.5 border border-stone-200 rounded-lg text-xs font-bold text-stone-700 bg-stone-50"
+                                    />
+                                    <span className="text-stone-400">to</span>
+                                    <input
+                                        type="date"
+                                        value={remittanceCustomTo}
+                                        onChange={(e) => setRemittanceCustomTo(e.target.value)}
+                                        className="px-3 py-1.5 border border-stone-200 rounded-lg text-xs font-bold text-stone-700 bg-stone-50"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => fetchRemittableSales('custom', remittanceCustomFrom, remittanceCustomTo)}
+                                        disabled={!remittanceCustomFrom || !remittanceCustomTo || loadingRemittableSales}
+                                        className="px-3 py-1.5 bg-stone-900 text-white rounded-lg text-xs font-bold hover:bg-stone-800 disabled:opacity-50 cursor-pointer"
+                                    >
+                                        Apply Range
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Status Filter Tabs */}
+                        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-100">
+                            {[
+                                { id: 'ALL', label: 'All Items', count: remittableSalesData.items?.length || 0 },
+                                { id: 'PENDING', label: 'Pending Remittance', count: remittableSalesData.items?.filter(i => i.remittanceStatus === 'PENDING').length || 0, badgeClass: 'bg-amber-100 text-amber-800' },
+                                { id: 'REMITTED', label: 'Fully Remitted', count: remittableSalesData.items?.filter(i => i.remittanceStatus === 'REMITTED').length || 0, badgeClass: 'bg-emerald-100 text-emerald-800' },
+                                { id: 'PARTIAL', label: 'Partially Remitted', count: remittableSalesData.items?.filter(i => i.remittanceStatus === 'PARTIAL').length || 0, badgeClass: 'bg-blue-100 text-blue-800' },
+                            ].map(filter => (
+                                <button
+                                    key={filter.id}
+                                    type="button"
+                                    onClick={() => setRemittanceStatusFilter(filter.id)}
+                                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                        remittanceStatusFilter === filter.id
+                                            ? 'bg-stone-900 text-white shadow-2xs'
+                                            : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                    }`}
+                                >
+                                    <span>{filter.label}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                                        remittanceStatusFilter === filter.id
+                                            ? 'bg-white/20 text-white'
+                                            : filter.badgeClass || 'bg-stone-200 text-stone-700'
+                                    }`}>
+                                        {filter.count}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Sold Items & Remittance Table */}
+                    <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden">
+                        <div className="p-5 border-b border-stone-200 flex flex-wrap items-center justify-between gap-3 bg-stone-50/70">
+                            <div>
+                                <h4 className="font-black text-stone-900 text-base">Itemized Sold Products & Remittable Dues</h4>
+                                <p className="text-xs text-stone-500 mt-0.5">
+                                    Shows every paddle & item bought by customers, customer selling price, remittable wholesale base owed to Admin HQ, and branch profit.
+                                </p>
+                            </div>
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-stone-200/70 text-stone-700">
+                                Showing {filteredRemittableItems.length} of {remittableSalesData.items?.length || 0} sold items
+                            </span>
+                        </div>
+
+                        {loadingRemittableSales ? (
+                            <div className="p-16 text-center text-stone-400 space-y-3">
+                                <Loader2 size={32} className="mx-auto animate-spin text-stone-400" />
+                                <p className="text-xs font-bold text-stone-600">Loading branch remittance data...</p>
+                            </div>
+                        ) : filteredRemittableItems.length === 0 ? (
+                            <div className="p-16 text-center text-stone-400 space-y-2">
+                                <ShoppingBag size={36} className="mx-auto opacity-30 text-stone-400" />
+                                <p className="text-sm font-black text-stone-700">No sold items found</p>
+                                <p className="text-xs text-stone-400">
+                                    {remittanceSearch || remittanceStatusFilter !== 'ALL'
+                                        ? 'No records match your active search or filters.'
+                                        : 'No completed or recorded retail purchases for this branch yet.'}
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs border-collapse">
+                                    <thead className="bg-stone-50 border-b border-stone-200 text-[11px] font-black uppercase tracking-wider text-stone-400">
+                                        <tr>
+                                            <th className="py-3.5 px-5">Date & Order Ticket</th>
+                                            <th className="py-3.5 px-4">Item Bought & Specs</th>
+                                            <th className="py-3.5 px-4 text-right">Customer Price</th>
+                                            <th className="py-3.5 px-4 text-right">Remittable to HQ</th>
+                                            <th className="py-3.5 px-4 text-right">Branch Profit</th>
+                                            <th className="py-3.5 px-4 text-center">Remittance Status</th>
+                                            <th className="py-3.5 px-4 text-center">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-stone-100">
+                                        {filteredRemittableItems.map(item => {
+                                            const v = item.variant || {};
+                                            const isRemitted = item.remittanceStatus === 'REMITTED';
+                                            const isPartial = item.remittanceStatus === 'PARTIAL';
+                                            const isPending = item.remittanceStatus === 'PENDING';
+
+                                            return (
+                                                <tr
+                                                    key={item.id}
+                                                    className="hover:bg-stone-50/80 transition-colors group"
+                                                >
+                                                    {/* Date & Order Ticket */}
+                                                    <td className="py-3.5 px-5 align-top">
+                                                        <div className="font-mono font-bold text-stone-900 flex items-center gap-1.5">
+                                                            <span>#{item.orderTicketId || `ID-${item.id}`}</span>
+                                                        </div>
+                                                        <div className="text-[11px] text-stone-400 mt-0.5">
+                                                            {item.transactionDate
+                                                                ? new Date(item.transactionDate).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
+                                                                : 'N/A'} • {item.transactionDate ? new Date(item.transactionDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                                        </div>
+                                                        <div className="text-[11px] font-medium text-stone-600 mt-1">
+                                                            👤 {item.customerName || 'Walk-in Customer'}
+                                                        </div>
+                                                        {item.notes && (
+                                                            <div className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-stone-100 text-[10px] text-stone-600 font-medium max-w-[220px] truncate" title={item.notes}>
+                                                                <FileText size={10} className="shrink-0 text-stone-400" />
+                                                                <span className="truncate">Note: {item.notes}</span>
+                                                            </div>
+                                                        )}
+                                                    </td>
+
+                                                    {/* Item Bought & Specs */}
+                                                    <td className="py-3.5 px-4 align-top">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-black text-stone-900 text-sm">
+                                                                {v.brandName ? `${v.brandName} ` : ''}{v.modelName || 'Unnamed Product'}
+                                                            </span>
+                                                            {v.category && (
+                                                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-stone-100 text-stone-600">
+                                                                    {v.category}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500">
+                                                            {v.sku && (
+                                                                <span className="font-mono font-bold text-stone-600 bg-stone-100 px-1.5 py-0.5 rounded">
+                                                                    {v.sku}
+                                                                </span>
+                                                            )}
+                                                            {v.color && <span>• {v.color}</span>}
+                                                            {v.thicknessMm && <span>• {v.thicknessMm}mm</span>}
+                                                            {v.shape && <span>• {v.shape}</span>}
+                                                        </div>
+                                                    </td>
+
+                                                    {/* Customer Selling Price */}
+                                                    <td className="py-3.5 px-4 text-right align-top">
+                                                        <div className="font-black text-stone-900 text-sm">
+                                                            {formatCurrency(item.finalPrice)}
+                                                        </div>
+                                                        <div className="flex items-center justify-end gap-1.5 mt-1">
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-stone-100 text-stone-600">
+                                                                {item.paymentMethod || 'Cash'}
+                                                            </span>
+                                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                                                item.status === 'FULL'
+                                                                    ? 'bg-emerald-100 text-emerald-800'
+                                                                    : 'bg-amber-100 text-amber-800'
+                                                            }`}>
+                                                                {item.status || 'FULL'}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+
+                                                    {/* Remittable to Admin HQ (Wholesale Cost) */}
+                                                    <td className="py-3.5 px-4 text-right align-top">
+                                                        <div className="font-black text-amber-700 text-sm font-mono">
+                                                            {formatCurrency(item.remittableCost)}
+                                                        </div>
+                                                        <div className="text-[11px] text-stone-400 mt-0.5">
+                                                            Wholesale Cost Base
+                                                        </div>
+                                                        {item.adminBatchId && (
+                                                            <div className="text-[10px] font-mono text-stone-400 mt-0.5">
+                                                                Batch #{item.adminBatchId.slice(-6).toUpperCase()}
+                                                            </div>
+                                                        )}
+                                                    </td>
+
+                                                    {/* Branch Retained Profit */}
+                                                    <td className="py-3.5 px-4 text-right align-top">
+                                                        <div className="font-black text-emerald-600 text-sm">
+                                                            +{formatCurrency(item.branchProfit)}
+                                                        </div>
+                                                        <div className="mt-1">
+                                                            <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                                                +{item.profitMarginPct ? item.profitMarginPct.toFixed(1) : '0.0'}% margin
+                                                            </span>
+                                                        </div>
+                                                    </td>
+
+                                                    {/* Remittance Status Badge */}
+                                                    <td className="py-3.5 px-4 text-center align-top">
+                                                        {isRemitted && (
+                                                            <div>
+                                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800">
+                                                                    <CheckCircle2 size={12} /> Remitted to HQ
+                                                                </span>
+                                                                <div className="text-[10px] text-stone-400 mt-1">
+                                                                    Paid {formatCurrency(item.remittedAmount)}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {isPending && (
+                                                            <div>
+                                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-100 text-amber-800">
+                                                                    <Clock size={12} /> Pending Remittance
+                                                                </span>
+                                                                <div className="text-[10px] font-bold text-amber-700 mt-1">
+                                                                    {formatCurrency(item.pendingRemittance)} owed
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {isPartial && (
+                                                            <div>
+                                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-blue-100 text-blue-800">
+                                                                    <CreditCard size={12} /> Partially Remitted
+                                                                </span>
+                                                                <div className="text-[10px] text-stone-500 mt-1">
+                                                                    {formatCurrency(item.remittedAmount)} / {formatCurrency(item.remittableCost)}
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </td>
+
+                                                    {/* Action: Inspect Details */}
+                                                    <td className="py-3.5 px-4 text-center align-top">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setSelectedSoldItemModal(item)}
+                                                            className="px-2.5 py-1.5 rounded-xl border border-stone-200 hover:bg-stone-100 text-stone-700 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1 mx-auto"
+                                                            title="Inspect item remittance breakdown"
+                                                        >
+                                                            <Eye size={13} />
+                                                            <span>Details</span>
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* TAB 4: INVENTORY TRACKER & MASTER CATALOG GAP */}
+            {activeTab === 'inventory' && (
+                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden space-y-0">
+                    {/* Header */}
+                    <div className="p-5 border-b border-stone-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-stone-50/50">
+                        <div>
+                            <div className="flex items-center gap-2.5">
+                                <h4 className="font-black text-stone-900 text-sm sm:text-base">Branch Inventory Tracker</h4>
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-stone-100 text-stone-700 border border-stone-200">
+                                    {branchCatalogAnalysis.totalUnitsInBranch} Total Stocked Units
+                                </span>
+                            </div>
+                            <p className="text-xs text-stone-400 mt-1">
+                                Live stock currently held at <strong className="text-stone-700 font-bold">{branch.name}</strong> vs. master catalog products available to add.
+                            </p>
+                        </div>
+
+                        {/* Sub-Tab Navigation Pills */}
+                        <div className="flex items-center gap-1.5 p-1 bg-stone-200/60 rounded-2xl shrink-0 self-start lg:self-auto">
+                            <button
+                                type="button"
+                                onClick={() => setInvSubTab('in_stock')}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                                    invSubTab === 'in_stock'
+                                        ? 'bg-white text-stone-900 shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                <span className={`w-2 h-2 rounded-full ${invSubTab === 'in_stock' ? 'bg-emerald-500' : 'bg-emerald-400/50'}`} />
+                                Carried In-Stock
+                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    invSubTab === 'in_stock' ? 'bg-emerald-50 text-emerald-700' : 'bg-stone-200 text-stone-600'
+                                }`}>
+                                    {branchCatalogAnalysis.inStockCount}
+                                </span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setInvSubTab('missing')}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                                    invSubTab === 'missing'
+                                        ? 'bg-white text-stone-900 shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                <span className={`w-2 h-2 rounded-full ${invSubTab === 'missing' ? 'bg-rose-500' : 'bg-rose-400/50'}`} />
+                                Missing / Products to Add
+                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    invSubTab === 'missing' ? 'bg-rose-50 text-rose-700' : 'bg-stone-200 text-stone-600'
+                                }`}>
+                                    {branchCatalogAnalysis.missingCount}
+                                </span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setInvSubTab('all')}
+                                className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                                    invSubTab === 'all'
+                                        ? 'bg-white text-stone-900 shadow-sm'
+                                        : 'text-stone-600 hover:text-stone-900'
+                                }`}
+                            >
+                                All Master Catalog
+                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    invSubTab === 'all' ? 'bg-indigo-50 text-indigo-700' : 'bg-stone-200 text-stone-600'
+                                }`}>
+                                    {branchCatalogAnalysis.totalCatalogCount}
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Filter & Action Bar */}
+                    <div className="p-4 border-b border-stone-100 flex flex-wrap items-center justify-between gap-3 bg-white">
+                        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
+                            {/* Search */}
+                            <div className="relative flex-1 min-w-[220px] max-w-md">
+                                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" />
+                                <input
+                                    type="text"
+                                    placeholder={invSubTab === 'missing' ? "Search products branch doesn't have (e.g. Wika Fire)..." : "Search brand, model, SKU, color..."}
+                                    value={invSearch}
+                                    onChange={(e) => setInvSearch(e.target.value)}
+                                    className="w-full pl-9 pr-7 py-2 text-xs font-semibold rounded-xl border border-stone-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-stone-50/50 focus:bg-white transition-all"
+                                />
+                                {invSearch && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setInvSearch('')}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                                    >
+                                        <X size={12} />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Category Filter */}
+                            <select
+                                value={invCategory}
+                                onChange={(e) => setInvCategory(e.target.value)}
+                                className="px-3 py-2 text-xs font-bold rounded-xl border border-stone-200 bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                            >
+                                {invCategories.map(cat => (
+                                    <option key={cat} value={cat}>{cat} {cat === 'All' ? 'Categories' : ''}</option>
+                                ))}
+                            </select>
+
+                            {/* HQ Stock Only Toggle for Missing or All */}
+                            {invSubTab !== 'in_stock' && (
+                                <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-stone-200 bg-stone-50/60 text-xs font-bold text-stone-700 cursor-pointer hover:bg-stone-100 transition-colors select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={invOnlyHqAvailable}
+                                        onChange={(e) => setInvOnlyHqAvailable(e.target.checked)}
+                                        className="rounded border-stone-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 cursor-pointer"
+                                    />
+                                    <span>Only with Admin HQ Stock ({branchCatalogAnalysis.hqAvailableMissingCount})</span>
+                                </label>
+                            )}
+                        </div>
+
+                        {/* Bulk Allocate for Missing Tab */}
+                        {invSubTab === 'missing' && selectedMissingVariantIds.size > 0 && (
+                            <button
+                                type="button"
+                                onClick={handleBulkAllocateMissing}
+                                className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-2 transition-all cursor-pointer active:scale-95"
+                            >
+                                <PackagePlus size={14} />
+                                Allocate Selected ({selectedMissingVariantIds.size}) to Branch
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Table View */}
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-stone-50 text-[11px] font-black uppercase tracking-wider text-stone-400 border-b border-stone-100">
                                 <tr>
-                                    <th className="py-3.5 px-6">Product & Model</th>
+                                    {invSubTab === 'missing' && (
+                                        <th className="py-3.5 pl-6 pr-2 w-10 text-center">
+                                            <input
+                                                type="checkbox"
+                                                checked={
+                                                    filteredInventoryItems.filter(it => it.adminStock > 0).length > 0 &&
+                                                    filteredInventoryItems.filter(it => it.adminStock > 0).every(it => selectedMissingVariantIds.has(it.variantId))
+                                                }
+                                                onChange={toggleSelectAllMissing}
+                                                title="Select all with HQ stock"
+                                                className="rounded border-stone-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer"
+                                            />
+                                        </th>
+                                    )}
+                                    <th className={`py-3.5 px-6 ${invSubTab === 'missing' ? 'pl-2' : ''}`}>Product & Model</th>
                                     <th className="py-3.5 px-4">SKU / Specs</th>
-                                    <th className="py-3.5 px-4">In Stock Units</th>
+                                    <th className="py-3.5 px-4">
+                                        {invSubTab === 'missing' ? 'Branch Status' : 'In Stock Units'}
+                                    </th>
+                                    {invSubTab !== 'in_stock' && (
+                                        <th className="py-3.5 px-4">Available in Admin HQ</th>
+                                    )}
                                     <th className="py-3.5 px-4">Default Admin Price</th>
-                                    <th className="py-3.5 px-6">Branch Selling Price</th>
+                                    <th className="py-3.5 px-6">
+                                        {invSubTab === 'missing' ? 'Quick Action' : 'Branch Selling Price'}
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-stone-100">
-                                {branchProducts.flatMap(p =>
-                                    (p.variants || []).map(v => (
-                                        <tr key={v.id} className="hover:bg-stone-50/70 transition-colors">
-                                            <td className="py-3.5 px-6">
-                                                <div className="font-black text-stone-900 text-xs">{p.modelName}</div>
-                                                <div className="text-[11px] text-stone-400 font-semibold">{p.brandName} • {p.category}</div>
-                                            </td>
-
-                                            <td className="py-3.5 px-4">
-                                                <span className="font-mono text-xs font-semibold text-stone-600">{v.sku}</span>
-                                                <div className="text-[11px] text-stone-400">
-                                                    {v.color || ''} {v.thicknessMm ? `• ${v.thicknessMm}mm` : ''}
+                                {filteredInventoryItems.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={invSubTab === 'missing' ? 7 : (invSubTab === 'all' ? 6 : 5)} className="py-12 text-center">
+                                            <div className="max-w-xs mx-auto space-y-2">
+                                                <div className="w-10 h-10 rounded-2xl bg-stone-100 text-stone-400 mx-auto flex items-center justify-center font-black">
+                                                    <Boxes size={20} />
                                                 </div>
-                                            </td>
+                                                <p className="font-bold text-stone-700 text-sm">
+                                                    {invSubTab === 'missing'
+                                                        ? 'No missing products found'
+                                                        : invSubTab === 'in_stock'
+                                                        ? 'No stocked items found'
+                                                        : 'No products match your filter'}
+                                                </p>
+                                                <p className="text-xs text-stone-400">
+                                                    {invSubTab === 'missing'
+                                                        ? `${branch.name} already carries all products matching your filters.`
+                                                        : 'Try adjusting your search query or category filter.'}
+                                                </p>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ) : (
+                                    filteredInventoryItems.map(item => {
+                                        const isMissingTab = invSubTab === 'missing';
+                                        const isOutOfStock = item.status === 'OUT_OF_STOCK';
+                                        const isNotCarried = item.status === 'NOT_CARRIED';
+                                        const isSelected = selectedMissingVariantIds.has(item.variantId);
 
-                                            <td className="py-3.5 px-4">
-                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black ${
-                                                    (v.stockQuantity ?? 0) > 5
-                                                        ? 'bg-emerald-50 text-emerald-700'
-                                                        : (v.stockQuantity ?? 0) > 0
-                                                        ? 'bg-amber-50 text-amber-700'
-                                                        : 'bg-rose-50 text-rose-700'
-                                                }`}>
-                                                    <Boxes size={12} />
-                                                    {v.stockQuantity ?? 0} units
-                                                </span>
-                                            </td>
-
-                                            <td className="py-3.5 px-4 font-semibold text-stone-500 text-xs">
-                                                {formatCurrency(v.sellingPrice)}
-                                            </td>
-
-                                            <td className="py-3.5 px-6 font-black text-stone-900 text-xs">
-                                                {editingPriceVariantId === v.id ? (
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className="text-stone-400 text-xs">₱</span>
+                                        return (
+                                            <tr
+                                                key={item.variantId}
+                                                className={`transition-colors ${
+                                                    isSelected ? 'bg-emerald-50/40' : 'hover:bg-stone-50/70'
+                                                }`}
+                                            >
+                                                {/* Checkbox for missing tab */}
+                                                {isMissingTab && (
+                                                    <td className="py-3.5 pl-6 pr-2 text-center">
                                                         <input
-                                                            type="number"
-                                                            step="0.01"
-                                                            min="0"
-                                                            value={editingPriceValue}
-                                                            onChange={(e) => setEditingPriceValue(e.target.value)}
-                                                            className="w-24 px-2 py-1 text-xs font-black rounded-lg border border-indigo-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                                            autoFocus
+                                                            type="checkbox"
+                                                            checked={isSelected}
+                                                            disabled={item.adminStock <= 0}
+                                                            onChange={() => toggleSelectMissingVariant(item.variantId)}
+                                                            className="rounded border-stone-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                                                         />
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => handleSaveInlineBranchPrice(v.id)}
-                                                            disabled={savingInlinePrice}
-                                                            className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all cursor-pointer"
-                                                            title="Save Price"
-                                                        >
-                                                            {savingInlinePrice ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setEditingPriceVariantId(null)}
-                                                            className="p-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-all cursor-pointer"
-                                                            title="Cancel"
-                                                        >
-                                                            <X size={12} />
-                                                        </button>
+                                                    </td>
+                                                )}
+
+                                                {/* Product & Model */}
+                                                <td className={`py-3.5 px-6 ${isMissingTab ? 'pl-2' : ''}`}>
+                                                    <div className="font-black text-stone-900 text-xs flex items-center gap-2">
+                                                        <span>{item.modelName}</span>
+                                                        {isNotCarried && (
+                                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-100">
+                                                                Not in Branch
+                                                            </span>
+                                                        )}
+                                                        {isOutOfStock && (
+                                                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100">
+                                                                0 Stock
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                ) : (
-                                                    <div className="flex items-center justify-between group/price">
-                                                        {v.hasCustomPrice ? (
-                                                            <div className="flex items-center gap-1.5 text-emerald-700">
-                                                                <span>{formatCurrency(v.branchSellingPrice)}</span>
-                                                                <span className="px-1.5 py-0.5 rounded text-[9px] uppercase bg-emerald-100 font-black">
-                                                                    Custom
-                                                                </span>
+                                                    <div className="text-[11px] text-stone-400 font-semibold">
+                                                        {item.brandName} • {item.category}
+                                                    </div>
+                                                </td>
+
+                                                {/* SKU / Specs */}
+                                                <td className="py-3.5 px-4">
+                                                    <span className="font-mono text-xs font-semibold text-stone-600">{item.sku}</span>
+                                                    <div className="text-[11px] text-stone-400">
+                                                        {item.color || ''} {item.thicknessMm ? `• ${item.thicknessMm}mm` : ''} {item.shape ? `• ${item.shape}` : ''}
+                                                    </div>
+                                                </td>
+
+                                                {/* Branch Stock Units / Status */}
+                                                <td className="py-3.5 px-4">
+                                                    {isMissingTab ? (
+                                                        isNotCarried ? (
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-100">
+                                                                <XCircle size={12} />
+                                                                Never Carried
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-100">
+                                                                <AlertCircle size={12} />
+                                                                0 units (Out)
+                                                            </span>
+                                                        )
+                                                    ) : (
+                                                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black ${
+                                                            item.branchStock > 5
+                                                                ? 'bg-emerald-50 text-emerald-700'
+                                                                : item.branchStock > 0
+                                                                ? 'bg-amber-50 text-amber-700'
+                                                                : 'bg-rose-50 text-rose-700'
+                                                        }`}>
+                                                            <Boxes size={12} />
+                                                            {item.branchStock} units
+                                                        </span>
+                                                    )}
+                                                </td>
+
+                                                {/* Admin HQ Available (Missing & All tabs) */}
+                                                {invSubTab !== 'in_stock' && (
+                                                    <td className="py-3.5 px-4">
+                                                        {item.adminStock > 0 ? (
+                                                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                                                <Boxes size={12} />
+                                                                {item.adminStock} units in HQ
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-stone-100 text-stone-400">
+                                                                0 at HQ
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                )}
+
+                                                {/* Default Admin Price */}
+                                                <td className="py-3.5 px-4 font-semibold text-stone-500 text-xs">
+                                                    {formatCurrency(item.defaultSellingPrice)}
+                                                </td>
+
+                                                {/* Action Column: Quick Allocate if missing, or Branch Selling Price if in_stock/all */}
+                                                <td className="py-3.5 px-6 font-black text-stone-900 text-xs">
+                                                    {isMissingTab ? (
+                                                        item.adminStock > 0 ? (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleQuickAllocateFromInventory(item)}
+                                                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                                                                title="Add to allocation manifest and dispatch"
+                                                            >
+                                                                <PackagePlus size={13} />
+                                                                + Allocate to Branch
+                                                            </button>
+                                                        ) : (
+                                                            <span className="text-xs text-stone-400 font-semibold italic">
+                                                                No HQ Stock
+                                                            </span>
+                                                        )
+                                                    ) : (
+                                                        /* Inline Price Editor for In-Stock & All */
+                                                        editingPriceVariantId === item.variantId ? (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className="text-stone-400 text-xs">₱</span>
+                                                                <input
+                                                                    type="number"
+                                                                    step="0.01"
+                                                                    min="0"
+                                                                    value={editingPriceValue}
+                                                                    onChange={(e) => setEditingPriceValue(e.target.value)}
+                                                                    className="w-24 px-2 py-1 text-xs font-black rounded-lg border border-indigo-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                                    autoFocus
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleSaveInlineBranchPrice(item.variantId)}
+                                                                    disabled={savingInlinePrice}
+                                                                    className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition-all cursor-pointer"
+                                                                    title="Save Price"
+                                                                >
+                                                                    {savingInlinePrice ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setEditingPriceVariantId(null)}
+                                                                    className="p-1.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-600 transition-all cursor-pointer"
+                                                                    title="Cancel"
+                                                                >
+                                                                    <X size={12} />
+                                                                </button>
                                                             </div>
                                                         ) : (
-                                                            <span className="text-stone-700">{formatCurrency(v.sellingPrice)}</span>
-                                                        )}
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => startEditingBranchPrice(v.id, v.hasCustomPrice ? v.branchSellingPrice : v.sellingPrice)}
-                                                            className="opacity-0 group-hover/price:opacity-100 p-1 rounded-md text-stone-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer"
-                                                            title="Edit Branch Selling Price"
-                                                        >
-                                                            <Pencil size={12} />
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))
+                                                            <div className="flex items-center justify-between group/price gap-2">
+                                                                {item.hasCustomPrice ? (
+                                                                    <div className="flex items-center gap-1.5 text-emerald-700">
+                                                                        <span>{formatCurrency(item.branchSellingPrice)}</span>
+                                                                        <span className="px-1.5 py-0.5 rounded text-[9px] uppercase bg-emerald-100 font-black">
+                                                                            Custom
+                                                                        </span>
+                                                                    </div>
+                                                                ) : (
+                                                                    <span className="text-stone-700">{formatCurrency(item.defaultSellingPrice)}</span>
+                                                                )}
+                                                                <div className="flex items-center gap-1">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => startEditingBranchPrice(item.variantId, item.hasCustomPrice ? item.branchSellingPrice : item.defaultSellingPrice)}
+                                                                        className="opacity-0 group-hover/price:opacity-100 p-1 rounded-md text-stone-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all cursor-pointer"
+                                                                        title="Edit Branch Selling Price"
+                                                                    >
+                                                                        <Pencil size={12} />
+                                                                    </button>
+                                                                    {/* If in All tab and item has HQ stock, show quick allocate too */}
+                                                                    {invSubTab === 'all' && item.adminStock > 0 && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleQuickAllocateFromInventory(item)}
+                                                                            className="opacity-0 group-hover/price:opacity-100 p-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-all cursor-pointer"
+                                                                            title="Allocate this item to branch"
+                                                                        >
+                                                                            <PackagePlus size={13} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>
                     </div>
+                </div>
+            )}
+
+            {/* TAB 5: BRANCH ANALYTICS & P&L */}
+            {activeTab === 'analytics' && (
+                <div className="space-y-6 animate-fadeIn">
+                    <BranchAnalytics branchId={branch.id} branchName={branch.name} />
+                </div>
+            )}
+
+            {/* TAB 6: BRANCH EXPENSES */}
+            {activeTab === 'expenses' && (
+                <div className="space-y-6 animate-fadeIn">
+                    <Expenses initialBranchId={branch.id} branchName={branch.name} />
                 </div>
             )}
 
@@ -2280,6 +3415,139 @@ const BranchDetail = () => {
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* SOLD ITEM REMITTANCE DETAIL MODAL */}
+            {selectedSoldItemModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fadeIn">
+                    <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-stone-200 space-y-5 animate-scaleUp">
+                        {/* Header */}
+                        <div className="flex items-center justify-between pb-3 border-b border-stone-100">
+                            <div>
+                                <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">
+                                    Item Sale & Remittance Breakdown
+                                </span>
+                                <h3 className="text-lg font-black text-stone-900 mt-0.5">
+                                    {selectedSoldItemModal.variant?.brandName} {selectedSoldItemModal.variant?.modelName}
+                                </h3>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedSoldItemModal(null)}
+                                className="p-2 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        {/* Customer & Ticket Info */}
+                        <div className="bg-stone-50 rounded-2xl p-4 space-y-2 text-xs border border-stone-100">
+                            <div className="flex justify-between">
+                                <span className="text-stone-400">Order Ticket ID:</span>
+                                <span className="font-mono font-bold text-stone-900">#{selectedSoldItemModal.orderTicketId || selectedSoldItemModal.id}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-stone-400">Transaction Date:</span>
+                                <span className="font-bold text-stone-800">
+                                    {selectedSoldItemModal.transactionDate
+                                        ? new Date(selectedSoldItemModal.transactionDate).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+                                        : 'N/A'}
+                                </span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-stone-400">Customer Name:</span>
+                                <span className="font-bold text-stone-900">{selectedSoldItemModal.customerName || 'Walk-in Customer'}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-stone-400">Payment Method:</span>
+                                <span className="font-bold text-stone-800">{selectedSoldItemModal.paymentMethod || 'Cash'}</span>
+                            </div>
+                            {selectedSoldItemModal.notes && (
+                                <div className="pt-2 border-t border-stone-200">
+                                    <span className="text-stone-400 block mb-0.5">Purchase Remarks / Notes:</span>
+                                    <div className="font-medium text-stone-800 bg-white p-2.5 rounded-xl border border-stone-200">
+                                        "{selectedSoldItemModal.notes}"
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Financial Math Breakdown */}
+                        <div className="bg-gradient-to-br from-stone-900 to-stone-800 rounded-2xl p-5 text-white space-y-3 shadow-md">
+                            <div className="flex items-center justify-between text-xs text-stone-300">
+                                <span>Gross Retail Sale Price:</span>
+                                <span className="text-base font-black text-white">{formatCurrency(selectedSoldItemModal.finalPrice)}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-amber-300 pt-2 border-t border-stone-700">
+                                <span>Remittable to Admin HQ (Cost Base):</span>
+                                <span className="text-base font-black text-amber-300">- {formatCurrency(selectedSoldItemModal.remittableCost)}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs text-emerald-400 pt-2 border-t border-stone-700">
+                                <span>Branch Retained Margin:</span>
+                                <span className="text-base font-black text-emerald-400">+ {formatCurrency(selectedSoldItemModal.branchProfit)}</span>
+                            </div>
+                            <div className="text-right text-[11px] text-stone-400">
+                                Branch Margin: <span className="font-bold text-emerald-300">+{selectedSoldItemModal.profitMarginPct?.toFixed(1)}%</span>
+                            </div>
+                        </div>
+
+                        {/* Remittance Status & Batch Details */}
+                        <div className="space-y-2 text-xs">
+                            <div className="flex items-center justify-between p-3 rounded-xl bg-stone-50 border border-stone-100">
+                                <span className="text-stone-500">Remittance Settlement:</span>
+                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                                    selectedSoldItemModal.remittanceStatus === 'REMITTED'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : selectedSoldItemModal.remittanceStatus === 'PARTIAL'
+                                        ? 'bg-blue-100 text-blue-800'
+                                        : 'bg-amber-100 text-amber-800'
+                                }`}>
+                                    {selectedSoldItemModal.remittanceStatus === 'REMITTED'
+                                        ? 'Fully Remitted'
+                                        : selectedSoldItemModal.remittanceStatus === 'PARTIAL'
+                                        ? 'Partially Remitted'
+                                        : 'Pending Remittance'}
+                                </span>
+                            </div>
+
+                            {selectedSoldItemModal.adminBatchId && (
+                                <div className="p-3 rounded-xl bg-stone-50 border border-stone-100 space-y-1">
+                                    <div className="flex justify-between">
+                                        <span className="text-stone-400">Allocation Batch:</span>
+                                        <span className="font-mono font-bold text-stone-800">#{selectedSoldItemModal.adminBatchId.slice(-6).toUpperCase()}</span>
+                                    </div>
+                                    {selectedSoldItemModal.allocationDeadline && (
+                                        <div className="flex justify-between">
+                                            <span className="text-stone-400">Payment Deadline:</span>
+                                            <span className="font-bold text-stone-700">{selectedSoldItemModal.allocationDeadline}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center justify-end gap-3 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setSelectedSoldItemModal(null);
+                                    handleTabChange('dues');
+                                }}
+                                className="px-4 py-2.5 rounded-xl border border-stone-200 hover:bg-stone-50 text-xs font-bold text-stone-700 transition-colors cursor-pointer"
+                            >
+                                Go to Dues & Payments
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedSoldItemModal(null)}
+                                className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-sm"
+                            >
+                                Close
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

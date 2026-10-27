@@ -277,50 +277,91 @@ public class ProductController {
         if (user == null) {
             return ResponseEntity.status(401).body(Map.of("error", "Not authenticated."));
         }
-        Long branchId = "BRANCH".equals(user.getRole()) ? user.getBranchId() :
-                (body.containsKey("branchId") ? Long.valueOf(body.get("branchId").toString()) : null);
 
-        if (branchId == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "branchId is required."));
+        Long branchId = null;
+        if ("BRANCH".equals(user.getRole()) && user.getBranchId() != null) {
+            branchId = user.getBranchId();
         }
 
-        Object priceObj = body.get("sellingPrice");
+        if (branchId == null && body != null && body.containsKey("branchId") && body.get("branchId") != null) {
+            Object rawBranch = body.get("branchId");
+            try {
+                if (rawBranch instanceof Number) {
+                    branchId = ((Number) rawBranch).longValue();
+                } else {
+                    String bStr = rawBranch.toString().trim();
+                    if (!bStr.isEmpty() && !"null".equalsIgnoreCase(bStr) && !"undefined".equalsIgnoreCase(bStr)) {
+                        branchId = Long.valueOf(bStr);
+                    }
+                }
+            } catch (NumberFormatException ignored) {}
+        }
+
+        // If branchId is still null, default to first active branch (or first branch in system)
+        if (branchId == null) {
+            branchId = branchRepository.findAll().stream()
+                    .filter(Branch::isActive)
+                    .map(Branch::getId)
+                    .findFirst()
+                    .orElseGet(() -> branchRepository.findAll().stream()
+                            .map(Branch::getId)
+                            .findFirst()
+                            .orElse(null));
+        }
+
+        if (branchId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No active branch found."));
+        }
+
+        Branch branch = branchRepository.findById(branchId).orElse(null);
+        if (branch == null) {
+            branch = branchRepository.findAll().stream()
+                    .filter(Branch::isActive)
+                    .findFirst()
+                    .orElseGet(() -> branchRepository.findAll().stream().findFirst().orElse(null));
+        }
+        if (branch == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Branch not found: " + branchId));
+        }
+        branchId = branch.getId();
+
+        Object priceObj = body != null ? body.get("sellingPrice") : null;
         if (priceObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "sellingPrice is required."));
         }
         BigDecimal price;
         try {
-            price = new BigDecimal(priceObj.toString());
-        } catch (NumberFormatException e) {
+            price = new BigDecimal(priceObj.toString().replace(",", "").trim());
+        } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid sellingPrice value."));
         }
         if (price.compareTo(BigDecimal.ZERO) < 0) {
             return ResponseEntity.badRequest().body(Map.of("error", "sellingPrice must be >= 0."));
         }
 
-        if (!variantRepository.existsById(variantId)) {
-            return ResponseEntity.notFound().build();
+        ProductVariant variant = variantRepository.findById(variantId).orElse(null);
+        if (variant == null) {
+            return ResponseEntity.status(404).body(Map.of("error", "Product variant not found: " + variantId));
         }
-        Branch branch = branchRepository.findById(branchId).orElse(null);
-        if (branch == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Branch not found: " + branchId));
-        }
-        ProductVariant variant = variantRepository.findById(variantId).get();
 
+        final Long effectiveBranchId = branchId;
+        final Branch effectiveBranch = branch;
         BranchSellingPrice bsp = branchSellingPriceRepository
-                .findByBranchIdAndVariantId(branchId, variantId)
+                .findByBranchIdAndVariantId(effectiveBranchId, variantId)
                 .orElseGet(() -> {
                     BranchSellingPrice newBsp = new BranchSellingPrice();
-                    newBsp.setBranch(branch);
+                    newBsp.setBranch(effectiveBranch);
                     newBsp.setVariant(variant);
                     return newBsp;
                 });
         bsp.setSellingPrice(price);
-        branchSellingPriceRepository.save(bsp);
+        BranchSellingPrice saved = branchSellingPriceRepository.save(bsp);
 
         Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("id", saved.getId());
         resp.put("variantId", variantId);
-        resp.put("branchId", branchId);
+        resp.put("branchId", effectiveBranchId);
+        resp.put("branchName", effectiveBranch.getName());
         resp.put("sellingPrice", price);
         resp.put("message", "Branch selling price updated.");
         return ResponseEntity.ok(resp);
@@ -339,7 +380,18 @@ public class ProductController {
                 ? user.getBranchId() : branchId;
 
         if (effectiveBranchId == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "branchId is required."));
+            effectiveBranchId = branchRepository.findAll().stream()
+                    .filter(Branch::isActive)
+                    .map(Branch::getId)
+                    .findFirst()
+                    .orElseGet(() -> branchRepository.findAll().stream()
+                            .map(Branch::getId)
+                            .findFirst()
+                            .orElse(null));
+        }
+
+        if (effectiveBranchId == null) {
+            return ResponseEntity.ok(List.of());
         }
 
         List<BranchSellingPrice> prices = branchSellingPriceRepository.findAllByBranchId(effectiveBranchId);

@@ -90,6 +90,13 @@ public class TransactionController {
             transaction.setConsignee(consignee);
         }
 
+        // Two-way synchronization between notes and paymentDetails
+        if (transaction.getNotes() == null && transaction.getPaymentDetails() != null) {
+            transaction.setNotes(transaction.getPaymentDetails());
+        } else if (transaction.getPaymentDetails() == null && transaction.getNotes() != null) {
+            transaction.setPaymentDetails(transaction.getNotes());
+        }
+
         // Save the transaction
         Transaction saved = transactionRepository.save(transaction);
 

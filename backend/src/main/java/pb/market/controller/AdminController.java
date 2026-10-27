@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import pb.market.entity.Branch;
 import pb.market.entity.BranchStockAllocation;
 import pb.market.entity.Role;
+import pb.market.entity.Transaction;
 import pb.market.entity.User;
 import pb.market.repository.BranchRepository;
 import pb.market.repository.BranchStockAllocationRepository;
@@ -14,8 +15,10 @@ import pb.market.repository.StockBatchRepository;
 import pb.market.repository.TransactionRepository;
 import pb.market.repository.UserRepository;
 
+import org.springframework.data.domain.PageRequest;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -274,5 +277,202 @@ public class AdminController {
         }
         userRepository.deleteById(id);
         return ResponseEntity.ok(Map.of("message", "User deleted"));
+    }
+
+    // ─── REMITTABLE SALES PER BRANCH ──────────────────────────────────────────
+    /**
+     * Returns an itemized breakdown of all items sold at a specific branch,
+     * including selling price, cost price (remittable wholesale base to Admin),
+     * branch profit margin, and current remittance status.
+     */
+    @GetMapping("/branches/{branchId}/remittable-sales")
+    public ResponseEntity<?> getBranchRemittableSales(
+            @PathVariable Long branchId,
+            @RequestParam(value = "from", required = false) String fromStr,
+            @RequestParam(value = "to", required = false) String toStr) {
+
+        Branch branch = branchRepository.findById(branchId).orElse(null);
+        if (branch == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        LocalDateTime fromDt = parseDateTime(fromStr, false);
+        LocalDateTime toDt = parseDateTime(toStr, true);
+
+        PageRequest page = PageRequest.of(0, 50000);
+        List<Transaction> transactions;
+        if (fromDt != null && toDt != null) {
+            transactions = transactionRepository.findAllWithDetailsByActivityDateAndBranch(fromDt, toDt, branchId, page);
+        } else {
+            transactions = transactionRepository.findAllWithDetailsByBranch(branchId, page);
+        }
+
+        // Fetch allocations for this branch to correlate stock batches and remittance status
+        List<BranchStockAllocation> allocations = allocationRepository.findByBranchIdOrderByAllocatedAtDesc(branchId);
+        Map<Long, BranchStockAllocation> batchToAllocation = new java.util.HashMap<>();
+        Map<Long, List<BranchStockAllocation>> variantToAllocations = new java.util.HashMap<>();
+        for (BranchStockAllocation a : allocations) {
+            if (a.getStockBatchId() != null) {
+                batchToAllocation.put(a.getStockBatchId(), a);
+            }
+            if (a.getVariant() != null && a.getVariant().getId() != null) {
+                variantToAllocations.computeIfAbsent(a.getVariant().getId(), k -> new java.util.ArrayList<>()).add(a);
+            }
+        }
+
+        BigDecimal totalGrossSales = BigDecimal.ZERO;
+        BigDecimal totalCollected = BigDecimal.ZERO;
+        BigDecimal totalRemittable = BigDecimal.ZERO;
+        BigDecimal totalRemitted = BigDecimal.ZERO;
+        int totalItemsSold = 0;
+
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
+
+        for (Transaction t : transactions) {
+            BigDecimal finalPrice = t.getFinalPrice() != null ? t.getFinalPrice() : BigDecimal.ZERO;
+            BigDecimal downpayment = t.getDownpayment() != null ? t.getDownpayment() : BigDecimal.ZERO;
+            BigDecimal costPrice = t.getCostPrice() != null ? t.getCostPrice() : BigDecimal.ZERO;
+            BigDecimal profit = finalPrice.subtract(costPrice);
+            double profitMargin = finalPrice.compareTo(BigDecimal.ZERO) > 0
+                    ? profit.multiply(BigDecimal.valueOf(100)).divide(finalPrice, 2, java.math.RoundingMode.HALF_UP).doubleValue()
+                    : 0.0;
+
+            // Correlate remittance status with allocation record
+            BranchStockAllocation alloc = null;
+            if (t.getStockBatch() != null && t.getStockBatch().getId() != null) {
+                alloc = batchToAllocation.get(t.getStockBatch().getId());
+            }
+            if (alloc == null && t.getVariant() != null && variantToAllocations.containsKey(t.getVariant().getId())) {
+                List<BranchStockAllocation> vAllocs = variantToAllocations.get(t.getVariant().getId());
+                if (!vAllocs.isEmpty()) {
+                    alloc = vAllocs.get(0);
+                }
+            }
+
+            String remittanceStatus;
+            BigDecimal remittedPortion;
+            BigDecimal pendingPortion;
+
+            if (alloc != null) {
+                if ("PAID".equalsIgnoreCase(alloc.getStatus())) {
+                    remittanceStatus = "REMITTED";
+                    remittedPortion = costPrice;
+                    pendingPortion = BigDecimal.ZERO;
+                } else if ("PARTIAL".equalsIgnoreCase(alloc.getStatus()) && alloc.getTotalCost() != null && alloc.getTotalCost().compareTo(BigDecimal.ZERO) > 0) {
+                    remittanceStatus = "PARTIAL";
+                    BigDecimal paidRatio = alloc.getAmountPaid().divide(alloc.getTotalCost(), 4, java.math.RoundingMode.HALF_UP);
+                    remittedPortion = costPrice.multiply(paidRatio).setScale(2, java.math.RoundingMode.HALF_UP);
+                    if (remittedPortion.compareTo(costPrice) > 0) remittedPortion = costPrice;
+                    pendingPortion = costPrice.subtract(remittedPortion);
+                } else {
+                    remittanceStatus = "PENDING";
+                    remittedPortion = BigDecimal.ZERO;
+                    pendingPortion = costPrice;
+                }
+            } else {
+                remittanceStatus = "PENDING";
+                remittedPortion = BigDecimal.ZERO;
+                pendingPortion = costPrice;
+            }
+
+            totalGrossSales = totalGrossSales.add(finalPrice);
+            totalCollected = totalCollected.add(downpayment);
+            totalRemittable = totalRemittable.add(costPrice);
+            totalRemitted = totalRemitted.add(remittedPortion);
+            totalItemsSold++;
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", t.getId());
+            item.put("orderTicketId", t.getTransactionId());
+            item.put("transactionDate", t.getTransactionDate() != null ? t.getTransactionDate().toString() : null);
+            item.put("customerName", t.getCustomerName());
+            item.put("paymentMethod", t.getPaymentMethod());
+            item.put("paymentDetails", t.getPaymentDetails());
+            item.put("notes", t.getNotes());
+            item.put("status", t.getStatus());
+            item.put("finalPrice", finalPrice);
+            item.put("downpayment", downpayment);
+            item.put("costPrice", costPrice);
+            item.put("remittableCost", costPrice);
+            item.put("branchProfit", profit);
+            item.put("profitMarginPct", profitMargin);
+            item.put("remittanceStatus", remittanceStatus);
+            item.put("remittedAmount", remittedPortion);
+            item.put("pendingRemittance", pendingPortion);
+
+            if (alloc != null) {
+                item.put("allocationId", alloc.getId());
+                item.put("adminBatchId", alloc.getAdminBatchId());
+                item.put("allocationStatus", alloc.getStatus());
+                item.put("allocationDeadline", alloc.getDeadline() != null ? alloc.getDeadline().toString() : null);
+                item.put("allocationCostPerUnit", alloc.getCostPerUnit());
+                item.put("allocationTotalCost", alloc.getTotalCost());
+                item.put("allocationAmountPaid", alloc.getAmountPaid());
+            } else {
+                item.put("allocationId", null);
+                item.put("adminBatchId", null);
+                item.put("allocationStatus", null);
+                item.put("allocationDeadline", null);
+                item.put("allocationCostPerUnit", null);
+                item.put("allocationTotalCost", null);
+                item.put("allocationAmountPaid", null);
+            }
+
+            if (t.getVariant() != null) {
+                Map<String, Object> vMap = new LinkedHashMap<>();
+                vMap.put("id", t.getVariant().getId());
+                vMap.put("sku", t.getVariant().getSku());
+                vMap.put("color", t.getVariant().getColor());
+                vMap.put("shape", t.getVariant().getShape());
+                vMap.put("thicknessMm", t.getVariant().getThicknessMm());
+                if (t.getVariant().getProduct() != null) {
+                    vMap.put("brandName", t.getVariant().getProduct().getBrandName());
+                    vMap.put("modelName", t.getVariant().getProduct().getModelName());
+                    vMap.put("category", t.getVariant().getProduct().getCategory());
+                }
+                item.put("variant", vMap);
+            } else {
+                item.put("variant", null);
+            }
+
+            items.add(item);
+        }
+
+        BigDecimal pendingRemittance = totalRemittable.subtract(totalRemitted);
+        BigDecimal totalBranchProfit = totalGrossSales.subtract(totalRemittable);
+        double overallMargin = totalGrossSales.compareTo(BigDecimal.ZERO) > 0
+                ? totalBranchProfit.multiply(BigDecimal.valueOf(100)).divide(totalGrossSales, 2, java.math.RoundingMode.HALF_UP).doubleValue()
+                : 0.0;
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalItemsSold", totalItemsSold);
+        summary.put("totalGrossSales", totalGrossSales);
+        summary.put("totalCollected", totalCollected);
+        summary.put("totalRemittable", totalRemittable);
+        summary.put("totalRemitted", totalRemitted);
+        summary.put("pendingRemittance", pendingRemittance);
+        summary.put("totalBranchProfit", totalBranchProfit);
+        summary.put("overallProfitMargin", overallMargin);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("branchId", branch.getId());
+        response.put("branchName", branch.getName());
+        response.put("summary", summary);
+        response.put("items", items);
+
+        return ResponseEntity.ok(response);
+    }
+
+    private LocalDateTime parseDateTime(String str, boolean isEnd) {
+        if (str == null || str.isBlank()) return null;
+        try {
+            if (str.length() == 10) {
+                LocalDate ld = LocalDate.parse(str);
+                return isEnd ? ld.atTime(23, 59, 59) : ld.atStartOfDay();
+            }
+            return LocalDateTime.parse(str);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

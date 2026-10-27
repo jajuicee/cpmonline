@@ -26,6 +26,8 @@ public class Transaction {
     private String customerName;
     private String paymentMethod; // GCash, Banko, BDO, GoTyme, Cash, Split Payment
     private String paymentDetails; // Detailed string if split payment (e.g., GCash (500) + Cash (300))
+    @Column(columnDefinition = "TEXT")
+    private String notes; // Purchase notes / order remarks
     private String status;        // FULL or PARTIAL
     
     private BigDecimal downpayment;

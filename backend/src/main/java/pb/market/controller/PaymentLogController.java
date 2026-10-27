@@ -30,8 +30,12 @@ public class PaymentLogController {
         if (fromStr != null && toStr != null) {
             LocalDateTime from = LocalDateTime.parse(fromStr);
             LocalDateTime to = LocalDateTime.parse(toStr);
-            return paymentLogRepository.findByPaymentDateBetweenAndBranch(from, to, branchId);
+            return branchId == null
+                    ? paymentLogRepository.findByPaymentDateBetween(from, to)
+                    : paymentLogRepository.findByPaymentDateBetweenAndBranch(from, to, branchId);
         }
-        return paymentLogRepository.findAllOrderedByBranch(branchId);
+        return branchId == null
+                ? paymentLogRepository.findAllOrdered()
+                : paymentLogRepository.findAllOrderedByBranch(branchId);
     }
 }

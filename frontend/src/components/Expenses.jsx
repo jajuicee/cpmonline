@@ -1,18 +1,33 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
 import {
     Receipt, Plus, Trash2, Calendar, X, ChevronLeft, ChevronRight,
-    AlertCircle, RefreshCw, Search, ChevronDown, DollarSign, TrendingUp, TrendingDown, Wallet
+    AlertCircle, RefreshCw, Search, ChevronDown, DollarSign, TrendingUp, TrendingDown,
+    Wallet, Store, Building2, CreditCard, Landmark, Smartphone
 } from 'lucide-react';
 
-const CATEGORIES = ['Miscellaneous', 'Bills', 'Supplies', 'Salary'];
+const CATEGORIES = ['Miscellaneous', 'Bills', 'Supplies', 'Salary', 'Rent', 'Maintenance'];
 
 const CATEGORY_COLORS = {
     'Miscellaneous': { bg: '#f5f5f4', text: '#57534e', dot: '#a8a29e' },
     'Bills':         { bg: '#fef3c7', text: '#92400e', dot: '#f59e0b' },
     'Supplies':      { bg: '#dbeafe', text: '#1e40af', dot: '#3b82f6' },
     'Salary':        { bg: '#dcfce7', text: '#166534', dot: '#22c55e' },
+    'Rent':          { bg: '#fdf2f8', text: '#9d174d', dot: '#ec4899' },
+    'Maintenance':   { bg: '#ecfeff', text: '#155e75', dot: '#06b6d4' },
 };
+
+const PAYMENT_SOURCES = [
+    { id: 'Cash Drawer', label: 'Cash Drawer', icon: Wallet },
+    { id: 'GCash',       label: 'GCash',       icon: Smartphone },
+    { id: 'Maya',        label: 'Maya',        icon: Smartphone },
+    { id: 'GoTyme',      label: 'GoTyme',      icon: Smartphone },
+    { id: 'BDO',         label: 'BDO Bank',    icon: Landmark },
+    { id: 'BPI',         label: 'BPI Bank',    icon: Landmark },
+    { id: 'MBOS',        label: 'MBOS Bank',   icon: Landmark },
+    { id: 'Other',       label: 'Other Account', icon: CreditCard },
+];
 
 const formatCurrency = (val) =>
     `₱${Number(val ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -134,8 +149,17 @@ const CalendarPicker = ({ onApply, onClose, visible }) => {
 };
 
 // ── Add Expense Modal ─────────────────────────────────────────────────────────
-const AddExpenseModal = ({ onSave, onClose, batches = [] }) => {
-    const [form, setForm] = useState({ name: '', category: 'Miscellaneous', cost: '', note: '', batchId: '', type: 'EXPENSE' });
+const AddExpenseModal = ({ onSave, onClose, batches = [], branches = [], defaultBranchId = null, isAdmin = true, user = null }) => {
+    const [form, setForm] = useState({
+        name: '',
+        category: 'Miscellaneous',
+        cost: '',
+        note: '',
+        batchId: '',
+        type: 'EXPENSE',
+        paymentSource: 'Cash Drawer',
+        branchId: defaultBranchId || (isAdmin ? '' : user?.branchId || '')
+    });
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState('');
 
@@ -146,8 +170,17 @@ const AddExpenseModal = ({ onSave, onClose, batches = [] }) => {
         if (!form.cost || isNaN(Number(form.cost)) || Number(form.cost) <= 0) return setErr(`Enter a valid ${form.type === 'INCOME' ? 'amount' : 'cost'}.`);
         setSaving(true); setErr('');
         try {
-            const dataToSave = { ...form, cost: Number(form.cost) };
-            if (!dataToSave.batchId) dataToSave.batchId = null;
+            const dataToSave = {
+                name: form.name.trim(),
+                category: form.type === 'INCOME' ? 'Income' : form.category,
+                cost: Number(form.cost),
+                note: form.note.trim(),
+                type: form.type,
+                paymentSource: form.paymentSource,
+                batchId: form.batchId || null,
+                branch: form.branchId && Number(form.branchId) > 0 ? { id: Number(form.branchId) } : null
+            };
+
             await onSave(dataToSave);
             onClose();
         } catch {
@@ -162,62 +195,120 @@ const AddExpenseModal = ({ onSave, onClose, batches = [] }) => {
     return (
         <div className="fixed inset-0 bg-zinc-950/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm" onClick={onClose}
             style={{ animation: 'fadeSlideIn 180ms ease' }}>
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md border border-stone-200" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-3xl shadow-2xl p-6 w-full max-w-md border border-stone-200" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between mb-5 pb-4 border-b border-stone-100">
                     <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-xl ${isExp ? 'bg-stone-100' : 'bg-emerald-100'}`}>
-                            {isExp ? <Receipt size={18} className="text-zinc-700" /> : <TrendingUp size={18} className="text-emerald-700" />}
+                        <div className={`p-2.5 rounded-2xl ${isExp ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                            {isExp ? <Receipt size={18} /> : <TrendingUp size={18} />}
                         </div>
-                        <h3 className="text-base font-bold text-zinc-800">{isExp ? 'Add Expense' : 'Add Money'}</h3>
+                        <div>
+                            <h3 className="text-base font-black text-stone-900">{isExp ? 'Record Operating Expense' : 'Record Direct Income'}</h3>
+                            <p className="text-[11px] text-stone-400 font-medium">Record outgoing costs or store cash adjustments</p>
+                        </div>
                     </div>
                     {/* Toggle */}
-                    <div className="flex bg-stone-100 p-1 rounded-lg">
-                        <button onClick={() => set('type', 'EXPENSE')} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-md transition-all ${isExp ? 'bg-white shadow text-zinc-900' : 'text-zinc-400 hover:text-zinc-600'}`}>Expense</button>
-                        <button onClick={() => set('type', 'INCOME')} className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-wider rounded-md transition-all ${!isExp ? 'bg-emerald-600 shadow text-white' : 'text-zinc-400 hover:text-zinc-600'}`}>Income</button>
+                    <div className="flex bg-stone-100 p-1 rounded-xl">
+                        <button onClick={() => set('type', 'EXPENSE')} className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${isExp ? 'bg-white shadow text-stone-900' : 'text-stone-400 hover:text-stone-600'}`}>Expense</button>
+                        <button onClick={() => set('type', 'INCOME')} className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all ${!isExp ? 'bg-emerald-600 shadow text-white' : 'text-stone-400 hover:text-stone-600'}`}>Income</button>
                     </div>
                 </div>
 
                 {err && (
-                    <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs font-medium">
+                    <div className="flex items-center gap-2 p-3 mb-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold">
                         <AlertCircle size={14} /> {err}
                     </div>
                 )}
 
-                <div className="space-y-4">
+                <div className="space-y-3.5 text-xs">
+                    {/* Location / Branch Tagging */}
+                    <div>
+                        <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">Location / Branch Scope *</label>
+                        {isAdmin ? (
+                            <div className="relative">
+                                <select
+                                    value={form.branchId} onChange={e => set('branchId', e.target.value)}
+                                    className="w-full appearance-none px-3 py-2 border border-stone-300 rounded-xl font-bold text-stone-800 bg-white pr-9 text-xs"
+                                >
+                                    <option value="">🏢 Central Admin (Headquarters)</option>
+                                    {branches.map(b => (
+                                        <option key={b.id} value={b.id}>
+                                            🏬 {b.name}
+                                        </option>
+                                    ))}
+                                </select>
+                                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2 px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-700 font-bold">
+                                <Store size={14} className="text-emerald-700" />
+                                <span>{user?.branchName || 'Assigned Branch'}</span>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Name */}
                     <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1.5">{isExp ? 'Expense Name' : 'Income Source'} *</label>
+                        <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">{isExp ? 'Expense Name' : 'Income Source'} *</label>
                         <input
                             type="text" autoFocus value={form.name} onChange={e => set('name', e.target.value)}
-                            placeholder={isExp ? "e.g. Internet Bill, Office Supplies…" : "e.g. Investment, Refund, Initial Capital…"}
-                            className="w-full px-3 py-2.5 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-800"
+                            placeholder={isExp ? "e.g. Internet Bill, Store Rent, Coffee for staff, Paddle Grip repair…" : "e.g. Initial Capital, Refund, Sponsorship…"}
+                            className="w-full px-3 py-2 border border-stone-300 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-stone-900 text-stone-800 text-xs"
                         />
+                    </div>
+
+                    {/* Paid From / Payment Source */}
+                    <div>
+                        <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">{isExp ? 'Paid From (Payment Account)' : 'Deposited To (Payment Account)'} *</label>
+                        <div className="relative">
+                            <select
+                                value={form.paymentSource} onChange={e => set('paymentSource', e.target.value)}
+                                className="w-full appearance-none px-3 py-2 border border-stone-300 rounded-xl font-bold text-stone-800 bg-white pr-9 text-xs"
+                            >
+                                {PAYMENT_SOURCES.map(p => (
+                                    <option key={p.id} value={p.id}>{p.label}</option>
+                                ))}
+                            </select>
+                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                        </div>
                     </div>
 
                     {/* Category */}
                     {isExp && (
                         <div>
-                            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Category *</label>
+                            <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">Category *</label>
                             <div className="relative">
                                 <select
                                     value={form.category} onChange={e => set('category', e.target.value)}
-                                    className="w-full appearance-none px-3 py-2.5 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-800 bg-white pr-9"
+                                    className="w-full appearance-none px-3 py-2 border border-stone-300 rounded-xl font-bold text-stone-800 bg-white pr-9 text-xs"
                                 >
                                     {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
-                                <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                             </div>
                         </div>
                     )}
 
+                    {/* Cost */}
+                    <div>
+                        <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">{isExp ? 'Cost' : 'Amount'} (₱) *</label>
+                        <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 font-bold">₱</span>
+                            <input
+                                type="number" min="0" step="0.01" value={form.cost} onChange={e => set('cost', e.target.value)}
+                                placeholder="0.00"
+                                className="w-full pl-7 pr-3 py-2 border border-stone-300 rounded-xl font-black focus:outline-none focus:ring-2 focus:ring-stone-900 text-stone-900 text-xs"
+                            />
+                        </div>
+                    </div>
+
                     {/* Batch Link */}
-                    {isExp && (
+                    {isExp && batches.length > 0 && (
                         <div>
-                            <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Link to Supply Batch <span className="font-normal normal-case text-zinc-400">(optional)</span></label>
+                            <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">Link to Restock Batch <span className="font-normal normal-case text-stone-400">(optional)</span></label>
                             <div className="relative">
                                 <select
                                     value={form.batchId} onChange={e => set('batchId', e.target.value)}
-                                    className="w-full appearance-none px-3 py-2.5 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-800 bg-white pr-9"
+                                    className="w-full appearance-none px-3 py-2 border border-stone-300 rounded-xl font-medium text-stone-800 bg-white pr-9 text-xs truncate"
                                 >
                                     <option value="">None (Standalone Expense)</option>
                                     {batches.map(b => (
@@ -226,40 +317,27 @@ const AddExpenseModal = ({ onSave, onClose, batches = [] }) => {
                                         </option>
                                     ))}
                                 </select>
-                                <ChevronDown size={15} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                                <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                             </div>
                         </div>
                     )}
 
-                    {/* Cost */}
-                    <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1.5">{isExp ? 'Cost' : 'Amount'} (₱) *</label>
-                        <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-sm font-medium">₱</span>
-                            <input
-                                type="number" min="0" step="0.01" value={form.cost} onChange={e => set('cost', e.target.value)}
-                                placeholder="0.00"
-                                className="w-full pl-7 pr-3 py-2.5 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-800"
-                            />
-                        </div>
-                    </div>
-
                     {/* Note */}
                     <div>
-                        <label className="block text-xs font-bold text-zinc-500 uppercase tracking-wider mb-1.5">Note <span className="font-normal normal-case text-zinc-400">(optional)</span></label>
+                        <label className="block text-[10px] font-black text-stone-500 uppercase tracking-wider mb-1">Note <span className="font-normal normal-case text-stone-400">(optional)</span></label>
                         <textarea
                             value={form.note} onChange={e => set('note', e.target.value)}
-                            placeholder="Any additional details…" rows={2}
-                            className="w-full px-3 py-2.5 text-sm border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-300 text-zinc-800 resize-none"
+                            placeholder="Any receipts, voucher numbers, or details…" rows={2}
+                            className="w-full px-3 py-2 border border-stone-300 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-stone-900 text-stone-800 resize-none text-xs"
                         />
                     </div>
                 </div>
 
-                <div className="flex gap-3 mt-6">
-                    <button onClick={onClose} className="flex-1 py-2.5 text-sm font-bold rounded-xl border border-stone-200 text-zinc-500 hover:bg-stone-50 transition-colors">Cancel</button>
-                    <button onClick={handleSubmit} disabled={saving} className={`flex-1 py-2.5 text-sm font-bold rounded-xl text-white transition-colors flex items-center justify-center gap-2 ${saving ? 'bg-zinc-700' : isExp ? 'bg-zinc-950 hover:bg-zinc-800' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                        {saving ? <RefreshCw size={14} className="animate-spin" /> : isExp ? <Plus size={14} /> : <TrendingUp size={14} />}
-                        {saving ? 'Saving…' : isExp ? 'Add Expense' : 'Add Money'}
+                <div className="flex gap-2.5 mt-5 pt-3 border-t border-stone-100">
+                    <button onClick={onClose} className="flex-1 py-2 text-xs font-bold rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors cursor-pointer">Cancel</button>
+                    <button onClick={handleSubmit} disabled={saving} className={`flex-1 py-2 text-xs font-black rounded-xl text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md active:scale-95 ${saving ? 'bg-stone-700' : isExp ? 'bg-stone-900 hover:bg-stone-800' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                        {saving ? <RefreshCw size={13} className="animate-spin" /> : isExp ? <Plus size={13} /> : <TrendingUp size={13} />}
+                        {saving ? 'Saving…' : isExp ? 'Record Expense' : 'Record Income'}
                     </button>
                 </div>
             </div>
@@ -268,18 +346,22 @@ const AddExpenseModal = ({ onSave, onClose, batches = [] }) => {
 };
 
 // ── Main Component ────────────────────────────────────────────────────────────
-const Expenses = () => {
-    const [expenses, setExpenses]   = useState([]);
+const Expenses = ({ initialBranchId = null, branchName = null }) => {
+    const { user, isAdmin, isBranch, currentBranchId } = useAuth();
+    const [expenses, setExpenses]       = useState([]);
+    const [branches, setBranches]       = useState([]);
+    const [selectedBranchFilter, setSelectedBranchFilter] = useState(initialBranchId !== null ? String(initialBranchId) : '');
     const [incomeSummary, setIncomeSummary] = useState({ totalIncome: 0, paymentBreakdown: {} });
-    const [batches, setBatches]     = useState([]);
-    const [loading, setLoading]     = useState(true);
-    const [error,   setError]       = useState('');
-    const [catFilter, setCatFilter] = useState('All');
-    const [searchQuery, setSearch]  = useState('');
-    const [showAdd,   setShowAdd]   = useState(false);
-    const [deletingId, setDeleting] = useState(null);
-    const [editingId, setEditing]   = useState(null);
-    const [editNote,   setEditNote]   = useState('');
+    const [batches, setBatches]         = useState([]);
+    const [loading, setLoading]         = useState(true);
+    const [error,   setError]           = useState('');
+    const [catFilter, setCatFilter]     = useState('All');
+    const [sourceFilter, setSourceFilter] = useState('All');
+    const [searchQuery, setSearch]      = useState('');
+    const [showAdd,   setShowAdd]       = useState(false);
+    const [deletingId, setDeleting]     = useState(null);
+    const [editingId, setEditing]       = useState(null);
+    const [editNote,   setEditNote]     = useState('');
 
     const [activePreset, setActivePreset] = useState('1M');
     const [customRange,  setCustomRange]  = useState(null);
@@ -292,11 +374,33 @@ const Expenses = () => {
         return () => document.removeEventListener('mousedown', handler);
     }, []);
 
+    // Load branch list for admin dropdown
+    useEffect(() => {
+        if (isAdmin) {
+            axios.get('/api/admin/branches')
+                .then(res => setBranches(Array.isArray(res.data) ? res.data : []))
+                .catch(err => console.error('Failed to load branches:', err));
+        }
+    }, [isAdmin]);
+
     const fetchData = () => {
         setLoading(true); setError('');
+
+        let bParam = '';
+        if (isBranch && currentBranchId) {
+            bParam = `&branchId=${currentBranchId}`;
+        } else if (selectedBranchFilter === 'admin') {
+            bParam = `&branchId=0`;
+        } else if (selectedBranchFilter) {
+            bParam = `&branchId=${selectedBranchFilter}`;
+        }
+
+        const expUrl = `/api/expenses?${bParam ? bParam.substring(1) : ''}`;
+        const incUrl = `/api/reporting/income-summary?${bParam ? bParam.substring(1) : ''}`;
+
         Promise.all([
-            axios.get(`/api/expenses`),
-            axios.get(`/api/reporting/income-summary`),
+            axios.get(expUrl),
+            axios.get(incUrl),
             axios.get(`/api/batch-actions/history`)
         ]).then(([resExp, resIncome, resBatches]) => {
             setExpenses(Array.isArray(resExp.data) ? resExp.data : []);
@@ -307,7 +411,9 @@ const Expenses = () => {
         }).finally(() => setLoading(false));
     };
 
-    useEffect(() => { fetchData(); }, []);
+    useEffect(() => {
+        fetchData();
+    }, [selectedBranchFilter, currentBranchId]);
 
     const handleAdd = async (data) => {
         const res = await axios.post(`/api/expenses`, data);
@@ -333,9 +439,7 @@ const Expenses = () => {
         setDeleting(exp.id);
         try {
             if (hasBatch) {
-                // Revert the full batch (this deletes the expense + stock batches)
                 await axios.delete(`/api/batch-actions/revert/${exp.batchId}`);
-                // Remove all expenses that share this batchId
                 setExpenses(prev => prev.filter(e => e.batchId !== exp.batchId));
                 setBatches(prev => prev.filter(b => b.batchId !== exp.batchId));
             } else {
@@ -369,10 +473,11 @@ const Expenses = () => {
             const d = new Date(e.expenseDate);
             const inDate = !dateWindow || (d >= dateWindow.start && d <= dateWindow.end);
             const inCat  = catFilter === 'All' || e.category === catFilter || (e.type === 'INCOME' && catFilter === 'All');
-            const inQ    = !q || (e.name || '').toLowerCase().includes(q) || (e.note || '').toLowerCase().includes(q);
-            return inDate && inCat && inQ;
+            const inSource = sourceFilter === 'All' || (e.paymentSource || 'Cash Drawer') === sourceFilter;
+            const inQ    = !q || (e.name || '').toLowerCase().includes(q) || (e.note || '').toLowerCase().includes(q) || (e.paymentSource || '').toLowerCase().includes(q);
+            return inDate && inCat && inSource && inQ;
         });
-    }, [expenses, dateWindow, catFilter, searchQuery]);
+    }, [expenses, dateWindow, catFilter, sourceFilter, searchQuery]);
 
     const totals = useMemo(() => {
         const byCategory = {};
@@ -392,254 +497,284 @@ const Expenses = () => {
     }, [filtered]);
 
     const txTotals = useMemo(() => {
-        // incomeSummary is already a single number from the lightweight endpoint
-        // We still filter by dateWindow if possible, but since the endpoint returns all-time,
-        // we use it as-is (the date filter is handled by the expenses side for display purposes)
         return { income: Number(incomeSummary.totalIncome || 0) };
     }, [incomeSummary]);
 
-    const currentMoney = txTotals.income - totals.total + totals.manualIncome;
+    const netOperatingMoney = txTotals.income - totals.total + totals.manualIncome;
 
     const periodLabel = customRange ? customRange.label
         : activePreset === 'TODAY' ? "Today" : activePreset === '1W' ? 'This Week'
         : activePreset === '1M' ? 'This Month' : 'This Year';
 
     return (
-        <div className="flex flex-col lg:h-full">
-            <style>{`
-                @keyframes fadeSlideIn {
-                    from { opacity: 0; transform: translateY(5px); }
-                    to   { opacity: 1; transform: translateY(0); }
-                }
-            `}</style>
-
+        <div className="flex flex-col lg:h-full space-y-4">
             {/* ── Header ── */}
-            <div className="flex items-baseline gap-3 mb-3 shrink-0">
-                <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2 shrink-0">
-                    <Receipt className="text-zinc-500" size={22} /> Expenses
-                </h2>
-                <span className="text-base font-semibold text-zinc-500" style={{ opacity: loading ? 0 : 1, transition: 'opacity 300ms ease' }}>
-                    <span className="text-zinc-700">{filtered.length} records</span>
-                    <span className="mx-2 text-zinc-300">·</span>
-                    <span>{periodLabel}</span>
-                </span>
+            <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-stone-900 text-white rounded-2xl shadow-sm">
+                        <Receipt size={22} />
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-xl font-black text-stone-900 tracking-tight">
+                                {isBranch ? `${user?.branchName || 'Branch'} Expenses` : 'Store & Operational Expenses'}
+                            </h2>
+                            {isBranch && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    Branch Scope
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs text-stone-500 font-medium">
+                            Track store bills, rent, supplies, salaries, and cash outflows across vaults
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                    {/* Branch Filter for Admin */}
+                    {isAdmin && (
+                        <div className="relative">
+                            <Store size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                            <select
+                                value={selectedBranchFilter}
+                                onChange={(e) => setSelectedBranchFilter(e.target.value)}
+                                className="pl-8 pr-8 py-2 bg-white border border-stone-300 rounded-xl text-xs font-black text-stone-900 shadow-xs focus:outline-none cursor-pointer"
+                            >
+                                <option value="">🏢 Consolidated (All Expenses)</option>
+                                <option value="admin">🏛️ Central Admin Only</option>
+                                {branches.map(b => (
+                                    <option key={b.id} value={b.id}>
+                                        🏬 {b.name}
+                                    </option>
+                                ))}
+                            </select>
+                            <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                        </div>
+                    )}
+
+                    <button
+                        onClick={() => setShowAdd(true)}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-stone-900 hover:bg-stone-800 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    >
+                        <Plus size={14} /> Add Record
+                    </button>
+                </div>
             </div>
 
-            {/* ── Controls ── */}
-            <div className="flex items-center gap-2 mb-4 shrink-0 flex-wrap">
+            {/* ── Period & Filter Controls ── */}
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
                 {/* Search */}
                 <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
-                    <input type="text" value={searchQuery} onChange={e => setSearch(e.target.value)} placeholder="Search expenses…"
-                        className="pl-8 pr-8 py-2 text-xs font-medium rounded-lg border border-stone-300 bg-white shadow-sm text-zinc-700 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-zinc-300 w-48" />
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={e => setSearch(e.target.value)}
+                        placeholder="Search expenses, notes, sources…"
+                        className="pl-8 pr-8 py-1.5 text-xs font-medium rounded-xl border border-stone-300 bg-white shadow-2xs text-stone-800 placeholder-stone-400 focus:outline-none w-52"
+                    />
                     {searchQuery && (
-                        <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700">
-                            <X size={13} />
+                        <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700">
+                            <X size={12} />
                         </button>
                     )}
                 </div>
 
-                {/* Category filter tabs */}
-                {['All', ...CATEGORIES].map(cat => {
-                    const color = CATEGORY_COLORS[cat];
-                    const isActive = catFilter === cat;
-                    return (
-                        <button key={cat} onClick={() => setCatFilter(cat)}
-                            className="px-3 py-1.5 rounded-full text-xs font-bold border transition-all duration-200"
-                            style={{
-                                backgroundColor: isActive ? '#09090b' : (color?.bg || '#fff'),
-                                color:           isActive ? '#fff' : (color?.text || '#52525b'),
-                                borderColor:     isActive ? '#09090b' : '#d6d3d1',
-                            }}>
-                            {cat}
-                        </button>
-                    );
-                })}
-
-                <div className="flex-1" />
-
-                {/* Time range presets */}
-                <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
-                    {TIME_RANGES.map(r => (
-                        <button key={r.id} onClick={() => handlePresetSelect(r.id)}
-                            className="px-3 py-1.5 text-xs font-bold rounded-md"
-                            style={{
-                                backgroundColor: activePreset === r.id && !customRange ? '#09090b' : 'transparent',
-                                color:           activePreset === r.id && !customRange ? '#ffffff' : '#71717a',
-                                transition: 'background-color 200ms ease, color 200ms ease',
-                            }}>
-                            {r.label}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Calendar */}
-                <div className="relative" ref={calRef}>
-                    <button onClick={() => setShowCal(v => !v)} title="Custom date range"
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border shadow-sm text-xs font-bold"
-                        style={{ backgroundColor: customRange ? '#09090b' : '#fff', color: customRange ? '#fff' : '#71717a', borderColor: customRange ? '#09090b' : '#d6d3d1', transition: 'all 200ms ease' }}>
-                        <Calendar size={15} />
-                        {customRange && <span className="max-w-[160px] truncate">{customRange.label}</span>}
+                {/* Presets */}
+                {TIME_RANGES.map(p => (
+                    <button
+                        key={p.id}
+                        onClick={() => handlePresetSelect(p.id)}
+                        className={`px-3 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                            !customRange && activePreset === p.id
+                                ? 'bg-stone-900 border-stone-900 text-white shadow-xs'
+                                : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                        }`}
+                    >
+                        {p.label}
                     </button>
-                    {customRange && (
-                        <button onClick={(e) => { e.stopPropagation(); setCustomRange(null); setActivePreset('1M'); }}
-                            className="absolute -top-1.5 -right-1.5 text-white rounded-full w-4 h-4 flex items-center justify-center"
-                            style={{ backgroundColor: '#3f3f46' }}
-                            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#ef4444'}
-                            onMouseLeave={e => e.currentTarget.style.backgroundColor = '#3f3f46'}>
-                            <X size={10} />
-                        </button>
-                    )}
-                    <CalendarPicker visible={showCal} onApply={handleCalApply} onClose={() => setShowCal(false)} />
+                ))}
+
+                {/* Custom Calendar */}
+                <div className="relative" ref={calRef}>
+                    <button
+                        onClick={() => setShowCal(s => !s)}
+                        className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border transition-all cursor-pointer ${
+                            customRange
+                                ? 'bg-stone-900 border-stone-900 text-white shadow-xs'
+                                : 'bg-white border-stone-200 text-stone-600 hover:bg-stone-50'
+                        }`}
+                    >
+                        <Calendar size={12} />
+                        <span>{customRange ? customRange.label : 'Custom Range'}</span>
+                    </button>
+                    <CalendarPicker onApply={handleCalApply} onClose={() => setShowCal(false)} visible={showCal} />
                 </div>
 
-                {/* Refresh */}
-                <button onClick={fetchData} disabled={loading} className="p-2 rounded-lg border border-stone-300 bg-white text-zinc-500 disabled:opacity-40 shadow-sm hover:bg-stone-50">
-                    <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-                </button>
-
-                {/* Add Expense */}
-                <button onClick={() => setShowAdd(true)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold text-white shadow-sm"
-                    style={{ backgroundColor: '#09090b', transition: 'background-color 150ms ease' }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#27272a'}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = '#09090b'}>
-                    <Plus size={14} /> Add Expense
-                </button>
+                {/* Account Source Filter */}
+                <div className="relative ml-auto">
+                    <select
+                        value={sourceFilter}
+                        onChange={e => setSourceFilter(e.target.value)}
+                        className="appearance-none pl-3 pr-7 py-1 text-xs font-bold bg-white border border-stone-200 rounded-lg text-stone-600 cursor-pointer shadow-2xs"
+                    >
+                        <option value="All">All Paid Sources</option>
+                        {PAYMENT_SOURCES.map(s => (
+                            <option key={s.id} value={s.id}>{s.label}</option>
+                        ))}
+                    </select>
+                    <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                </div>
             </div>
 
             {error && (
-                <div className="flex items-center gap-2 p-3 mb-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm shrink-0">
-                    <AlertCircle size={16} /> {error}
+                <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold shrink-0">
+                    <AlertCircle size={15} /> {error}
                 </div>
             )}
 
-            {/* ── Summary Cards ── */}
-            <div className="grid grid-cols-2 lg:grid-cols-8 gap-3 mb-4 shrink-0">
-                {/* Cash Flow Main Cards */}
-                <div className="col-span-2 lg:col-span-2 grid grid-cols-2 gap-3">
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl shadow-sm p-4 flex flex-col justify-center">
-                        <p className="text-[10px] font-black text-emerald-800 uppercase tracking-wider mb-1 flex items-center gap-1.5"><TrendingUp size={14}/> Income</p>
-                        <p className="text-xl font-black text-emerald-700 tracking-tight">{formatCurrency(txTotals.income)}</p>
-                    </div>
-                    <div className="bg-red-50 border border-red-200 rounded-xl shadow-sm p-4 flex flex-col justify-center">
-                        <p className="text-[10px] font-black text-red-800 uppercase tracking-wider mb-1 flex items-center gap-1.5"><TrendingDown size={14}/> Expenses</p>
-                        <p className="text-xl font-black text-red-700 tracking-tight">{formatCurrency(totals.total)}</p>
-                    </div>
+            {/* ── Summary KPI Cards ── */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
+                <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 block">Total Expenses</span>
+                    <div className="text-2xl font-black text-rose-600 mt-1">{formatCurrency(totals.total)}</div>
+                    <span className="text-[11px] text-stone-400 font-medium">in {periodLabel.toLowerCase()}</span>
                 </div>
 
-                <div className="col-span-2 lg:col-span-2 bg-zinc-950 border border-zinc-900 rounded-xl shadow-md p-4 flex flex-col justify-center relative overflow-hidden">
-                    <div className="absolute -right-4 -bottom-4 opacity-10"><Wallet size={100} /></div>
-                    <p className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-1 flex items-center gap-1.5 relative z-10"><DollarSign size={14}/> Current Money</p>
-                    <p className="text-3xl font-black text-white tracking-tight relative z-10">{formatCurrency(currentMoney)}</p>
+                <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 block">Store Revenue Inflow</span>
+                    <div className="text-2xl font-black text-emerald-600 mt-1">{formatCurrency(txTotals.income)}</div>
+                    <span className="text-[11px] text-stone-400 font-medium">gross sales collections</span>
                 </div>
 
-                {/* Categories Breakdown */}
-                {CATEGORIES.map(cat => {
-                    const c = CATEGORY_COLORS[cat];
-                    return (
-                        <div key={cat} className="col-span-1 lg:col-span-1 bg-white border border-stone-200 rounded-xl shadow-sm p-3 flex flex-col">
-                            <div className="flex items-center gap-1.5 mb-2">
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.dot }} />
-                                <p className="text-[10px] font-black text-zinc-500 uppercase truncate">{cat}</p>
-                            </div>
-                            <p className="text-sm font-black text-zinc-800 tracking-tight mt-auto">{formatCurrency(totals.byCategory[cat])}</p>
+                <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-500 block">Net Store Money Flow</span>
+                    <div className={`text-2xl font-black mt-1 ${netOperatingMoney >= 0 ? 'text-stone-900' : 'text-rose-600'}`}>
+                        {formatCurrency(netOperatingMoney)}
+                    </div>
+                    <span className="text-[11px] text-stone-400 font-medium">Sales minus operating expenses</span>
+                </div>
+
+                <div className="bg-stone-900 text-white rounded-2xl p-4 shadow-xs flex flex-col justify-between">
+                    <div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">Active Scope</span>
+                        <div className="text-sm font-black text-white mt-1 flex items-center gap-1.5">
+                            <Store size={14} className="text-emerald-400" />
+                            <span>{selectedBranchFilter ? (branches.find(b => b.id.toString() === selectedBranchFilter)?.name || 'Central Admin') : 'All Branches'}</span>
                         </div>
-                    );
-                })}
+                    </div>
+                    <span className="text-[10px] text-stone-400">{filtered.length} recorded line items</span>
+                </div>
             </div>
 
             {/* ── Table ── */}
-            <div className="flex-1 min-h-0 overflow-auto bg-white border border-stone-200 rounded-xl shadow-sm">
-                <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 bg-stone-100 z-10 text-xs uppercase tracking-wider text-zinc-500 font-bold border-b border-stone-200 shadow-sm">
+            <div className="flex-1 min-h-[350px] overflow-auto bg-white border border-stone-200 rounded-2xl shadow-xs">
+                <table className="w-full text-left border-collapse text-xs">
+                    <thead className="sticky top-0 bg-stone-50 z-10 text-[10px] uppercase tracking-wider text-stone-500 font-black border-b border-stone-200">
                         <tr>
-                            <th className="px-5 py-4">Name</th>
-                            <th className="px-5 py-4">Category</th>
-                            <th className="px-5 py-4 text-right">Cost</th>
-                            <th className="px-5 py-4">Date</th>
-                            <th className="px-5 py-4">Note</th>
-                            <th className="px-5 py-4"></th>
+                            <th className="px-4 py-3">Expense Name</th>
+                            <th className="px-4 py-3">Location / Scope</th>
+                            <th className="px-4 py-3">Category</th>
+                            <th className="px-4 py-3">Paid From</th>
+                            <th className="px-4 py-3 text-right">Cost</th>
+                            <th className="px-4 py-3">Date</th>
+                            <th className="px-4 py-3">Notes</th>
+                            <th className="px-4 py-3 text-center"></th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-stone-100 text-sm">
+                    <tbody className="divide-y divide-stone-100">
                         {loading ? (
-                            Array.from({ length: 5 }).map((_, i) => (
+                            Array.from({ length: 4 }).map((_, i) => (
                                 <tr key={i} className="animate-pulse">
-                                    {Array.from({ length: 6 }).map((_, j) => (
-                                        <td key={j} className="px-5 py-4"><div className="h-4 bg-stone-200 rounded w-3/4" /></td>
+                                    {Array.from({ length: 8 }).map((_, j) => (
+                                        <td key={j} className="px-4 py-3.5"><div className="h-4 bg-stone-100 rounded w-3/4" /></td>
                                     ))}
                                 </tr>
                             ))
                         ) : filtered.length === 0 ? (
                             <tr>
-                                <td colSpan="6" className="px-5 py-16 text-center text-zinc-400">
-                                    <Receipt size={32} className="mx-auto mb-3 opacity-20" />
-                                    <p className="font-medium">No expenses found for this period.</p>
-                                    <p className="text-xs mt-1 text-zinc-300">Click "Add Expense" to record one.</p>
+                                <td colSpan="8" className="px-4 py-16 text-center text-stone-400">
+                                    <Receipt size={32} className="mx-auto mb-2 opacity-20" />
+                                    <p className="font-bold text-stone-700">No expenses found for this scope or period.</p>
+                                    <p className="text-[11px] text-stone-400 mt-0.5">Click "Add Record" to log an operating expense or income.</p>
                                 </td>
                             </tr>
-                        ) : filtered.map((exp, idx) => {
+                        ) : filtered.map(exp => {
                             const isInc = exp.type === 'INCOME';
-                            const c = isInc 
+                            const c = isInc
                                 ? { bg: '#dcfce7', text: '#166534', dot: '#22c55e' }
                                 : (CATEGORY_COLORS[exp.category] || CATEGORY_COLORS['Miscellaneous']);
+                            const branchLabel = exp.branch?.name ? `🏬 ${exp.branch.name}` : '🏢 Central Admin';
+                            const sourceLabel = exp.paymentSource || 'Cash Drawer';
+
                             return (
-                                <tr key={exp.id}
-                                    style={{ animation: 'fadeSlideIn 220ms ease both', animationDelay: `${Math.min(idx * 20, 250)}ms`, transition: 'background-color 150ms ease' }}
-                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fafaf9'}
-                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = ''}>
-                                    <td className="px-5 py-4 font-semibold text-zinc-800">
+                                <tr key={exp.id} className="hover:bg-stone-50/70 transition-colors">
+                                    <td className="px-4 py-3 font-bold text-stone-900">
                                         <div className="flex items-center gap-2">
-                                            {isInc ? <TrendingUp size={14} className="text-emerald-600" /> : <Receipt size={14} className="text-zinc-400" />}
-                                            {exp.name}
+                                            {isInc ? (
+                                                <TrendingUp size={14} className="text-emerald-600 shrink-0" />
+                                            ) : (
+                                                <Receipt size={14} className="text-stone-400 shrink-0" />
+                                            )}
+                                            <span>{exp.name}</span>
                                         </div>
                                     </td>
-                                    <td className="px-5 py-4">
-                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold"
+                                    <td className="px-4 py-3">
+                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                            exp.branch?.name
+                                                ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                                                : 'bg-stone-100 text-stone-700'
+                                        }`}>
+                                            {branchLabel}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold"
                                             style={{ backgroundColor: c.bg, color: c.text }}>
-                                            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: c.dot }} />
+                                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: c.dot }} />
                                             {isInc ? 'Income' : exp.category}
                                         </span>
                                     </td>
-                                    <td className={`px-5 py-4 text-right font-mono font-black ${isInc ? 'text-emerald-600' : 'text-zinc-900'}`}>
-                                        {isInc ? '+' : ''}{formatCurrency(exp.cost)}
+                                    <td className="px-4 py-3 font-semibold text-stone-700">
+                                        <div className="flex items-center gap-1 text-[11px]">
+                                            <Wallet size={12} className="text-stone-400" />
+                                            <span>{sourceLabel}</span>
+                                        </div>
                                     </td>
-                                    <td className="px-5 py-4 text-xs text-zinc-500">{formatDate(exp.expenseDate)}</td>
-                                    <td className="px-5 py-4 text-zinc-600 max-w-xs text-xs">
+                                    <td className={`px-4 py-3 text-right font-black ${isInc ? 'text-emerald-600' : 'text-stone-900'}`}>
+                                        {formatCurrency(exp.cost)}
+                                    </td>
+                                    <td className="px-4 py-3 text-stone-500 font-medium whitespace-nowrap">
+                                        {formatDate(exp.expenseDate)}
+                                    </td>
+                                    <td className="px-4 py-3 text-stone-500 max-w-[200px] truncate" title={exp.note || ''}>
                                         {editingId === exp.id ? (
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1">
                                                 <input
-                                                    autoFocus
-                                                    className="w-full px-2 py-1 border border-stone-300 rounded focus:outline-none focus:ring-1 focus:ring-zinc-400 text-xs"
+                                                    type="text"
                                                     value={editNote}
                                                     onChange={e => setEditNote(e.target.value)}
-                                                    onKeyDown={e => {
-                                                        if (e.key === 'Enter') handleUpdateNote(exp.id);
-                                                        if (e.key === 'Escape') setEditing(null);
-                                                    }}
-                                                    onBlur={() => handleUpdateNote(exp.id)}
+                                                    className="px-2 py-1 border border-stone-300 rounded text-xs w-full"
                                                 />
+                                                <button onClick={() => handleUpdateNote(exp.id)} className="text-emerald-600 font-bold text-xs">Save</button>
+                                                <button onClick={() => setEditing(null)} className="text-stone-400 text-xs">X</button>
                                             </div>
                                         ) : (
-                                            <div 
-                                                className="cursor-pointer hover:bg-stone-100 px-1 py-0.5 rounded transition-colors truncate group flex items-center gap-1"
-                                                onClick={() => { setEditing(exp.id); setEditNote(exp.note || ''); }}
-                                                title="Click to edit note"
-                                            >
-                                                {exp.note || '—'}
-                                                <Plus size={10} className="opacity-0 group-hover:opacity-100 text-zinc-400" />
-                                            </div>
+                                            <span onClick={() => { setEditing(exp.id); setEditNote(exp.note || ''); }} className="cursor-pointer hover:underline">
+                                                {exp.note || <span className="text-stone-300 italic text-[11px]">Add note…</span>}
+                                            </span>
                                         )}
                                     </td>
-                                    <td className="px-5 py-4">
-                                        <div className="flex items-center justify-end gap-1">
-                                            <button onClick={() => handleDelete(exp)} disabled={deletingId === exp.id}
-                                                className="p-1.5 rounded-lg text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
-                                                title="Delete record">
-                                                {deletingId === exp.id ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                                            </button>
-                                        </div>
+                                    <td className="px-4 py-3 text-center">
+                                        <button
+                                            onClick={() => handleDelete(exp)}
+                                            disabled={deletingId === exp.id}
+                                            className="p-1 text-stone-400 hover:text-rose-600 transition-colors cursor-pointer rounded"
+                                            title="Delete record"
+                                        >
+                                            <Trash2 size={13} />
+                                        </button>
                                     </td>
                                 </tr>
                             );
@@ -648,8 +783,18 @@ const Expenses = () => {
                 </table>
             </div>
 
-            {/* ── Add Expense Modal ── */}
-            {showAdd && <AddExpenseModal onSave={handleAdd} onClose={() => setShowAdd(false)} batches={batches} />}
+            {/* Modal */}
+            {showAdd && (
+                <AddExpenseModal
+                    onSave={handleAdd}
+                    onClose={() => setShowAdd(false)}
+                    batches={batches}
+                    branches={branches}
+                    defaultBranchId={selectedBranchFilter !== 'admin' ? selectedBranchFilter : null}
+                    isAdmin={isAdmin}
+                    user={user}
+                />
+            )}
         </div>
     );
 };

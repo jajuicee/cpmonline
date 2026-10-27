@@ -7,16 +7,17 @@ import {
 } from 'recharts';
 import {
     BarChart3, TrendingUp, DollarSign, Package, AlertCircle, RefreshCw, Trophy, Calendar,
-    X, ChevronLeft, ChevronRight, CreditCard, ChevronDown, Store, PieChart as PieIcon, Layers
+    X, ChevronLeft, ChevronRight, CreditCard, ChevronDown, Store, PieChart as PieIcon, Layers,
+    Receipt, Sparkles
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
-    `₱${Number(val).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    `₱${(Number(val) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const CurrencyDisplay = ({ value }) => (
     <span>
         <span style={{ fontFamily: 'ui-sans-serif, system-ui, sans-serif', fontWeight: 'normal', marginRight: '2px' }}>₱</span>
-        {Number(value).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        {(Number(value) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
     </span>
 );
 
@@ -174,7 +175,7 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
             </button>
 
             <div
-                className="absolute right-0 top-10 z-50 bg-white border border-stone-200 rounded-xl shadow-2xl py-1.5 min-w-[160px]"
+                className="absolute right-0 top-10 z-50 bg-white border border-stone-200 rounded-xl shadow-2xl py-1.5 min-w-[170px]"
                 style={{
                     opacity: open ? 1 : 0,
                     transform: open ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.97)',
@@ -182,6 +183,18 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
                     pointerEvents: open ? 'all' : 'none',
                 }}
             >
+                <button
+                    onClick={() => { onChange('All'); setOpen(false); }}
+                    className="w-full text-left px-4 py-2 text-xs flex items-center gap-2 border-b border-stone-100"
+                    style={{
+                        backgroundColor: value === 'All' ? '#f5f5f4' : 'transparent',
+                        color: value === 'All' ? '#09090b' : '#52525b',
+                        fontWeight: value === 'All' ? '700' : '500',
+                    }}
+                >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${value === 'All' ? 'bg-zinc-800' : 'bg-transparent'}`} />
+                    All Payment Methods
+                </button>
                 {paymentMethods.map(method => (
                     <button
                         key={method}
@@ -206,19 +219,33 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
 };
 
 const Analytics = () => {
-    const { currentBranchId, selectedBranchId, user } = useAuth();
+    const { currentBranchId, selectedBranchId, setSelectedBranchId, user, isAdmin, isBranch } = useAuth();
+    const [branches, setBranches] = useState([]);
     const [transactions, setTransactions] = useState([]);
+    const [expenses, setExpenses] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [timeRange, setTimeRange] = useState(TIME_RANGES[0]);
     const [topFilter, setTopFilter] = useState('units');
     const [mainTab, setMainTab] = useState('trends');
     const [paymentFilter, setPaymentFilter] = useState('All');
-    const [typeFilter, setTypeFilter] = useState('REGULAR'); // NEW: 'All', 'REGULAR', 'CONSIGNMENT'
+    const [typeFilter, setTypeFilter] = useState('All'); // 'All', 'REGULAR', 'CONSIGNMENT'
     const [categoryFilter, setCategoryFilter] = useState('All');
     const [showCalendar, setShowCalendar] = useState(false);
     const [customRange, setCustomRange] = useState(null);
     const calendarRef = useRef(null);
+
+    // Effective branch: branch user locked to their branch; admin can select a branch or null for Consolidated All Branches
+    const effectiveBranch = isBranch ? user?.branchId : selectedBranchId;
+
+    // Fetch branches for admin filter dropdown
+    useEffect(() => {
+        if (isAdmin) {
+            axios.get('/api/admin/branches')
+                .then(res => setBranches(Array.isArray(res.data) ? res.data.filter(b => b.active) : []))
+                .catch(err => console.error('Failed to load branches for analytics:', err));
+        }
+    }, [isAdmin]);
 
     useEffect(() => {
         const handler = (e) => { if (calendarRef.current && !calendarRef.current.contains(e.target)) setShowCalendar(false); };
@@ -235,7 +262,6 @@ const Analytics = () => {
 
     const handlePresetSelect = (range) => { setTimeRange(range); setCustomRange(null); };
 
-    const [categoryData, setCategoryData] = useState(null);
     const [paymentLogs, setPaymentLogs] = useState([]);
 
     // Helper: format date as LocalDateTime string for the API
@@ -247,14 +273,19 @@ const Analytics = () => {
     const getDateBounds = () => {
         const now = new Date();
         if (customRange) {
-            const end = new Date(customRange.end); end.setHours(23, 59, 59);
-            return { from: fmtDt(customRange.start), to: fmtDt(end) };
+            const start = new Date(customRange.start);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(customRange.end);
+            end.setHours(23, 59, 59, 999);
+            return { from: fmtDt(start), to: fmtDt(end) };
         }
         if (!timeRange) return null;
         if (timeRange.id === '1D') {
             return { from: fmtDt(getStartOfDay(now)), to: fmtDt(now) };
         }
-        const from = new Date(now); from.setDate(now.getDate() - timeRange.days);
+        const from = new Date(now);
+        from.setDate(now.getDate() - timeRange.days);
+        from.setHours(0, 0, 0, 0);
         return { from: fmtDt(from), to: fmtDt(now) };
     };
 
@@ -262,42 +293,43 @@ const Analytics = () => {
         setLoading(true);
         setError('');
         const bounds = getDateBounds();
-        const branchParam = currentBranchId ? `&branchId=${currentBranchId}` : '';
+
+        const branchParam = effectiveBranch ? `&branchId=${effectiveBranch}` : '';
         const txUrl = bounds
             ? `/api/transactions?from=${bounds.from}&to=${bounds.to}&limit=10000${branchParam}`
             : `/api/transactions?limit=10000${branchParam}`;
         const plUrl = bounds
-            ? `/api/payment-logs?from=${bounds.from}&to=${bounds.to}`
-            : `/api/payment-logs`;
-        const catUrl = bounds
-            ? `/api/transactions/category-sales?from=${bounds.from}&to=${bounds.to}${branchParam}`
-            : `/api/transactions/category-sales${branchParam ? `?${branchParam.substring(1)}` : ''}`;
+            ? `/api/payment-logs?from=${bounds.from}&to=${bounds.to}${effectiveBranch ? `&branchId=${effectiveBranch}` : ''}`
+            : `/api/payment-logs${effectiveBranch ? `?branchId=${effectiveBranch}` : ''}`;
+        const expUrl = bounds
+            ? `/api/expenses?from=${bounds.from}&to=${bounds.to}${effectiveBranch ? `&branchId=${effectiveBranch}` : ''}`
+            : `/api/expenses${effectiveBranch ? `?branchId=${effectiveBranch}` : ''}`;
 
         Promise.all([
-            axios.get(txUrl),
-            axios.get(plUrl),
-            axios.get(catUrl)
+            axios.get(txUrl).catch(() => ({ data: [] })),
+            axios.get(plUrl).catch(() => ({ data: [] })),
+            axios.get(expUrl).catch(() => ({ data: [] }))
         ])
-            .then(([txRes, plRes, catRes]) => {
+            .then(([txRes, plRes, expRes]) => {
                 setTransactions(Array.isArray(txRes.data) ? txRes.data : []);
                 setPaymentLogs(Array.isArray(plRes.data) ? plRes.data : []);
-                setCategoryData(catRes.data || null);
+                setExpenses(Array.isArray(expRes.data) ? expRes.data : []);
             })
             .catch(() => setError('Could not load analytics data.'))
             .finally(() => setLoading(false));
     };
 
-    useEffect(() => { fetchData(); }, [timeRange, customRange, currentBranchId]);
-
+    useEffect(() => {
+        fetchData();
+    }, [timeRange, customRange, effectiveBranch]);
 
     const processedData = useMemo(() => {
-        if (!transactions.length && !paymentLogs.length) return { chartData: [], topProducts: [], summary: {} };
-
         const now = new Date();
         let cutoffDate, toDate;
 
         if (customRange) {
-            cutoffDate = customRange.start;
+            cutoffDate = new Date(customRange.start);
+            cutoffDate.setHours(0, 0, 0, 0);
             toDate = new Date(customRange.end);
             toDate.setHours(23, 59, 59, 999);
         } else if (timeRange) {
@@ -307,10 +339,30 @@ const Analytics = () => {
             } else {
                 cutoffDate = new Date(now);
                 cutoffDate.setDate(now.getDate() - timeRange.days);
+                cutoffDate.setHours(0, 0, 0, 0);
                 toDate = now;
             }
         } else {
-            return { chartData: [], topProducts: [], summary: {} };
+            return {
+                chartData: [],
+                topProducts: [],
+                allCategories: ['All'],
+                categoryCounts: {},
+                categoryBreakdown: { categories: [], totalRevenue: 0, totalUnitsSold: 0, totalCost: 0, totalProfit: 0, overallProfitMargin: 0 },
+                operatingExpenses: 0,
+                expensesByCategory: {},
+                periodExpensesList: [],
+                summary: {
+                    revenue: 0,
+                    grossProfit: 0,
+                    grossMargin: 0,
+                    cost: 0,
+                    profit: 0,
+                    margin: 0,
+                    expenses: 0,
+                    units: 0
+                }
+            };
         }
 
         let groupBy = timeRange?.groupBy || 'day';
@@ -320,20 +372,23 @@ const Analytics = () => {
         }
 
         // Build a lookup: orderId → transactionType so we can filter payment logs by type.
-        // Also index by LEGACY-{id} so old transactions without a transactionId are classified correctly.
         const txTypeMap = {};
         transactions.forEach(t => {
-            const type = t.transactionType || 'REGULAR';
+            const type = (t.transactionType || 'REGULAR').toUpperCase();
             if (t.transactionId) txTypeMap[t.transactionId] = type;
-            if (t.id) txTypeMap[`LEGACY-${t.id}`] = type; // Fix: legacy CONSIGNMENT was always treated as REGULAR
+            if (t.id) {
+                txTypeMap[`LEGACY-${t.id}`] = type;
+                txTypeMap[String(t.id)] = type;
+            }
         });
 
         // ── Revenue & Profit: from PAYMENT LOGS (by actual payment date) ──────
         const validLogs = paymentLogs.filter(pl => {
             const pDate = new Date(pl.paymentDate);
             const inDate = pDate >= cutoffDate && pDate <= toDate;
-            const inPayment = paymentFilter === 'All' || pl.paymentMethod === paymentFilter;
-            const txType = txTypeMap[pl.orderId] || 'REGULAR';
+            const inPayment = paymentFilter === 'All'
+                || (pl.paymentMethod && pl.paymentMethod.toLowerCase() === paymentFilter.toLowerCase());
+            const txType = (txTypeMap[pl.orderId] || 'REGULAR').toUpperCase();
             const inType = typeFilter === 'All'
                 ? true
                 : typeFilter === 'REGULAR'
@@ -363,58 +418,98 @@ const Analytics = () => {
 
         const chartData = Object.values(grouped).sort((a, b) => a.xDate - b.xDate);
 
-        // Build a set of orderIds whose payment logs matched ALL active filters (date, payment
-        // method, type). Used for two purposes:
-        //   1. Include split-payment transactions in unit counts (t.paymentMethod = "Split Payment"
-        //      doesn't match specific methods, but their logs do).
-        //   2. Include CONSIGNMENT items paid in this period even though their transactionDate
-        //      is older (they are created as UNPAID on the consignment date and paid later via
-        //      ConsigneesPage — the payment log date is what matters for analytics).
-        const paidOrderIds = new Set(validLogs.map(pl => pl.orderId));
+        const paidOrderIds = new Set(validLogs.map(pl => pl.orderId).filter(Boolean));
 
         // ── Units & Product Rankings: from TRANSACTIONS ───────────────────────
-        // A transaction is "in scope" for unit counts if EITHER:
-        //   a) Its transactionDate falls in the selected range (standard regular sales), OR
-        //   b) It has a payment log in the selected range (covers CONSIGNMENT paid later +
-        //      split payments filtered by a specific method).
         const validTxs = transactions.filter(t => {
+            // Strict branch match if effectiveBranch is set
+            if (effectiveBranch && t.branch?.id && String(t.branch.id) !== String(effectiveBranch)) {
+                return false;
+            }
+
             const tDate = new Date(t.transactionDate);
             const inDateByTx = tDate >= cutoffDate && tDate <= toDate;
             const orderId = t.transactionId || `LEGACY-${t.id}`;
-            const hasPaidLogInRange = paidOrderIds.has(orderId); // paid in this period
+            const hasPaidLogInRange = paidOrderIds.has(orderId) || paidOrderIds.has(t.transactionId) || (t.id && paidOrderIds.has(String(t.id)));
             const inDate = inDateByTx || hasPaidLogInRange;
 
             const inPayment = paymentFilter === 'All'
-                || t.paymentMethod === paymentFilter
-                || hasPaidLogInRange; // split payments & consignment paid via specific method
+                || (t.paymentMethod && t.paymentMethod.toLowerCase() === paymentFilter.toLowerCase())
+                || hasPaidLogInRange;
             const isPaid = t.status !== 'UNPAID';
+            const tType = (t.transactionType || 'REGULAR').toUpperCase();
             const inType = typeFilter === 'All'
                 ? true
                 : typeFilter === 'REGULAR'
-                    ? t.transactionType !== 'CONSIGNMENT'
-                    : t.transactionType === 'CONSIGNMENT';
+                    ? tType !== 'CONSIGNMENT'
+                    : tType === 'CONSIGNMENT';
             return inDate && inPayment && isPaid && inType;
         });
 
-        // Build a lookup: orderId → total amount paid (from payment logs) so product rankings
-        // revenue matches the stat card revenue. Previously used finalPrice/downpayment from
-        // the transaction which diverged from the payment-log-based summary totals.
-        const paidAmountByTxId = {};
-        validLogs.forEach(pl => {
-            paidAmountByTxId[pl.orderId] = (paidAmountByTxId[pl.orderId] || 0) + pl.revenue;
+        // ── Dynamic Category Breakdown from validTxs (ensures all filters apply to category view) ──
+        const catMap = {};
+        let totalCatRevenue = 0;
+        let totalCatUnits = 0;
+        let totalCatCost = 0;
+
+        validTxs.forEach(t => {
+            const catName = t.variant?.product?.category || 'Uncategorized';
+            const selling = t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0);
+            const cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
+            const profit = selling - cost;
+
+            if (!catMap[catName]) {
+                catMap[catName] = {
+                    category: catName,
+                    revenue: 0,
+                    unitsSold: 0,
+                    cost: 0,
+                    profit: 0
+                };
+            }
+            catMap[catName].revenue += selling;
+            catMap[catName].unitsSold += 1;
+            catMap[catName].cost += cost;
+            catMap[catName].profit += profit;
+
+            totalCatRevenue += selling;
+            totalCatUnits += 1;
+            totalCatCost += cost;
         });
 
+        const totalCatProfit = totalCatRevenue - totalCatCost;
+        const overallProfitMargin = totalCatRevenue > 0 ? (totalCatProfit / totalCatRevenue) * 100 : 0;
+
+        const categories = Object.values(catMap).map(c => {
+            const revenuePercentage = totalCatRevenue > 0 ? (c.revenue / totalCatRevenue) * 100 : 0;
+            const unitsPercentage = totalCatUnits > 0 ? (c.unitsSold / totalCatUnits) * 100 : 0;
+            const avgSellingPrice = c.unitsSold > 0 ? c.revenue / c.unitsSold : 0;
+            const profitMargin = c.revenue > 0 ? (c.profit / c.revenue) * 100 : 0;
+            return {
+                ...c,
+                revenuePercentage,
+                unitsPercentage,
+                avgSellingPrice,
+                profitMargin
+            };
+        }).sort((a, b) => b.revenue - a.revenue);
+
+        const categoryBreakdown = {
+            totalRevenue: totalCatRevenue,
+            totalUnitsSold: totalCatUnits,
+            totalCost: totalCatCost,
+            totalProfit: totalCatProfit,
+            overallProfitMargin,
+            categories
+        };
+
+        // ── Product Rankings ──
         const productMap = validTxs.reduce((acc, t) => {
             if (!t.variant?.product) return acc;
             const p = t.variant.product;
             const name = `${p.brandName} ${p.modelName} ${t.variant.color ? `(${t.variant.color})` : ''}`.trim();
             const key = t.variant.sku;
-            const orderId = t.transactionId || `LEGACY-${t.id}`;
-            // Fix: use actual cash received from payment logs to match the stat card revenue.
-            // Fall back to finalPrice if no payment log exists (e.g. very old legacy data).
-            const selling = paidAmountByTxId[orderId] !== undefined
-                ? paidAmountByTxId[orderId]
-                : (t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0));
+            const selling = t.status === 'PARTIAL' ? Number(t.downpayment || 0) : Number(t.finalPrice || 0);
             const cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
             if (!acc[key]) acc[key] = { name, sku: t.variant.sku, category: p.category || 'Uncategorized', units: 0, revenue: 0, profit: 0 };
             acc[key].units += 1;
@@ -423,6 +518,13 @@ const Analytics = () => {
             return acc;
         }, {});
 
+        const categoryCounts = {};
+        Object.values(productMap).forEach(p => {
+            if (p.category) {
+                categoryCounts[p.category] = (categoryCounts[p.category] || 0) + 1;
+            }
+        });
+
         const filteredByCategory = categoryFilter === 'All'
             ? Object.values(productMap)
             : Object.values(productMap).filter(p => p.category === categoryFilter);
@@ -430,23 +532,78 @@ const Analytics = () => {
         const sortedProducts = filteredByCategory.sort((a, b) =>
             topFilter === 'profit' ? b.profit - a.profit || b.units - a.units : b.units - a.units || b.revenue - a.revenue
         );
-        sortedProducts.forEach((p, idx) => { p.name = `#${idx + 1} ${p.name}`; });
-        const topProducts = sortedProducts.slice(0, 50);
+        const topProducts = sortedProducts.slice(0, 50).map((p, idx) => ({
+            ...p,
+            name: `#${idx + 1} ${p.name}`
+        }));
 
-        // Derive unique categories from all products in range (unfiltered)
+        // ── Operating Expenses in selected period ──
+        let totalOperatingExpenses = 0;
+        const expensesByCategory = {};
+        const periodExpensesList = [];
+
+        expenses.forEach(e => {
+            const isExp = !e.type || e.type.toUpperCase() === 'EXPENSE';
+            if (!isExp) return;
+            const cost = Number(e.cost || 0);
+            const eDate = e.expenseDate ? new Date(e.expenseDate) : null;
+            if (eDate && (eDate < cutoffDate || eDate > toDate)) return;
+
+            // Strict branch filter match if effectiveBranch is set
+            if (effectiveBranch && e.branch?.id && String(e.branch.id) !== String(effectiveBranch)) {
+                return;
+            }
+
+            totalOperatingExpenses += cost;
+            const cat = e.category || 'General';
+            expensesByCategory[cat] = (expensesByCategory[cat] || 0) + cost;
+            periodExpensesList.push(e);
+        });
+
         const allCategories = ['All', ...Array.from(new Set(Object.values(productMap).map(p => p.category).filter(Boolean))).sort()];
 
         // Summary: revenue & profit from payment logs, units from transactions
         const totalRevenue = validLogs.reduce((s, pl) => s + pl.revenue, 0);
-        const totalProfit = validLogs.reduce((s, pl) => s + pl.profit, 0);
         const totalCost = validLogs.reduce((s, pl) => s + pl.cost, 0);
+        const grossProfit = totalRevenue - totalCost;
+        const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+        const netOperatingProfit = grossProfit - totalOperatingExpenses;
+        const operatingMargin = totalRevenue > 0 ? (netOperatingProfit / totalRevenue) * 100 : 0;
         const totalUnits = validTxs.length;
-        const avgMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
-        return { chartData, topProducts, allCategories, summary: { revenue: totalRevenue, profit: totalProfit, cost: totalCost, units: totalUnits, margin: avgMargin } };
-    }, [transactions, paymentLogs, timeRange, topFilter, customRange, paymentFilter, typeFilter, categoryFilter]);
+        return {
+            chartData,
+            topProducts,
+            allCategories,
+            categoryCounts,
+            categoryBreakdown,
+            operatingExpenses: totalOperatingExpenses,
+            expensesByCategory,
+            periodExpensesList,
+            summary: {
+                revenue: totalRevenue,
+                grossProfit,
+                grossMargin,
+                cost: totalCost,
+                profit: netOperatingProfit,
+                margin: operatingMargin,
+                expenses: totalOperatingExpenses,
+                units: totalUnits
+            }
+        };
+    }, [transactions, paymentLogs, expenses, timeRange, topFilter, customRange, paymentFilter, typeFilter, categoryFilter, effectiveBranch]);
 
-    const { chartData, topProducts, allCategories = ['All'], summary } = processedData;
+    const {
+        chartData,
+        topProducts,
+        allCategories = ['All'],
+        categoryCounts = {},
+        categoryBreakdown = { categories: [], totalRevenue: 0, totalUnitsSold: 0, totalCost: 0, totalProfit: 0, overallProfitMargin: 0 },
+        summary,
+        operatingExpenses = 0,
+        expensesByCategory = {},
+        periodExpensesList = []
+    } = processedData;
     const paddleChartHeight = Math.max(400, topProducts.length * 40 + 50);
 
     return (
@@ -455,24 +612,47 @@ const Analytics = () => {
             {/* Header & Controls */}
             <div className="flex flex-wrap justify-between items-center gap-4 shrink-0">
                 <h2 className="text-2xl font-bold text-zinc-800 flex items-center gap-2">
-                    <BarChart3 className="text-zinc-500" /> Performance Analytics
+                    <BarChart3 className="text-zinc-500" /> Performance Analytics & P&L
                 </h2>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* Branch Filter Selector (for Admin) */}
+                    {isAdmin && (
+                        <div className="relative">
+                            <select
+                                value={effectiveBranch ? String(effectiveBranch) : 'ALL'}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    const nextId = (val === 'ALL' || !val) ? null : Number(val);
+                                    if (setSelectedBranchId) {
+                                        setSelectedBranchId(nextId);
+                                    }
+                                }}
+                                className="appearance-none pl-8 pr-7 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-bold text-zinc-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                            >
+                                <option value="ALL">🏢 All Branches (Consolidated)</option>
+                                {branches.map(b => (
+                                    <option key={b.id} value={b.id}>📍 {b.name}</option>
+                                ))}
+                            </select>
+                            <Store size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                            <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                        </div>
+                    )}
+
                     {/* Transaction Type Filter */}
                     <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
-                        {['REGULAR', 'CONSIGNMENT', 'All'].map(tType => (
+                        {['All', 'REGULAR', 'CONSIGNMENT'].map(tType => (
                             <button
                                 key={tType}
                                 onClick={() => setTypeFilter(tType)}
-                                className="px-3 py-1.5 text-xs font-bold rounded-md capitalize"
+                                className="px-3 py-1.5 text-xs font-bold rounded-md transition-all"
                                 style={{
-                                    backgroundColor: typeFilter === tType ? '#f3e8ff' : 'transparent',
-                                    color: typeFilter === tType ? '#7e22ce' : '#71717a',
-                                    transition: 'all 150ms ease'
+                                    backgroundColor: typeFilter === tType ? '#09090b' : 'transparent',
+                                    color: typeFilter === tType ? '#ffffff' : '#71717a',
                                 }}
                             >
-                                {tType.toLowerCase()}
+                                {tType === 'All' ? 'All Types' : tType === 'REGULAR' ? 'Regular' : 'Consignment'}
                             </button>
                         ))}
                     </div>
@@ -539,17 +719,76 @@ const Analytics = () => {
                 </div>
             </div>
 
-            {/* Active payment filter badge */}
-            {paymentFilter !== 'All' && (
-                <div className="flex items-center gap-2 shrink-0" style={{ animation: 'fadeSlideIn 200ms ease' }}>
-                    <span className="text-xs text-zinc-400">Filtered by payment:</span>
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 text-zinc-700 text-xs font-bold rounded-full">
-                        <CreditCard size={11} />
-                        {paymentFilter}
-                        <button onClick={() => setPaymentFilter('All')} className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
-                            <X size={10} />
-                        </button>
-                    </span>
+            {/* Active filters indicators bar */}
+            {(effectiveBranch || typeFilter !== 'All' || paymentFilter !== 'All' || customRange || categoryFilter !== 'All') && (
+                <div className="flex flex-wrap items-center gap-2 shrink-0 p-2.5 bg-stone-50 border border-stone-200/80 rounded-xl" style={{ animation: 'fadeSlideIn 200ms ease' }}>
+                    <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider text-[10px]">Active Filters:</span>
+                    
+                    {effectiveBranch && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
+                            <Store size={11} className="text-emerald-600" />
+                            {branches.find(b => String(b.id) === String(effectiveBranch))?.name || `Branch #${effectiveBranch}`}
+                            {isAdmin && (
+                                <button onClick={() => setSelectedBranchId(null)} title="Clear branch filter" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                    <X size={11} />
+                                </button>
+                            )}
+                        </span>
+                    )}
+
+                    {typeFilter !== 'All' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-purple-700 text-xs font-bold rounded-lg shadow-xs">
+                            <Layers size={11} className="text-purple-600" />
+                            {typeFilter === 'REGULAR' ? 'Regular Sales' : 'Consignment'}
+                            <button onClick={() => setTypeFilter('All')} title="Show all types" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                <X size={11} />
+                            </button>
+                        </span>
+                    )}
+
+                    {paymentFilter !== 'All' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
+                            <CreditCard size={11} className="text-blue-600" />
+                            {paymentFilter}
+                            <button onClick={() => setPaymentFilter('All')} title="Clear payment filter" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                <X size={11} />
+                            </button>
+                        </span>
+                    )}
+
+                    {customRange && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
+                            <Calendar size={11} className="text-amber-600" />
+                            {customRange.label}
+                            <button onClick={() => { setCustomRange(null); setTimeRange(TIME_RANGES[0]); }} title="Clear custom range" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                <X size={11} />
+                            </button>
+                        </span>
+                    )}
+
+                    {categoryFilter !== 'All' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
+                            <PieIcon size={11} className="text-indigo-600" />
+                            {categoryFilter}
+                            <button onClick={() => setCategoryFilter('All')} title="Show all categories" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                <X size={11} />
+                            </button>
+                        </span>
+                    )}
+
+                    <button
+                        onClick={() => {
+                            if (isAdmin) setSelectedBranchId(null);
+                            setTypeFilter('All');
+                            setPaymentFilter('All');
+                            setCategoryFilter('All');
+                            setCustomRange(null);
+                            setTimeRange(TIME_RANGES[0]);
+                        }}
+                        className="text-xs font-bold text-zinc-400 hover:text-rose-600 ml-auto transition-colors underline cursor-pointer"
+                    >
+                        Reset All Filters
+                    </button>
                 </div>
             )}
 
@@ -559,19 +798,50 @@ const Analytics = () => {
                 </div>
             )}
 
-            {/* Top Stat Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
-                <StatCard title="Total Revenue" value={loading ? '...' : <CurrencyDisplay value={summary.revenue} />} icon={<DollarSign size={20} className="text-emerald-600" />} bg="bg-emerald-50" />
-                <StatCard title="Net Profit" value={loading ? '...' : <CurrencyDisplay value={summary.profit} />} icon={<TrendingUp size={20} className="text-blue-600" />} subtitle={summary.margin > 0 ? `${summary.margin.toFixed(1)}% margin` : null} bg="bg-blue-50" />
-                <StatCard title="Total Cost of Goods" value={loading ? '...' : <CurrencyDisplay value={summary.cost} />} icon={<DollarSign size={20} className="text-amber-600" />} bg="bg-amber-50" />
-                <StatCard title="Units Sold" value={loading ? '...' : summary.units?.toLocaleString()} icon={<Package size={20} className="text-purple-600" />} bg="bg-purple-50" />
+            {/* Top Stat Cards (Executive 5-Card Grid) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 shrink-0">
+                <StatCard
+                    title="Total Revenue"
+                    value={loading ? '...' : <CurrencyDisplay value={summary.revenue} />}
+                    icon={<DollarSign size={18} className="text-emerald-600" />}
+                    bg="bg-emerald-50"
+                />
+                <StatCard
+                    title="Cost of Goods (COGS)"
+                    value={loading ? '...' : <CurrencyDisplay value={summary.cost} />}
+                    icon={<Layers size={18} className="text-amber-600" />}
+                    bg="bg-amber-50"
+                />
+                <StatCard
+                    title="Operating Expenses"
+                    value={loading ? '...' : <CurrencyDisplay value={summary.expenses} />}
+                    icon={<Receipt size={18} className="text-rose-600" />}
+                    bg="bg-rose-50"
+                    subtitle="Store rent, bills, supplies"
+                />
+                <StatCard
+                    title="Net Operating Profit"
+                    value={loading ? '...' : <CurrencyDisplay value={summary.profit} />}
+                    icon={<TrendingUp size={18} className={summary.profit >= 0 ? "text-blue-600" : "text-rose-600"} />}
+                    subtitle={summary.margin ? `${summary.margin.toFixed(1)}% net margin` : null}
+                    bg={summary.profit >= 0 ? "bg-blue-50" : "bg-rose-50"}
+                />
+                <StatCard
+                    title="Units Sold"
+                    value={loading ? '...' : summary.units?.toLocaleString()}
+                    icon={<Package size={18} className="text-purple-600" />}
+                    bg="bg-purple-50"
+                />
             </div>
 
             {/* View Mode Toggle */}
-            <div className="flex bg-stone-100 p-1 rounded-lg w-fit shrink-0">
-                <button onClick={() => setMainTab('trends')} className={`px-5 py-2 text-sm font-bold rounded-md transition-all ${mainTab === 'trends' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Revenue Trends</button>
-                <button onClick={() => setMainTab('paddles')} className={`px-5 py-2 text-sm font-bold rounded-md transition-all ${mainTab === 'paddles' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Product Rankings</button>
-                <button onClick={() => setMainTab('categories')} className={`px-5 py-2 text-sm font-bold rounded-md transition-all ${mainTab === 'categories' ? 'bg-white shadow text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Category Breakdown</button>
+            <div className="flex bg-stone-100 p-1 rounded-xl w-fit shrink-0 border border-stone-200/80">
+                <button onClick={() => setMainTab('trends')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'trends' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Revenue Trends</button>
+                <button onClick={() => setMainTab('paddles')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'paddles' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Product Rankings</button>
+                <button onClick={() => setMainTab('categories')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'categories' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Category Breakdown</button>
+                <button onClick={() => setMainTab('pnl')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'pnl' ? 'bg-white shadow-xs text-emerald-800 font-black' : 'text-zinc-500 hover:text-zinc-700'}`}>
+                    📊 Branch P&L Statement
+                </button>
             </div>
 
             {/* Charts Area */}
@@ -647,10 +917,7 @@ const Analytics = () => {
                                                 transition: 'background-color 200ms ease, color 200ms ease',
                                             }}
                                         >
-                                            {topProducts.filter(p => categoryFilter === cat
-                                                ? true  // already filtered
-                                                : p.category === cat
-                                            ).length || ''}
+                                            {categoryCounts[cat] || ''}
                                         </span>
                                     )}
                                 </button>
@@ -700,14 +967,14 @@ const Analytics = () => {
                                         <h4 className="text-sm font-black text-zinc-900 tracking-tight">Sales Revenue Share by Category</h4>
                                     </div>
                                     <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
-                                        {categoryData ? formatCurrency(categoryData.totalRevenue) : '...'}
+                                        {categoryBreakdown ? formatCurrency(categoryBreakdown.totalRevenue) : '...'}
                                     </span>
                                 </div>
                                 <p className="text-xs text-zinc-400 mb-4">Percentage of total gross sales generated</p>
 
                                 {loading ? (
                                     <div className="h-64 flex items-center justify-center text-zinc-400"><RefreshCw size={24} className="animate-spin" /></div>
-                                ) : !categoryData?.categories?.length ? (
+                                ) : !categoryBreakdown?.categories?.length ? (
                                     <div className="h-64 flex flex-col items-center justify-center text-zinc-400">
                                         <Package size={32} className="opacity-20 mb-2" />
                                         <p className="text-sm">No category sales recorded in this period.</p>
@@ -718,7 +985,7 @@ const Analytics = () => {
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <PieChart>
                                                     <Pie
-                                                        data={categoryData.categories}
+                                                        data={categoryBreakdown.categories}
                                                         dataKey="revenue"
                                                         nameKey="category"
                                                         cx="50%"
@@ -727,7 +994,7 @@ const Analytics = () => {
                                                         outerRadius={85}
                                                         paddingAngle={3}
                                                     >
-                                                        {categoryData.categories.map((entry, index) => (
+                                                        {categoryBreakdown.categories.map((entry, index) => (
                                                             <Cell key={`cell-${index}`} fill={CATEGORY_COLORS[entry.category] || PIE_COLORS[index % PIE_COLORS.length]} />
                                                         ))}
                                                     </Pie>
@@ -742,7 +1009,7 @@ const Analytics = () => {
                                             </ResponsiveContainer>
                                         </div>
                                         <div className="w-full sm:w-1/2 flex flex-col gap-2">
-                                            {categoryData.categories.map((cat, idx) => (
+                                            {categoryBreakdown.categories.map((cat, idx) => (
                                                 <div key={cat.category} className="flex items-center justify-between text-xs">
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <span
@@ -770,14 +1037,14 @@ const Analytics = () => {
                                         <h4 className="text-sm font-black text-zinc-900 tracking-tight">Units Volume Share by Category</h4>
                                     </div>
                                     <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                                        {categoryData ? `${categoryData.totalUnitsSold.toLocaleString()} units` : '...'}
+                                        {categoryBreakdown ? `${categoryBreakdown.totalUnitsSold.toLocaleString()} units` : '...'}
                                     </span>
                                 </div>
                                 <p className="text-xs text-zinc-400 mb-4">Percentage of total items sold</p>
 
                                 {loading ? (
                                     <div className="h-64 flex items-center justify-center text-zinc-400"><RefreshCw size={24} className="animate-spin" /></div>
-                                ) : !categoryData?.categories?.length ? (
+                                ) : !categoryBreakdown?.categories?.length ? (
                                     <div className="h-64 flex flex-col items-center justify-center text-zinc-400">
                                         <Package size={32} className="opacity-20 mb-2" />
                                         <p className="text-sm">No category sales recorded in this period.</p>
@@ -788,7 +1055,7 @@ const Analytics = () => {
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <PieChart>
                                                     <Pie
-                                                        data={categoryData.categories}
+                                                        data={categoryBreakdown.categories}
                                                         dataKey="unitsSold"
                                                         nameKey="category"
                                                         cx="50%"
@@ -797,7 +1064,7 @@ const Analytics = () => {
                                                         outerRadius={85}
                                                         paddingAngle={3}
                                                     >
-                                                        {categoryData.categories.map((entry, index) => (
+                                                        {categoryBreakdown.categories.map((entry, index) => (
                                                             <Cell key={`cell-u-${index}`} fill={CATEGORY_COLORS[entry.category] || PIE_COLORS[index % PIE_COLORS.length]} />
                                                         ))}
                                                     </Pie>
@@ -812,7 +1079,7 @@ const Analytics = () => {
                                             </ResponsiveContainer>
                                         </div>
                                         <div className="w-full sm:w-1/2 flex flex-col gap-2">
-                                            {categoryData.categories.map((cat, idx) => (
+                                            {categoryBreakdown.categories.map((cat, idx) => (
                                                 <div key={cat.category} className="flex items-center justify-between text-xs">
                                                     <div className="flex items-center gap-2 min-w-0">
                                                         <span
@@ -851,7 +1118,7 @@ const Analytics = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-stone-100">
-                                        {categoryData?.categories?.map((cat, idx) => (
+                                        {categoryBreakdown?.categories?.map((cat, idx) => (
                                             <tr key={cat.category} className="hover:bg-stone-50/80 transition-colors">
                                                 <td className="py-3 font-bold text-zinc-900 flex items-center gap-2">
                                                     <span
@@ -888,22 +1155,234 @@ const Analytics = () => {
                                             </tr>
                                         ))}
                                     </tbody>
-                                    {categoryData && (
+                                    {categoryBreakdown && (
                                         <tfoot>
                                             <tr className="border-t-2 border-stone-200 font-black text-sm bg-stone-50/50">
                                                 <td className="py-3 font-black text-zinc-900">Total Across All Categories</td>
-                                                <td className="py-3 text-right text-emerald-600 font-mono">{formatCurrency(categoryData.totalRevenue)}</td>
+                                                <td className="py-3 text-right text-emerald-600 font-mono">{formatCurrency(categoryBreakdown.totalRevenue)}</td>
                                                 <td className="py-3 text-right text-emerald-700">100.0%</td>
-                                                <td className="py-3 text-right text-zinc-900">{categoryData.totalUnitsSold.toLocaleString()}</td>
+                                                <td className="py-3 text-right text-zinc-900">{categoryBreakdown.totalUnitsSold.toLocaleString()}</td>
                                                 <td className="py-3 text-right text-blue-700">100.0%</td>
                                                 <td className="py-3 text-right text-zinc-600 font-mono text-xs">—</td>
-                                                <td className="py-3 text-right text-purple-600 font-mono">{formatCurrency(categoryData.totalProfit)}</td>
-                                                <td className="py-3 text-right text-zinc-900">{categoryData.overallProfitMargin?.toFixed(1)}%</td>
+                                                <td className="py-3 text-right text-purple-600 font-mono">{formatCurrency(categoryBreakdown.totalProfit)}</td>
+                                                <td className="py-3 text-right text-zinc-900">{categoryBreakdown.overallProfitMargin?.toFixed(1)}%</td>
                                             </tr>
                                         </tfoot>
                                     )}
                                 </table>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {mainTab === 'pnl' && (
+                    <div className="space-y-6">
+                        {/* P&L Statement Card */}
+                        <div className="bg-white border border-stone-200 rounded-3xl shadow-sm p-6 lg:p-8">
+                            <div className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-stone-200/80">
+                                <div>
+                                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200 mb-2">
+                                        <Sparkles size={12} />
+                                        Profit & Loss Statement
+                                    </div>
+                                    <h3 className="text-xl font-black text-stone-900 tracking-tight">
+                                        {effectiveBranch
+                                            ? `${branches.find(b => String(b.id) === String(effectiveBranch))?.name || 'Branch'} P&L Statement`
+                                            : 'Consolidated P&L Statement (All Locations)'}
+                                    </h3>
+                                    <p className="text-xs text-stone-500 mt-0.5">
+                                        Income from sales collections minus inventory cost and branch operating overhead
+                                    </p>
+                                </div>
+
+                                <div className="text-right">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">Net Operating Profit</span>
+                                    <span className={`text-2xl font-black font-mono ${
+                                        summary.profit >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                    }`}>
+                                        {formatCurrency(summary.profit)}
+                                    </span>
+                                    <span className="text-xs text-stone-400 font-bold block mt-0.5">
+                                        {summary.margin ? `${summary.margin.toFixed(1)}% net margin` : '—'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* P&L Line Items Table */}
+                            <div className="mt-6 overflow-x-auto">
+                                <table className="w-full text-left text-xs font-medium">
+                                    <thead>
+                                        <tr className="border-b border-stone-200 text-stone-400 uppercase text-[10px] font-black tracking-wider">
+                                            <th className="py-3 px-4">Financial Line Item</th>
+                                            <th className="py-3 px-4 text-right">Amount</th>
+                                            <th className="py-3 px-4 text-right">% of Revenue</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-stone-100">
+                                        {/* REVENUE */}
+                                        <tr className="bg-emerald-50/30">
+                                            <td className="py-3.5 px-4 font-black text-stone-900 flex items-center gap-2">
+                                                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                                1. Gross Sales Revenue
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right font-black text-emerald-700 font-mono text-sm">
+                                                {formatCurrency(summary.revenue)}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right font-black text-stone-700">
+                                                100.0%
+                                            </td>
+                                        </tr>
+
+                                        {/* COGS */}
+                                        <tr>
+                                            <td className="py-3.5 px-4 font-bold text-stone-700 pl-8">
+                                                Less: Cost of Goods Sold (COGS / Inventory Cost)
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right font-mono font-bold text-stone-700">
+                                                ({formatCurrency(summary.cost)})
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right text-stone-500">
+                                                {summary.revenue > 0 ? ((summary.cost / summary.revenue) * 100).toFixed(1) : 0}%
+                                            </td>
+                                        </tr>
+
+                                        {/* GROSS PROFIT */}
+                                        <tr className="bg-stone-50 font-black">
+                                            <td className="py-3.5 px-4 text-stone-900 pl-6">
+                                                2. Gross Profit
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right font-mono text-stone-900 text-sm">
+                                                {formatCurrency(summary.grossProfit)}
+                                            </td>
+                                            <td className="py-3.5 px-4 text-right text-emerald-700">
+                                                {summary.grossMargin ? `${summary.grossMargin.toFixed(1)}%` : '—'}
+                                            </td>
+                                        </tr>
+
+                                        {/* OPERATING EXPENSES HEADER */}
+                                        <tr className="bg-rose-50/20">
+                                            <td colSpan={3} className="py-2.5 px-4 font-black text-rose-800 uppercase tracking-wider text-[10px]">
+                                                3. Operating Expenses & Store Overhead
+                                            </td>
+                                        </tr>
+
+                                        {/* EXPENSE CATEGORIES */}
+                                        {Object.entries(expensesByCategory).length === 0 ? (
+                                            <tr>
+                                                <td colSpan={3} className="py-3 px-8 text-stone-400 italic">
+                                                    No local operating expenses recorded for this period
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            Object.entries(expensesByCategory).map(([cat, amt]) => (
+                                                <tr key={cat} className="hover:bg-stone-50 transition-colors">
+                                                    <td className="py-2.5 px-4 pl-8 text-stone-600">
+                                                        • {cat}
+                                                    </td>
+                                                    <td className="py-2.5 px-4 text-right font-mono font-bold text-rose-600">
+                                                        ({formatCurrency(amt)})
+                                                    </td>
+                                                    <td className="py-2.5 px-4 text-right text-stone-400">
+                                                        {summary.revenue > 0 ? ((amt / summary.revenue) * 100).toFixed(1) : 0}%
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+
+                                        {/* TOTAL EXPENSES */}
+                                        <tr className="bg-stone-50/80 font-bold">
+                                            <td className="py-3 px-4 pl-6 text-stone-800">
+                                                Total Operating Expenses
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono text-rose-600">
+                                                ({formatCurrency(summary.expenses)})
+                                            </td>
+                                            <td className="py-3 px-4 text-right text-rose-600 font-bold">
+                                                {summary.revenue > 0 ? ((summary.expenses / summary.revenue) * 100).toFixed(1) : 0}%
+                                            </td>
+                                        </tr>
+
+                                        {/* NET OPERATING PROFIT */}
+                                        <tr className="bg-stone-900 text-white font-black text-sm">
+                                            <td className="py-4 px-4 rounded-l-xl">
+                                                4. Net Operating Profit (EBIT)
+                                            </td>
+                                            <td className="py-4 px-4 text-right font-mono text-base">
+                                                <span className={summary.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                                                    {formatCurrency(summary.profit)}
+                                                </span>
+                                            </td>
+                                            <td className="py-4 px-4 text-right text-emerald-400 rounded-r-xl">
+                                                {summary.margin ? `${summary.margin.toFixed(1)}%` : '—'}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Recent Period Expenses Audit Ledger */}
+                        <div className="bg-white border border-stone-200 rounded-3xl shadow-sm p-6">
+                            <div className="flex items-center justify-between mb-4">
+                                <div>
+                                    <h4 className="text-sm font-black text-stone-900">
+                                        Expense Disbursals During Period
+                                    </h4>
+                                    <p className="text-xs text-stone-400 mt-0.5">
+                                        Line items contributing to total operating costs above
+                                    </p>
+                                </div>
+                                <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-stone-100 text-stone-700">
+                                    {periodExpensesList.length} expenses
+                                </span>
+                            </div>
+
+                            {periodExpensesList.length === 0 ? (
+                                <div className="p-8 text-center text-xs text-stone-400 bg-stone-50 rounded-2xl border border-dashed border-stone-200">
+                                    No expense records found for this period and branch selection.
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-xs">
+                                        <thead className="bg-stone-50 text-stone-400 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
+                                            <tr>
+                                                <th className="py-2.5 px-4">Date</th>
+                                                <th className="py-2.5 px-4">Expense Title</th>
+                                                <th className="py-2.5 px-4">Category</th>
+                                                <th className="py-2.5 px-4">Payment Source</th>
+                                                <th className="py-2.5 px-4">Branch</th>
+                                                <th className="py-2.5 px-4 text-right">Cost</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-stone-100">
+                                            {periodExpensesList.map(exp => (
+                                                <tr key={exp.id} className="hover:bg-stone-50 transition-colors">
+                                                    <td className="py-2.5 px-4 font-mono text-stone-500">
+                                                        {exp.expenseDate ? new Date(exp.expenseDate).toLocaleDateString('en-PH') : '—'}
+                                                    </td>
+                                                    <td className="py-2.5 px-4 font-bold text-stone-800">
+                                                        {exp.name}
+                                                    </td>
+                                                    <td className="py-2.5 px-4">
+                                                        <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-stone-100 text-stone-700">
+                                                            {exp.category || 'General'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-2.5 px-4 text-stone-600 font-medium">
+                                                        {exp.paymentSource || 'Cash Drawer'}
+                                                    </td>
+                                                    <td className="py-2.5 px-4 text-stone-600 font-medium">
+                                                        {exp.branch?.name || 'Central Admin'}
+                                                    </td>
+                                                    <td className="py-2.5 px-4 text-right font-black font-mono text-rose-600">
+                                                        {formatCurrency(exp.cost)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

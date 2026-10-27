@@ -38,6 +38,14 @@ public class Expense {
     @Column(name = "batch_id", length = 36)
     private String batchId;
 
+    // Payment source/account: Cash Drawer, GCash, Maya, BDO, BPI, GoTyme, MBOS, Other
+    @Column(name = "payment_source", length = 50)
+    private String paymentSource = "Cash Drawer";
+
+    public String getPaymentSource() {
+        return paymentSource == null || paymentSource.isBlank() ? "Cash Drawer" : paymentSource;
+    }
+
     @PrePersist
     protected void onCreate() {
         if (this.expenseDate == null) {

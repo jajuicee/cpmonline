@@ -32,6 +32,9 @@ class StockAllocationAndPriceTest {
     @Autowired
     private BranchStockAllocationRepository branchStockAllocationRepository;
 
+    @Autowired
+    private pb.market.controller.ProductController productController;
+
     @Test
     void testBranchSellingPriceOverride() {
         Branch branch = new Branch();
@@ -111,5 +114,40 @@ class StockAllocationAndPriceTest {
 
         BigDecimal remaining = branchStockAllocationRepository.sumOutstandingByBranchId(branch.getId());
         assertEquals(0, new BigDecimal("15000.00").compareTo(remaining));
+    }
+
+    @Test
+    void testSetBranchPriceControllerAdminNullBranchId() {
+        Branch branch = new Branch();
+        branch.setName("Test Branch For Controller");
+        branch.setActive(true);
+        branch = branchRepository.save(branch);
+
+        Product p = new Product();
+        p.setBrandName("Spartus");
+        p.setModelName("Spitfire");
+        p.setCategory("Paddles");
+        p = productRepository.save(p);
+
+        ProductVariant v = new ProductVariant();
+        v.setProduct(p);
+        v.setSku("SPARTUS-SPITFIRE-" + System.currentTimeMillis());
+        v.setSellingPrice(new BigDecimal("7500.00"));
+        v = variantRepository.save(v);
+
+        // Simulate admin user with null branchId (like JWT UserPrincipal for ADMIN)
+        pb.market.config.UserPrincipal adminUser = new pb.market.config.UserPrincipal("admin", "ADMIN", null);
+
+        // Simulate payload from frontend when branchId is null: { sellingPrice: 8000, branchId: null }
+        java.util.Map<String, Object> body = new java.util.HashMap<>();
+        body.put("sellingPrice", 8000);
+        body.put("branchId", null);
+
+        org.springframework.http.ResponseEntity<?> response = productController.setBranchPrice(v.getId(), body, adminUser);
+        assertEquals(200, response.getStatusCode().value());
+
+        // Also test getBranchPrices for admin without query param (branchId == null)
+        org.springframework.http.ResponseEntity<?> pricesResp = productController.getBranchPrices(null, adminUser);
+        assertEquals(200, pricesResp.getStatusCode().value());
     }
 }

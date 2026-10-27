@@ -153,4 +153,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
            "GROUP BY v.id, p.brandName, p.modelName, v.color, v.shape, v.thicknessMm, v.sku, p.category " +
            "ORDER BY COUNT(t) DESC, COALESCE(SUM(t.finalPrice), 0) DESC")
     List<Object[]> findTopRankingUnitsInRange(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, @Param("branchId") Long branchId, org.springframework.data.domain.Pageable pageable);
+
+    @Query("SELECT COALESCE(SUM(t.finalPrice - COALESCE(t.downpayment, 0)), 0) FROM Transaction t WHERE t.transactionType = 'CONSIGNMENT' AND t.status != 'FULL'")
+    java.math.BigDecimal sumConsigneePayables();
+
+    @Query("SELECT COALESCE(SUM(t.finalPrice - COALESCE(t.downpayment, 0)), 0) FROM Transaction t WHERE (t.transactionType IS NULL OR t.transactionType != 'CONSIGNMENT') AND t.status != 'FULL'")
+    java.math.BigDecimal sumCustomerUnpaid();
 }

@@ -654,7 +654,8 @@ const OrderHistory = () => {
                     customerName: t.customerName,
                     transactionType: t.transactionType,
                     paymentMethod: t.paymentMethod,
-                    paymentDetails: t.paymentDetails,
+                    paymentDetails: t.notes || t.paymentDetails || '',
+                    notes: t.notes || t.paymentDetails || '',
                     status: t.status,
                     date: t.transactionDate,
                     branchName: t.branch?.name || (isBranch ? user?.branchName : 'Main Store'),
@@ -732,6 +733,7 @@ const OrderHistory = () => {
                     (g.customerName || '').toLowerCase().includes(q) ||
                     (g.displayId || '').toLowerCase().includes(q) ||
                     (g.paymentMethod || '').toLowerCase().includes(q) ||
+                    (g.notes || g.paymentDetails || '').toLowerCase().includes(q) ||
                     productNames.includes(q) ||
                     skus.includes(q)
                 );
@@ -1527,6 +1529,17 @@ const OrderHistory = () => {
                                                         }}
                                                     >
                                                         <div className="py-3 px-8 ml-8 border-l-2 border-blue-400 my-2">
+                                                            {group.paymentDetails && (
+                                                                <div className="mb-3 p-3 bg-blue-50/80 border border-blue-200/70 rounded-xl flex items-start gap-2.5 text-xs text-blue-950">
+                                                                    <MessageSquare size={14} className="text-blue-600 shrink-0 mt-0.5" />
+                                                                    <div className="min-w-0">
+                                                                        <span className="font-black uppercase tracking-wider text-[10px] text-blue-700 block mb-0.5">
+                                                                            Purchase Note / Remarks
+                                                                        </span>
+                                                                        <span className="font-medium whitespace-pre-wrap leading-relaxed">{group.paymentDetails}</span>
+                                                                    </div>
+                                                                </div>
+                                                            )}
                                                             <table className="w-full text-xs">
                                                                 <tbody>
                                                                     {group.items.map((item, idx) => {

@@ -27,7 +27,8 @@ import {
     User,
     DollarSign,
     CreditCard,
-    Send
+    Send,
+    Wallet
 } from 'lucide-react';
 
 // Main Page Components
@@ -54,6 +55,7 @@ const BranchPrices = lazy(() => import('./BranchPrices'));
 const BranchDues = lazy(() => import('./BranchDues'));
 const BranchAnalytics = lazy(() => import('./BranchAnalytics'));
 const StockRequests = lazy(() => import('./StockRequests'));
+const MoneyTracker = lazy(() => import('./MoneyTracker'));
 
 const Dashboard = () => {
     const location = useLocation();
@@ -121,6 +123,7 @@ const Dashboard = () => {
                 title: 'Payments & Records',
                 items: [
                     { name: 'My Dues',           path: '/branch-dues',      icon: CreditCard },
+                    { name: 'Branch Expenses',   path: '/expenses',         icon: Receipt },
                     { name: 'Order History',     path: '/history',          icon: History },
                 ]
             }
@@ -148,6 +151,7 @@ const Dashboard = () => {
             {
                 title: 'Financials & Reports',
                 items: [
+                    { name: 'Money Tracker',    path: '/money-tracker',    icon: Wallet },
                     { name: 'Order History',    path: '/history',          icon: History },
                     { name: 'Reporting',        path: '/reporting',        icon: Activity },
                     { name: 'Analytics',        path: '/analytics',        icon: TrendingUp },
@@ -382,6 +386,7 @@ const Dashboard = () => {
                                         <Route path="/reporting" element={<Reporting />} />
                                         <Route path="/analytics" element={<Analytics />} />
                                         <Route path="/expenses" element={<Expenses />} />
+                                        <Route path="/money-tracker" element={<MoneyTracker />} />
                                         <Route path="/branches" element={<BranchesAdmin />} />
                                         <Route path="/branches/:branchId" element={<BranchDetail />} />
                                         <Route path="/accounts" element={<AccountsAdmin />} />
@@ -393,6 +398,7 @@ const Dashboard = () => {
                                         <Route path="/branch-prices" element={<BranchPrices products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/branch-dues" element={<BranchDues />} />
                                         <Route path="/branch-analytics" element={<BranchAnalytics />} />
+                                        <Route path="/expenses" element={<Expenses />} />
                                         <Route path="/history" element={<OrderHistory />} />
                                         <Route path="/consignees" element={<ConsigneesPage />} />
                                         {/* Fallback for unauthorized branch routes */}

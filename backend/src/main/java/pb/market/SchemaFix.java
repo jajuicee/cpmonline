@@ -33,6 +33,9 @@ public class SchemaFix implements CommandLineRunner {
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS consignee_id BIGINT",
                 "Column 'consignee_id' checked/added to 'transactions' table.");
 
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS notes TEXT",
+                "Column 'notes' checked/added to 'transactions' table.");
+
         // Backfill old transactions
         safeExecute("UPDATE transactions SET transaction_type = 'REGULAR' WHERE transaction_type IS NULL",
                 "Backfilled existing transactions with 'REGULAR' type.");
@@ -134,6 +137,10 @@ public class SchemaFix implements CommandLineRunner {
                 "approved_quantity INT DEFAULT 0, " +
                 "status VARCHAR(20) NOT NULL DEFAULT 'PENDING'" +
                 ")", "Table 'stock_request_items' verified/created.");
+
+        // Add payment_source column to expenses if not exists
+        safeExecute("ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_source VARCHAR(50) DEFAULT 'Cash Drawer'",
+                "Added payment_source to expenses.");
 
         // Clear branch_id for ADMIN users (Admin holds unallocated stock)
         safeExecute("UPDATE users SET branch_id = NULL WHERE role = 'ADMIN'",

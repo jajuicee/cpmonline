@@ -23,6 +23,7 @@ import java.util.*;
 @RequestMapping("/api/stock-requests")
 @RequiredArgsConstructor
 @CrossOrigin
+@org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN', 'BRANCH')")
 public class StockRequestController {
 
     private final StockRequestRepository stockRequestRepository;

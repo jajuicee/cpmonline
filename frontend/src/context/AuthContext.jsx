@@ -112,11 +112,12 @@ export const AuthProvider = ({ children }) => {
     const isAuthenticated = !!token && !!user;
     const isAdmin = user?.role === 'ADMIN';
     const isBranch = user?.role === 'BRANCH';
+    const isCashier = user?.role === 'CASHIER';
 
     // The effective branch ID:
-    // If branch user, always their own branchId.
+    // If branch user or cashier, always their own branchId.
     // If admin, whatever branch they currently selected (or null for consolidated).
-    const currentBranchId = isBranch ? user?.branchId : selectedBranchId;
+    const currentBranchId = (isBranch || isCashier) ? user?.branchId : selectedBranchId;
 
     return (
         <AuthContext.Provider
@@ -129,6 +130,7 @@ export const AuthProvider = ({ children }) => {
                 isAuthenticated,
                 isAdmin,
                 isBranch,
+                isCashier,
                 selectedBranchId,
                 setSelectedBranchId,
                 currentBranchId,

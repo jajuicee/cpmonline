@@ -40,11 +40,11 @@ public class ProductController {
     public List<Product> getAll(
             @RequestParam(required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
         List<Product> products = productService.getAllProducts(branchId);
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             for (Product p : products) {
                 if (p.getVariants() != null) {
                     for (ProductVariant v : p.getVariants()) {
@@ -289,7 +289,7 @@ public class ProductController {
         }
 
         Long branchId = null;
-        if ("BRANCH".equals(user.getRole()) && user.getBranchId() != null) {
+        if (("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole())) && user.getBranchId() != null) {
             branchId = user.getBranchId();
         }
 
@@ -386,7 +386,7 @@ public class ProductController {
             @RequestParam(required = false) Long branchId,
             @AuthenticationPrincipal UserPrincipal user) {
 
-        Long effectiveBranchId = (user != null && "BRANCH".equals(user.getRole()))
+        Long effectiveBranchId = (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole())))
                 ? user.getBranchId() : branchId;
 
         if (effectiveBranchId == null) {

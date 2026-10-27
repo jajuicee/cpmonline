@@ -20,7 +20,7 @@ public class ConsigneeController {
     public List<Consignee> getAllConsignees(
             @RequestParam(required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
         return consigneeRepository.findAllByBranch(branchId);
@@ -35,7 +35,7 @@ public class ConsigneeController {
             throw new IllegalArgumentException("Consignee name is required.");
         }
         Long resolvedBranchId = null;
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             resolvedBranchId = user.getBranchId();
         } else if (branchId != null) {
             resolvedBranchId = branchId;
@@ -71,7 +71,7 @@ public class ConsigneeController {
 
         // Branch update: only admin or if not branch-restricted
         Long resolvedBranchId = null;
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             resolvedBranchId = user.getBranchId();
         } else if (branchId != null) {
             resolvedBranchId = branchId;

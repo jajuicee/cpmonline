@@ -23,7 +23,7 @@ public class ExpenseController {
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
 
@@ -71,7 +71,7 @@ public class ExpenseController {
         }
 
         Long branchId = null;
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         } else if (expense.getBranch() != null && expense.getBranch().getId() != null && expense.getBranch().getId() > 0) {
             branchId = expense.getBranch().getId();

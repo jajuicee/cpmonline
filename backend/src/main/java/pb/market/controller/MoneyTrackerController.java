@@ -19,6 +19,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/api/money-tracker")
 @RequiredArgsConstructor
+@org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
 public class MoneyTrackerController {
 
     private final TransactionRepository transactionRepository;

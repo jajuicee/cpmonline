@@ -42,7 +42,7 @@ const AccountsAdmin = lazy(() => import('./AccountsAdmin'));
 const TabletLayout = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { user, logout, isAdmin, isBranch, currentBranchId } = useAuth();
+    const { user, logout, isAdmin, isBranch, isCashier, currentBranchId } = useAuth();
     
     // Determine if we are under the /tablet prefix or at the root
     const isExplicitTabletPath = location.pathname.startsWith('/tablet');
@@ -71,7 +71,13 @@ const TabletLayout = () => {
     // ─── WEBSOCKET REAL-TIME SYNC ─────────────────────────────────────────────
     const { wsConnected } = useStockSync(fetchProducts);
 
-    const navItems = isBranch
+    const navItems = isCashier
+        ? [
+            { name: 'POS',        path: `${basePath}/orders`,           icon: ShoppingCart },
+            { name: 'History',    path: `${basePath}/history`,          icon: History },
+            { name: 'Expenses',   path: `${basePath}/expenses`,         icon: Receipt },
+        ]
+        : isBranch
         ? [
             { name: 'POS',        path: `${basePath}/orders`,           icon: ShoppingCart },
             { name: 'Sales',      path: `${basePath}/branch-sales`,     icon: TrendingUp },
@@ -118,7 +124,7 @@ const TabletLayout = () => {
                         <div className="flex items-center gap-2">
                             <h1 className="text-lg font-black text-brand-black tracking-tight leading-none uppercase">Cebu Pickleball</h1>
                             <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-stone-900 text-white">
-                                {isBranch ? (user?.branchName || 'Branch') : 'Admin'}
+                                {isCashier ? `Cashier (${user?.branchName || 'Retail'})` : isBranch ? (user?.branchName || 'Branch') : 'Admin'}
                             </span>
                         </div>
                         <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">{currentTab}</span>
@@ -168,14 +174,14 @@ const TabletLayout = () => {
                     <Suspense fallback={<div className="h-full w-full flex justify-center items-center p-12"><Loader2 className="w-8 h-8 animate-spin text-zinc-400" /></div>}>
                         <Routes>
                             <Route path="orders"           element={<OrderPage products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                            <Route path="branch-sales"     element={<BranchSales />} />
-                            <Route path="add-stock"        element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
-                            <Route path="inventory"        element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                            <Route path="consignees"       element={<ConsigneesPage />} />
-                            <Route path="history"          element={<OrderHistory />} />
                             
-                            {isAdmin && (
+                            {isAdmin ? (
                                 <>
+                                    <Route path="branch-sales"     element={<BranchSales />} />
+                                    <Route path="add-stock"        element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
+                                    <Route path="inventory"        element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                    <Route path="consignees"       element={<ConsigneesPage />} />
+                                    <Route path="history"          element={<OrderHistory />} />
                                     <Route path="add-product"      element={<AddProduct onProductAdded={fetchProducts} />} />
                                     <Route path="manage-inventory" element={<ManageInventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                     <Route path="supplies"         element={<Supplies />} />
@@ -185,6 +191,21 @@ const TabletLayout = () => {
                                     <Route path="expenses"         element={<Expenses />} />
                                     <Route path="branches"         element={<BranchesAdmin />} />
                                     <Route path="accounts"         element={<AccountsAdmin />} />
+                                </>
+                            ) : isCashier ? (
+                                <>
+                                    <Route path="history"          element={<OrderHistory />} />
+                                    <Route path="expenses"         element={<Expenses />} />
+                                    <Route path="*"                element={<Navigate to={`${basePath}/orders`} replace />} />
+                                </>
+                            ) : (
+                                <>
+                                    <Route path="branch-sales"     element={<BranchSales />} />
+                                    <Route path="add-stock"        element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
+                                    <Route path="inventory"        element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                    <Route path="consignees"       element={<ConsigneesPage />} />
+                                    <Route path="history"          element={<OrderHistory />} />
+                                    <Route path="*"                element={<Navigate to={`${basePath}/orders`} replace />} />
                                 </>
                             )}
                         </Routes>

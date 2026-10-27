@@ -14,7 +14,8 @@ import {
     CheckCircle2,
     Lock,
     UserCheck,
-    UserX
+    UserX,
+    ShoppingCart
 } from 'lucide-react';
 
 const AccountsAdmin = () => {
@@ -88,8 +89,8 @@ const AccountsAdmin = () => {
             return;
         }
 
-        if (formRole === 'BRANCH' && !formBranchId) {
-            setError('Please assign a branch to this branch user.');
+        if ((formRole === 'BRANCH' || formRole === 'CASHIER') && !formBranchId) {
+            setError(`Please assign a branch to this ${formRole.toLowerCase()} user.`);
             return;
         }
 
@@ -99,7 +100,7 @@ const AccountsAdmin = () => {
             username: formUsername.trim(),
             role: formRole,
             active: formActive,
-            branchId: formRole === 'BRANCH' ? formBranchId : null
+            branchId: (formRole === 'BRANCH' || formRole === 'CASHIER') ? formBranchId : null
         };
 
         if (formPassword) {
@@ -212,6 +213,7 @@ const AccountsAdmin = () => {
                             <tbody className="divide-y divide-stone-100">
                                 {users.map((u) => {
                                     const isAdmin = u.role === 'ADMIN';
+                                    const isCashier = u.role === 'CASHIER';
                                     return (
                                         <tr key={u.id} className="hover:bg-stone-50/50 transition-colors">
                                             <td className="py-4 px-6">
@@ -227,9 +229,11 @@ const AccountsAdmin = () => {
                                                 <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
                                                     isAdmin
                                                         ? 'bg-purple-100 text-purple-800'
+                                                        : isCashier
+                                                        ? 'bg-amber-100 text-amber-800'
                                                         : 'bg-emerald-100 text-emerald-800'
                                                 }`}>
-                                                    {isAdmin ? <ShieldCheck size={12} /> : <Store size={12} />}
+                                                    {isAdmin ? <ShieldCheck size={12} /> : isCashier ? <ShoppingCart size={12} /> : <Store size={12} />}
                                                     <span>{u.role}</span>
                                                 </span>
                                             </td>
@@ -357,12 +361,13 @@ const AccountsAdmin = () => {
                                     onChange={(e) => setFormRole(e.target.value)}
                                     className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm font-bold text-stone-900 focus:outline-none focus:border-stone-900 focus:bg-white"
                                 >
-                                    <option value="BRANCH">BRANCH (Restricted to POS, Add Inventory, Consign, Inventory)</option>
+                                    <option value="BRANCH">BRANCH (Branch Operations, Inventory, Stock Requests, Prices)</option>
+                                    <option value="CASHIER">CASHIER (POS Multi-Item Checkout, Order History, Expenses Only)</option>
                                     <option value="ADMIN">ADMIN (Full System Access & Analytics)</option>
                                 </select>
                             </div>
 
-                            {formRole === 'BRANCH' && (
+                            {(formRole === 'BRANCH' || formRole === 'CASHIER') && (
                                 <div>
                                     <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 mb-1.5">
                                         Assigned Branch Store *

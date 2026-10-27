@@ -1,5 +1,5 @@
 package pb.market.entity;
 
 public enum Role {
-    ADMIN, BRANCH
+    ADMIN, BRANCH, CASHIER
 }

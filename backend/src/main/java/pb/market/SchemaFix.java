@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
+@org.springframework.core.annotation.Order(1)
 @RequiredArgsConstructor
 @Slf4j
 public class SchemaFix implements CommandLineRunner {
@@ -16,6 +17,12 @@ public class SchemaFix implements CommandLineRunner {
     @Override
     public void run(String... args) throws Exception {
         log.info("Checking database schema for missing columns and constraints...");
+
+        // Update role check constraint to include CASHIER
+        safeExecute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check",
+                "Dropped old users_role_check constraint.");
+        safeExecute("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN', 'BRANCH', 'CASHIER'))",
+                "Updated users_role_check constraint to include CASHIER.");
 
         // ── Column migrations (idempotent) ─────────────────────────────────────
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS consigned BOOLEAN DEFAULT FALSE",

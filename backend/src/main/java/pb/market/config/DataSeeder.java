@@ -16,21 +16,29 @@ import pb.market.repository.UserRepository;
  *   Branch: branch_cebu / branch123
  */
 @Component
+@org.springframework.core.annotation.Order(2)
 public class DataSeeder implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
     private final PasswordEncoder passwordEncoder;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 
     public DataSeeder(UserRepository userRepository, BranchRepository branchRepository,
-                      PasswordEncoder passwordEncoder) {
+                      PasswordEncoder passwordEncoder, org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
         this.userRepository = userRepository;
         this.branchRepository = branchRepository;
         this.passwordEncoder = passwordEncoder;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
     public void run(String... args) {
+        try {
+            jdbcTemplate.execute("ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check");
+            jdbcTemplate.execute("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('ADMIN', 'BRANCH', 'CASHIER'))");
+        } catch (Exception ignored) {}
+
         Branch mainBranch = null;
         if (branchRepository.count() == 0) {
             Branch b = new Branch();
@@ -65,6 +73,19 @@ public class DataSeeder implements CommandLineRunner {
             System.out.println("  2. BRANCH: branch_cebu / branch123");
             System.out.println("  *** Change credentials after first login! ***");
             System.out.println("============================================");
+        }
+
+        // Ensure default cashier account exists
+        if (userRepository.findByUsername("cashier").isEmpty()) {
+            User cashier = new User();
+            cashier.setUsername("cashier");
+            cashier.setPasswordHash(passwordEncoder.encode("cashier123"));
+            cashier.setRole(Role.CASHIER);
+            if (mainBranch != null) {
+                cashier.setBranch(mainBranch);
+            }
+            userRepository.save(cashier);
+            System.out.println("Default cashier created: cashier / cashier123");
         }
     }
 }

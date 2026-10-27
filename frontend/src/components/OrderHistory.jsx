@@ -357,7 +357,7 @@ const EditPaymentModal = ({ group, methods, onSave, onClose }) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const OrderHistory = () => {
-    const { user, isAdmin, isBranch, currentBranchId, selectedBranchId, setSelectedBranchId } = useAuth();
+    const { user, isAdmin, isBranch, isCashier, currentBranchId, selectedBranchId, setSelectedBranchId } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const isHqMode = isAdmin && searchParams.get('mode') === 'hq';
     const [branchList, setBranchList] = useState([]);
@@ -665,7 +665,7 @@ const OrderHistory = () => {
                     notes: t.notes || t.paymentDetails || '',
                     status: t.status,
                     date: t.transactionDate,
-                    branchName: t.branch?.name || (isBranch ? user?.branchName : 'Main Store'),
+                    branchName: t.branch?.name || ((isBranch || isCashier) ? user?.branchName : 'Main Store'),
                     items: [],
                     paymentLogs: [],
                     totalPrice: 0,
@@ -1031,7 +1031,7 @@ const OrderHistory = () => {
                         </select>
                     </div>
                 )}
-                {isBranch && (
+                {(isBranch || isCashier) && (
                     <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-sm">
                         <Store size={12} className="text-emerald-600" />
                         <span>{user?.branchName || 'Assigned Branch'}</span>

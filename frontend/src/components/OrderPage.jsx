@@ -48,10 +48,10 @@ const newTicketNumber = () =>
     'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
 const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
-    const { user, isBranch, isAdmin, currentBranchId } = useAuth();
+    const { user, isBranch, isCashier, isAdmin, currentBranchId } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const isHqDirectMode = isAdmin && searchParams.get('mode') === 'hq';
-    const activeBranchId = isHqDirectMode ? null : (isBranch ? user?.branchId : (currentBranchId || user?.branchId || 1));
+    const activeBranchId = isHqDirectMode ? null : ((isBranch || isCashier) ? user?.branchId : (currentBranchId || user?.branchId || 1));
     const [searchQuery, setSearchQuery]         = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [cart, setCart]                       = useState([]); // Array of { variant, qty, finalPrice, paymentStatus, downpayment }

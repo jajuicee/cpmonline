@@ -60,7 +60,7 @@ const MoneyTracker = lazy(() => import('./MoneyTracker'));
 const Dashboard = () => {
     const location = useLocation();
     const navigate = useNavigate();
-    const { user, logout, isAdmin, isBranch, selectedBranchId, setSelectedBranchId, currentBranchId } = useAuth();
+    const { user, logout, isAdmin, isBranch, isCashier, selectedBranchId, setSelectedBranchId, currentBranchId } = useAuth();
 
     // Ensure html zoom is clean and reset
     useEffect(() => {
@@ -101,7 +101,18 @@ const Dashboard = () => {
     const { wsConnected } = useStockSync(fetchProducts);
 
     // Navigation Sections with Category Headers
-    const navSections = isBranch
+    const navSections = isCashier
+        ? [
+            {
+                title: 'Cashier Operations',
+                items: [
+                    { name: 'POS System',    path: '/orders',   icon: ShoppingCart },
+                    { name: 'Order History', path: '/history',  icon: History },
+                    { name: 'Expenses',      path: '/expenses', icon: Receipt },
+                ]
+            }
+        ]
+        : isBranch
         ? [
             {
                 title: 'Store Operations',
@@ -215,7 +226,7 @@ const Dashboard = () => {
                             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                         </span>
                         <span className="truncate max-w-[130px]">
-                            {isBranch ? (user?.branchName || 'Assigned Branch') : 'Central Admin'}
+                            {isCashier ? `Cashier (${user?.branchName || 'Retail'})` : isBranch ? (user?.branchName || 'Assigned Branch') : 'Central Admin'}
                         </span>
                     </div>
                 </div>
@@ -275,7 +286,7 @@ const Dashboard = () => {
                                     {user?.username}
                                 </div>
                                 <div className="text-[10px] text-stone-400 truncate font-semibold mt-0.5">
-                                    {isBranch ? user?.branchName : 'Master Admin'}
+                                    {isCashier ? `Cashier - ${user?.branchName || 'Store'}` : isBranch ? user?.branchName : 'Master Admin'}
                                 </div>
                             </div>
                         </div>
@@ -301,7 +312,7 @@ const Dashboard = () => {
                         <div>
                             <h2 className="text-lg font-black text-stone-900 tracking-tight leading-none">{currentTab}</h2>
                             <p className="text-[10px] text-stone-400 font-bold mt-0.5 uppercase tracking-wider">
-                                {isBranch ? (user?.branchName || 'Branch Terminal') : 'Central Hub Management'}
+                                {isCashier ? `Cashier POS - ${user?.branchName || 'Terminal'}` : isBranch ? (user?.branchName || 'Branch Terminal') : 'Central Hub Management'}
                             </p>
                         </div>
                     </div>
@@ -329,8 +340,8 @@ const Dashboard = () => {
                             </div>
                         )}
 
-                        {/* Branch User Store Indicator */}
-                        {isBranch && (
+                        {/* Branch User / Cashier Store Indicator */}
+                        {(isBranch || isCashier) && (
                             <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-3 py-1 rounded-xl text-xs font-black text-emerald-800 shadow-sm">
                                 <Store size={13} className="text-emerald-600" />
                                 <span>{user?.branchName || 'Assigned Branch'}</span>
@@ -402,6 +413,13 @@ const Dashboard = () => {
                                         <Route path="/branches/:branchId" element={<BranchDetail />} />
                                         <Route path="/branch-analytics" element={<BranchAnalytics />} />
                                         <Route path="/accounts" element={<AccountsAdmin />} />
+                                    </>
+                                ) : isCashier ? (
+                                    <>
+                                        <Route path="/history" element={<OrderHistory />} />
+                                        <Route path="/expenses" element={<Expenses />} />
+                                        {/* Fallback for unauthorized cashier routes -> redirect to orders */}
+                                        <Route path="*" element={<Navigate to="/orders" replace />} />
                                     </>
                                 ) : (
                                     <>

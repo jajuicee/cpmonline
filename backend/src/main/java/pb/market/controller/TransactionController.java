@@ -57,7 +57,7 @@ public class TransactionController {
         ProductVariant variant = variantOpt.get();
 
         Long branchId = null;
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         } else if (transaction.getBranch() != null && transaction.getBranch().getId() != null) {
             branchId = transaction.getBranch().getId();
@@ -148,7 +148,7 @@ public class TransactionController {
             @RequestParam(value = "branchId", required = false) Long branchId,
             @RequestParam(value = "onlyHq", required = false, defaultValue = "false") boolean onlyHq,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
             onlyHq = false;
         }
@@ -190,7 +190,7 @@ public class TransactionController {
     public List<Transaction> getConsignmentAll(
             @RequestParam(value = "branchId", required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
         return transactionRepository.findAllConsignmentWithDetailsByBranch(
@@ -204,7 +204,7 @@ public class TransactionController {
             @RequestParam(value = "to",   required = false) String toStr,
             @RequestParam(value = "branchId", required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
 
@@ -288,7 +288,7 @@ public class TransactionController {
             @RequestParam(value = "to",   required = false) String toStr,
             @RequestParam(value = "branchId", required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
 
@@ -322,7 +322,7 @@ public class TransactionController {
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "limit", required = false, defaultValue = "50") int limit,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
 

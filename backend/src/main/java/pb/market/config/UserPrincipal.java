@@ -11,6 +11,6 @@ import lombok.Data;
 @AllArgsConstructor
 public class UserPrincipal {
     private String username;
-    private String role;     // "ADMIN" or "BRANCH"
+    private String role;     // "ADMIN", "BRANCH", or "CASHIER"
     private Long branchId;   // null for ADMIN
 }

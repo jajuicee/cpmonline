@@ -236,7 +236,7 @@ public class ReportingController {
             @RequestParam(required = false) Long branchId,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
 
-        if (user != null && "BRANCH".equals(user.getRole())) {
+        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
         }
 

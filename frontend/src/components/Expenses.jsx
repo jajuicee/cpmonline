@@ -347,7 +347,7 @@ const AddExpenseModal = ({ onSave, onClose, batches = [], branches = [], default
 
 // ── Main Component ────────────────────────────────────────────────────────────
 const Expenses = ({ initialBranchId = null, branchName = null }) => {
-    const { user, isAdmin, isBranch, currentBranchId } = useAuth();
+    const { user, isAdmin, isBranch, isCashier, currentBranchId } = useAuth();
     const [expenses, setExpenses]       = useState([]);
     const [branches, setBranches]       = useState([]);
     const [selectedBranchFilter, setSelectedBranchFilter] = useState(initialBranchId !== null ? String(initialBranchId) : '');
@@ -387,7 +387,7 @@ const Expenses = ({ initialBranchId = null, branchName = null }) => {
         setLoading(true); setError('');
 
         let bParam = '';
-        if (isBranch && currentBranchId) {
+        if ((isBranch || isCashier) && currentBranchId) {
             bParam = `&branchId=${currentBranchId}`;
         } else if (selectedBranchFilter === 'admin') {
             bParam = `&branchId=0`;
@@ -517,9 +517,9 @@ const Expenses = ({ initialBranchId = null, branchName = null }) => {
                     <div>
                         <div className="flex items-center gap-2">
                             <h2 className="text-xl font-black text-stone-900 tracking-tight">
-                                {isBranch ? `${user?.branchName || 'Branch'} Expenses` : 'Store & Operational Expenses'}
+                                {(isBranch || isCashier) ? `${user?.branchName || 'Branch'} Expenses` : 'Store & Operational Expenses'}
                             </h2>
-                            {isBranch && (
+                            {(isBranch || isCashier) && (
                                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200">
                                     Branch Scope
                                 </span>

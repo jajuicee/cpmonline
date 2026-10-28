@@ -69,4 +69,8 @@ public interface BranchStockAllocationRepository extends JpaRepository<BranchSto
 
     /** All allocations for a specific admin batch ID (for group revert) */
     List<BranchStockAllocation> findByAdminBatchId(String adminBatchId);
+
+    List<BranchStockAllocation> findByStockBatchId(Long stockBatchId);
+
+    List<BranchStockAllocation> findByBranchIdAndVariantId(Long branchId, Long variantId);
 }

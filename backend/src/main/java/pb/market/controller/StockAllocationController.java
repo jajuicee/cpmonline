@@ -631,6 +631,213 @@ public class StockAllocationController {
         ));
     }
 
+    // ─── POST /api/allocations/pull-out or /api/admin/allocations/pull-out ────
+    // Pull out stock from a branch and return it to the Master Admin (Holding Pool).
+    @PostMapping("/pull-out")
+    @Transactional
+    public ResponseEntity<?> pullOutStock(
+            @RequestBody Map<String, Object> body,
+            @AuthenticationPrincipal UserPrincipal user) {
+
+        if (body == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Request body is required."));
+        }
+
+        Long branchId = null;
+        if (body.get("branchId") != null) {
+            try {
+                branchId = Long.parseLong(body.get("branchId").toString());
+            } catch (Exception ignored) {}
+        }
+
+        if (user != null && "BRANCH".equals(user.getRole())) {
+            // Branch manager can only pull out from their own branch
+            branchId = user.getBranchId();
+        }
+
+        if (branchId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "branchId is required."));
+        }
+
+        Branch branch = branchRepository.findById(branchId).orElse(null);
+        if (branch == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Branch not found with id: " + branchId));
+        }
+
+        Long variantId = null;
+        if (body.get("variantId") != null) {
+            try {
+                variantId = Long.parseLong(body.get("variantId").toString());
+            } catch (Exception ignored) {}
+        }
+        if (variantId == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "variantId is required."));
+        }
+
+        ProductVariant variant = variantRepository.findById(variantId).orElse(null);
+        if (variant == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Product variant not found with id: " + variantId));
+        }
+
+        int quantity = 0;
+        if (body.get("quantity") != null) {
+            try {
+                quantity = Integer.parseInt(body.get("quantity").toString());
+            } catch (Exception ignored) {}
+        }
+        if (quantity <= 0) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Quantity must be greater than zero."));
+        }
+
+        String reason = body.get("reason") != null ? body.get("reason").toString().trim() : "Pulled out to Master Admin";
+        String notes = body.get("notes") != null ? body.get("notes").toString().trim() : "";
+
+        // 1. Fetch branch receivable batches for this variant with pessimistic write lock
+        List<StockBatch> branchBatches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
+        int availableAtBranch = branchBatches.stream()
+                .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
+                .sum();
+
+        if (quantity > availableAtBranch) {
+            return ResponseEntity.badRequest().body(Map.of("error",
+                    "Cannot pull out " + quantity + " units. Only " + availableAtBranch + " units available at " + branch.getName() + "."));
+        }
+
+        int remainingToPull = quantity;
+        BigDecimal totalPulledAcqCost = BigDecimal.ZERO;
+        int unitsCounted = 0;
+        boolean isPartner = false;
+        String partnerName = null;
+        BigDecimal partnerSplitPct = null;
+        Supplier defaultOrBatchSupplier = variant.getDefaultSupplier();
+
+        // 2. FIFO deduction across branch batches & credit associated allocations
+        for (StockBatch bBatch : branchBatches) {
+            if (remainingToPull <= 0) break;
+            int avail = bBatch.getRemainingQuantity() != null ? bBatch.getRemainingQuantity() : 0;
+            if (avail <= 0) continue;
+
+            int deduct = Math.min(avail, remainingToPull);
+            bBatch.setRemainingQuantity(avail - deduct);
+            stockBatchRepository.save(bBatch);
+
+            BigDecimal acq = bBatch.getAcquisitionPrice() != null ? bBatch.getAcquisitionPrice()
+                    : (variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO);
+            totalPulledAcqCost = totalPulledAcqCost.add(acq.multiply(BigDecimal.valueOf(deduct)));
+            unitsCounted += deduct;
+
+            if (bBatch.isPartner()) {
+                isPartner = true;
+                if (partnerName == null && bBatch.getPartnerName() != null) partnerName = bBatch.getPartnerName();
+                if (partnerSplitPct == null && bBatch.getPartnerSplitPct() != null) partnerSplitPct = bBatch.getPartnerSplitPct();
+            }
+            if (bBatch.getSupplier() != null) {
+                defaultOrBatchSupplier = bBatch.getSupplier();
+            }
+
+            // Adjust linked BranchStockAllocation if present
+            if (bBatch.getId() != null) {
+                List<BranchStockAllocation> linkedAllocs = allocationRepo.findByStockBatchId(bBatch.getId());
+                for (BranchStockAllocation alloc : linkedAllocs) {
+                    adjustAllocationForPullOut(alloc, deduct);
+                }
+            }
+
+            remainingToPull -= deduct;
+        }
+
+        // Also check uncredited allocations for this branch and variant where status != 'PAID'
+        List<BranchStockAllocation> variantAllocs = allocationRepo.findByBranchIdAndVariantId(branchId, variantId);
+        int uncreditedPull = quantity;
+        for (BranchStockAllocation alloc : variantAllocs) {
+            if (uncreditedPull <= 0) break;
+            if (!"PAID".equals(alloc.getStatus()) && alloc.getQuantity() != null && alloc.getQuantity() > 0) {
+                int deductFromAlloc = Math.min(uncreditedPull, alloc.getQuantity());
+                adjustAllocationForPullOut(alloc, deductFromAlloc);
+                uncreditedPull -= deductFromAlloc;
+            }
+        }
+
+        // 3. Create or replenish Master Admin Holding StockBatch (branch == null)
+        BigDecimal adminAcqPrice = (unitsCounted > 0)
+                ? totalPulledAcqCost.divide(BigDecimal.valueOf(unitsCounted), 2, java.math.RoundingMode.HALF_UP)
+                : (variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO);
+
+        StockBatch holdingBatch = new StockBatch();
+        holdingBatch.setVariant(variant);
+        holdingBatch.setQuantity(quantity);
+        holdingBatch.setRemainingQuantity(quantity);
+        holdingBatch.setAcquisitionPrice(adminAcqPrice);
+        holdingBatch.setSupplier(defaultOrBatchSupplier);
+        holdingBatch.setBranch(null); // Return to Master Admin holding pool
+        holdingBatch.setStatus("RECEIVED");
+        holdingBatch.setConsigned(false);
+        holdingBatch.setPartner(isPartner);
+        holdingBatch.setPartnerName(partnerName);
+        holdingBatch.setPartnerSplitPct(partnerSplitPct);
+        holdingBatch.setBatchId("PULLOUT-" + branch.getName().toUpperCase().replaceAll("[^A-Z0-9]+", "-") + "-" + System.currentTimeMillis());
+        holdingBatch.setNotes("Pulled out " + quantity + " units from " + branch.getName() + (notes.isBlank() ? "" : ": " + notes));
+        stockBatchRepository.save(holdingBatch);
+
+        // 4. Record stock adjustments for audit trail
+        // At branch
+        StockAdjustment branchAdj = new StockAdjustment();
+        branchAdj.setVariant(variant);
+        branchAdj.setQuantity(quantity);
+        branchAdj.setReason("Pulled out to Master Admin");
+        branchAdj.setNote(notes.isBlank() ? "Returned to Master Admin Holding Pool" : notes);
+        branchAdj.setBranch(branch);
+        stockAdjustmentRepository.save(branchAdj);
+
+        // At Master Admin Holding
+        StockAdjustment hqAdj = new StockAdjustment();
+        hqAdj.setVariant(variant);
+        hqAdj.setQuantity(quantity);
+        hqAdj.setReason("Pull-out from " + branch.getName());
+        hqAdj.setNote("Stock returned from " + branch.getName() + (notes.isBlank() ? "" : ": " + notes));
+        hqAdj.setBranch(null);
+        stockAdjustmentRepository.save(hqAdj);
+
+        // 5. Broadcast live stock change via WebSocket
+        stockWebSocketHandler.broadcastStockUpdate();
+
+        int newBranchRemaining = availableAtBranch - quantity;
+        Long masterHoldingRemaining = stockBatchRepository.sumRemainingQuantityForHolding(variantId);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Successfully pulled out " + quantity + " unit(s) of " + (variant.getProduct() != null ? variant.getProduct().getModelName() : variant.getSku()) + " from " + branch.getName() + " back to Master Admin.",
+                "branchId", branch.getId(),
+                "branchName", branch.getName(),
+                "variantId", variant.getId(),
+                "sku", variant.getSku(),
+                "pulledQuantity", quantity,
+                "branchRemaining", newBranchRemaining,
+                "masterHoldingRemaining", masterHoldingRemaining != null ? masterHoldingRemaining : quantity
+        ));
+    }
+
+    private void adjustAllocationForPullOut(BranchStockAllocation alloc, int unitsDeducted) {
+        if (alloc == null || unitsDeducted <= 0) return;
+        int currentQty = alloc.getQuantity() != null ? alloc.getQuantity() : 0;
+        int newQty = Math.max(0, currentQty - unitsDeducted);
+        alloc.setQuantity(newQty);
+
+        BigDecimal costPerUnit = alloc.getCostPerUnit() != null ? alloc.getCostPerUnit() : BigDecimal.ZERO;
+        BigDecimal newTotalCost = costPerUnit.multiply(BigDecimal.valueOf(newQty));
+        alloc.setTotalCost(newTotalCost);
+
+        BigDecimal paid = alloc.getAmountPaid() != null ? alloc.getAmountPaid() : BigDecimal.ZERO;
+        if (paid.compareTo(newTotalCost) >= 0) {
+            alloc.setStatus("PAID");
+        } else if (paid.compareTo(BigDecimal.ZERO) > 0) {
+            alloc.setStatus("PARTIAL");
+        } else {
+            alloc.setStatus(newQty == 0 ? "PAID" : "PENDING");
+        }
+        allocationRepo.save(alloc);
+    }
+
     // ─── Helper: serialize allocation to map ──────────────────────────────────
 
     private Map<String, Object> toMap(BranchStockAllocation a) {

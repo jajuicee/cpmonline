@@ -53,6 +53,7 @@ import {
 import BranchAnalytics from './BranchAnalytics';
 import Expenses from './Expenses';
 import BranchPasswordModal from './BranchPasswordModal';
+import PullOutModal from './PullOutModal';
 
 const formatCurrency = (val) =>
     `₱${Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -66,6 +67,7 @@ const BranchDetail = () => {
     const [loadingBranch, setLoadingBranch] = useState(true);
     const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'overview');
     const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+    const [pullOutModalItem, setPullOutModalItem] = useState(null);
 
     useEffect(() => {
         const tabFromUrl = searchParams.get('tab');
@@ -1341,17 +1343,39 @@ const BranchDetail = () => {
                                                                     </td>
 
                                                                     <td className="py-3 px-5 text-right">
-                                                                        {!isItemPaid ? (
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => openPaymentModal(item)}
-                                                                                className="px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95"
-                                                                            >
-                                                                                Pay Item
-                                                                            </button>
-                                                                        ) : (
-                                                                            <span className="text-[11px] font-bold text-emerald-600">✓ Done</span>
-                                                                        )}
+                                                                        <div className="flex items-center justify-end gap-1.5">
+                                                                            {!isItemPaid ? (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => openPaymentModal(item)}
+                                                                                    className="px-2.5 py-1 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+                                                                                >
+                                                                                    Pay Item
+                                                                                </button>
+                                                                            ) : (
+                                                                                <span className="text-[11px] font-bold text-emerald-600">✓ Settled</span>
+                                                                            )}
+                                                                            {(item.remainingQuantity != null ? item.remainingQuantity : item.quantity) > 0 && (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setPullOutModalItem({
+                                                                                        variantId: item.variant?.id || item.variantId,
+                                                                                        sku: item.sku,
+                                                                                        brandName: item.brandName,
+                                                                                        modelName: item.modelName,
+                                                                                        color: item.variant?.color,
+                                                                                        thicknessMm: item.variant?.thicknessMm,
+                                                                                        branchStock: item.remainingQuantity != null ? item.remainingQuantity : item.quantity,
+                                                                                        branchId: branch?.id,
+                                                                                        branchName: branch?.name
+                                                                                    })}
+                                                                                    className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+                                                                                    title="Pull out unsold units from this batch back to Master Admin"
+                                                                                >
+                                                                                    Pull Out
+                                                                                </button>
+                                                                            )}
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -3012,6 +3036,21 @@ const BranchDetail = () => {
                                                                     >
                                                                         <Pencil size={12} />
                                                                     </button>
+                                                                    {item.branchStock > 0 && (
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setPullOutModalItem({
+                                                                                ...item,
+                                                                                branchId: branch?.id,
+                                                                                branchName: branch?.name
+                                                                            })}
+                                                                            className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95 ml-1"
+                                                                            title={`Pull out stock from ${branch?.name} back to Master Admin`}
+                                                                        >
+                                                                            <ArrowLeft size={11} className="text-amber-600" />
+                                                                            <span>Pull Out</span>
+                                                                        </button>
+                                                                    )}
                                                                     {/* If in All tab and item has HQ stock, show quick allocate too */}
                                                                     {invSubTab === 'all' && item.adminStock > 0 && (
                                                                         <button
@@ -3573,6 +3612,19 @@ const BranchDetail = () => {
                 branchId={branch?.id}
                 branchName={branch?.name}
             />
+
+            {pullOutModalItem && (
+                <PullOutModal
+                    isOpen={!!pullOutModalItem}
+                    onClose={() => setPullOutModalItem(null)}
+                    item={pullOutModalItem}
+                    onSuccess={() => {
+                        fetchBranchProducts();
+                        fetchAdminProducts();
+                        fetchAllocations();
+                    }}
+                />
+            )}
         </div>
     );
 };

@@ -5,10 +5,11 @@ import {
     CheckCircle, AlertCircle, Loader2, Building2, PackagePlus, Trash2,
     Pencil, AlertTriangle, PackageX, History, Save, Printer,
     CreditCard, Boxes, Clock, CheckCircle2, Store,
-    ChevronDown, ChevronUp, MapPin, Eye
+    ChevronDown, ChevronUp, MapPin, Eye, ArrowLeft
 } from 'lucide-react';
 import BatchAddModal from './BatchAddModal';
 import PasswordModal from './PasswordModal';
+import PullOutModal from './PullOutModal';
 
 const BASE = '';
 const DEFAULT_LOW_STOCK_THRESHOLD = 5;
@@ -26,6 +27,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
     const [displayedCount, setDisplayedCount] = useState(20);
     const [expandedRows, setExpandedRows] = useState({});
     const [locationModalVariant, setLocationModalVariant] = useState(null);
+    const [pullOutModalItem, setPullOutModalItem] = useState(null);
     const tableContainerRef = useRef(null);
 
     const toggleExpandRow = (variantId) => {
@@ -1498,15 +1500,37 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                 </td>
 
                                                 <td className="px-4 py-3 text-right">
-                                                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                                        isPaid
-                                                            ? 'bg-emerald-100 text-emerald-800'
-                                                            : a.status === 'PARTIAL'
-                                                            ? 'bg-amber-100 text-amber-800'
-                                                            : 'bg-stone-100 text-stone-700'
-                                                    }`}>
-                                                        {isPaid ? 'Settled' : a.status}
-                                                    </span>
+                                                    <div className="flex items-center justify-end gap-1.5">
+                                                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                                            isPaid
+                                                                ? 'bg-emerald-100 text-emerald-800'
+                                                                : a.status === 'PARTIAL'
+                                                                ? 'bg-amber-100 text-amber-800'
+                                                                : 'bg-stone-100 text-stone-700'
+                                                        }`}>
+                                                            {isPaid ? 'Settled' : a.status}
+                                                        </span>
+                                                        {(a.remainingQuantity != null ? a.remainingQuantity : a.quantity) > 0 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPullOutModalItem({
+                                                                    variantId: a.variantId || a.variant?.id,
+                                                                    sku: a.sku || a.variant?.sku,
+                                                                    brandName: a.brandName || a.variant?.brandName,
+                                                                    modelName: a.modelName || a.variant?.modelName,
+                                                                    color: a.variant?.color,
+                                                                    thicknessMm: a.variant?.thicknessMm,
+                                                                    branchStock: a.remainingQuantity != null ? a.remainingQuantity : a.quantity,
+                                                                    branchId: a.branchId,
+                                                                    branchName: a.branchName
+                                                                })}
+                                                                className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-md text-[10px] font-bold transition-all shadow-xs cursor-pointer active:scale-95"
+                                                                title={`Pull out unsold units from ${a.branchName} back to Master Admin`}
+                                                            >
+                                                                Pull Out
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         );
@@ -2121,7 +2145,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                     </div>
                                                 </div>
 
-                                                <div className="flex items-center gap-4">
+                                                <div className="flex items-center gap-3">
                                                     <div className="text-right">
                                                         <div className={`text-xl font-black ${isOut ? 'text-zinc-400' : 'text-zinc-900'}`}>
                                                             {qty} <span className="text-xs font-normal text-zinc-500">units</span>
@@ -2135,6 +2159,28 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                     }`}>
                                                         {isOut ? 'Out of Stock' : 'In Stock'}
                                                     </span>
+                                                    {!isMain && qty > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setPullOutModalItem({
+                                                                variantId: locationModalVariant.variantId,
+                                                                sku: locationModalVariant.sku,
+                                                                brandName: locationModalVariant.brand,
+                                                                modelName: locationModalVariant.name,
+                                                                color: locationModalVariant.color,
+                                                                thicknessMm: locationModalVariant.thicknessMm,
+                                                                branchStock: qty,
+                                                                adminStock: locationModalVariant.mainStock,
+                                                                branchId: loc.branchId,
+                                                                branchName: loc.branchName
+                                                            })}
+                                                            className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-xs active:scale-95 ml-1"
+                                                            title={`Pull out stock from ${loc.branchName} back to Master Admin`}
+                                                        >
+                                                            <ArrowLeft size={12} className="text-amber-600" />
+                                                            <span>Pull Out</span>
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                         );
@@ -2173,6 +2219,19 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                     title={`Authenticate to ${pendingAuthAction.type.toLowerCase()}`}
                     onConfirm={handleAuthConfirm}
                     onCancel={() => setPendingAuthAction(null)}
+                />
+            )}
+
+            {pullOutModalItem && (
+                <PullOutModal
+                    isOpen={!!pullOutModalItem}
+                    onClose={() => setPullOutModalItem(null)}
+                    item={pullOutModalItem}
+                    onSuccess={() => {
+                        if (refetchProducts) refetchProducts();
+                        if (fetchAllocations) fetchAllocations();
+                        setLocationModalVariant(null);
+                    }}
                 />
             )}
         </div>

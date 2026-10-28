@@ -62,7 +62,7 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
 
     // --- ADD STOCK MODAL STATE ---
     const [addStockModal, setAddStockModal] = useState(null);
-    const [addForm, setAddForm] = useState({ quantity: '', acquisitionPrice: '', supplierId: '', consigned: false });
+    const [addForm, setAddForm] = useState({ quantity: '', acquisitionPrice: '', supplierId: '', consigned: false, ownershipType: 'owned', partnerName: 'Pickle Gear', partnerSplitPct: '50' });
     const [addStatus, setAddStatus] = useState({ type: '', message: '' });
     const [isAdding, setIsAdding] = useState(false);
 
@@ -350,6 +350,11 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                     totalAdjusted: variant.totalAdjusted || 0,
                     totalTransferred: variant.totalTransferred || 0,
                     consigned: variant.consigned,
+                    partner: variant.partner,
+                    partnerName: variant.partnerName,
+                    partnerSplitPct: variant.partnerSplitPct,
+                    partnerStock: variant.partnerStock || 0,
+                    ownedStock: variant.ownedStock || 0,
                     defaultSupplier: variant.defaultSupplier,
                     dropdownName: isPaddle
                         ? `${product.brandName} ${product.modelName} ${variant.color || ''} ${variant.thicknessMm || 0}mm`
@@ -459,7 +464,10 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
             quantity: '',
             acquisitionPrice: '',
             supplierId: row.defaultSupplier?.id ? String(row.defaultSupplier.id) : '',
-            consigned: row.consigned || false
+            consigned: false,
+            ownershipType: row.partnerStock > 0 ? 'partner' : (row.consigned ? 'consigned' : 'owned'),
+            partnerName: row.partnerName || 'Pickle Gear',
+            partnerSplitPct: row.partnerSplitPct ? String(row.partnerSplitPct) : '50'
         });
         setAddStatus({ type: '', message: '' });
         setAddStockModal({ variantId: row.variantId, sku: row.sku, name: row.dropdownName });
@@ -470,7 +478,12 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
         setIsAdding(true);
         setAddStatus({ type: '', message: '' });
         try {
-            let url = `${BASE}/api/products/variants/${addStockModal.variantId}/add-stock?quantity=${addForm.quantity}&consigned=${addForm.consigned}`;
+            const isConsigned = addForm.ownershipType === 'consigned';
+            const isPartner = addForm.ownershipType === 'partner';
+            let url = `${BASE}/api/products/variants/${addStockModal.variantId}/add-stock?quantity=${addForm.quantity}&consigned=${isConsigned}&partner=${isPartner}`;
+            if (isPartner) {
+                url += `&partnerName=${encodeURIComponent(addForm.partnerName || 'Pickle Gear')}&partnerSplitPct=${addForm.partnerSplitPct || '50'}`;
+            }
             if (addForm.acquisitionPrice) url += `&acquisitionPrice=${addForm.acquisitionPrice}`;
             if (addForm.supplierId) url += `&supplierId=${addForm.supplierId}`;
             await axios.patch(url);
@@ -1013,8 +1026,13 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                 </td>
                                 <td className="px-4 py-4">
                                     {row.category === 'Paddles' ? (
-                                        row.consigned ? (
-                                             <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs font-bold">Consigned</span>
+                                        row.partnerStock > 0 ? (
+                                            <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1" title={`${row.partnerStock} units partnered`}>
+                                                <span>Partner</span>
+                                                <span className="text-[10px] bg-purple-200 text-purple-800 px-1 rounded-full">{row.partnerStock}</span>
+                                            </span>
+                                        ) : row.consigned ? (
+                                            <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-xs font-bold">Consigned</span>
                                         ) : (
                                             <span className="bg-green-100 text-green-700 px-2 py-1 rounded-full text-xs font-bold">Owned</span>
                                         )
@@ -1544,18 +1562,46 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-xs font-bold text-zinc-600 mb-2">Ownership Type</label>
-                                <div className="flex gap-3">
-                                    <button type="button" onClick={() => setAddForm(f => ({ ...f, consigned: false }))}
-                                        className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${!addForm.consigned ? 'border-green-500 bg-green-50 text-green-700' : 'border-stone-200 text-zinc-400 hover:border-stone-300'}`}>
-                                        Owned
+                                <label className="block text-xs font-bold text-zinc-600 mb-2">Ownership & Profit Split</label>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button type="button" onClick={() => setAddForm(f => ({ ...f, ownershipType: 'owned' }))}
+                                        className={`py-2 rounded-xl text-xs font-bold border-2 transition-all ${addForm.ownershipType === 'owned' ? 'border-green-500 bg-green-50 text-green-700' : 'border-stone-200 text-zinc-400 hover:border-stone-300'}`}>
+                                        Owned (100%)
                                     </button>
-                                    <button type="button" onClick={() => setAddForm(f => ({ ...f, consigned: true }))}
-                                        className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${addForm.consigned ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-stone-200 text-zinc-400 hover:border-stone-300'}`}>
+                                    <button type="button" onClick={() => setAddForm(f => ({ ...f, ownershipType: 'partner' }))}
+                                        className={`py-2 rounded-xl text-xs font-bold border-2 transition-all ${addForm.ownershipType === 'partner' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-stone-200 text-zinc-400 hover:border-stone-300'}`}>
+                                        Partner (50/50)
+                                    </button>
+                                    <button type="button" onClick={() => setAddForm(f => ({ ...f, ownershipType: 'consigned' }))}
+                                        className={`py-2 rounded-xl text-xs font-bold border-2 transition-all ${addForm.ownershipType === 'consigned' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-stone-200 text-zinc-400 hover:border-stone-300'}`}>
                                         Consigned
                                     </button>
                                 </div>
                             </div>
+                            {addForm.ownershipType === 'partner' && (
+                                <div className="p-3 bg-purple-50/70 border border-purple-200 rounded-xl space-y-2">
+                                    <div className="flex justify-between items-center text-xs font-bold text-purple-900">
+                                        <span>Partner Attribution</span>
+                                        <span className="text-[10px] bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded font-black">50% Net Profit Share</span>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="block text-[11px] font-bold text-purple-800 mb-1">Partner Name</label>
+                                            <input type="text" value={addForm.partnerName || ''}
+                                                onChange={e => setAddForm(f => ({ ...f, partnerName: e.target.value }))}
+                                                className="w-full px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-purple-600"
+                                                placeholder="e.g. Pickle Gear" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[11px] font-bold text-purple-800 mb-1">Partner Share %</label>
+                                            <input type="number" min="1" max="99" value={addForm.partnerSplitPct || '50'}
+                                                onChange={e => setAddForm(f => ({ ...f, partnerSplitPct: e.target.value }))}
+                                                className="w-full px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-purple-600"
+                                                placeholder="50" />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="px-6 pb-6 flex gap-3">
                             <button onClick={() => setAddStockModal(null)} disabled={isAdding} className="flex-1 px-4 py-2 border border-stone-300 rounded-xl font-bold text-zinc-600 hover:bg-stone-50 disabled:opacity-50">Cancel</button>
@@ -1838,10 +1884,16 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                                     ) : <span className="text-zinc-300 text-xs">—</span>}
                                                                 </td>
                                                                 <td className="px-5 py-3">
-                                                                    {b.consigned
-                                                                        ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-bold">Consigned</span>
-                                                                        : <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">Owned</span>
-                                                                    }
+                                                                    {b.partner ? (
+                                                                        <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-xs font-bold inline-flex items-center gap-1" title={`${b.partnerName || 'Partner'} (${b.partnerSplitPct || 50}% split)`}>
+                                                                            <span>Partner</span>
+                                                                            <span className="text-[10px] bg-purple-200 text-purple-800 px-1 rounded-full">{b.partnerSplitPct ? `${b.partnerSplitPct}%` : '50%'}</span>
+                                                                        </span>
+                                                                    ) : b.consigned ? (
+                                                                        <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-xs font-bold">Consigned</span>
+                                                                    ) : (
+                                                                        <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-xs font-bold">Owned</span>
+                                                                    )}
                                                                 </td>
                                                                 <td className="px-5 py-3">
                                                                     {totalUnits > 0 && (

@@ -47,10 +47,12 @@ import {
     RefreshCw,
     XCircle,
     Filter,
-    ArrowRight
+    ArrowRight,
+    Key
 } from 'lucide-react';
 import BranchAnalytics from './BranchAnalytics';
 import Expenses from './Expenses';
+import BranchPasswordModal from './BranchPasswordModal';
 
 const formatCurrency = (val) =>
     `₱${Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -63,6 +65,7 @@ const BranchDetail = () => {
     const [branch, setBranch] = useState(null);
     const [loadingBranch, setLoadingBranch] = useState(true);
     const [activeTab, setActiveTab] = useState(() => searchParams.get('tab') || 'overview');
+    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
     useEffect(() => {
         const tabFromUrl = searchParams.get('tab');
@@ -1394,31 +1397,43 @@ const BranchDetail = () => {
     return (
         <div className="space-y-6 max-w-7xl mx-auto min-w-0 pb-12">
             {/* Top Navigation & Branch Title */}
-            <div className="flex items-center gap-3">
-                <button
-                    onClick={() => navigate('/branches')}
-                    className="p-2.5 rounded-xl bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:bg-stone-50 transition-all shadow-sm cursor-pointer"
-                >
-                    <ArrowLeft size={16} />
-                </button>
-                <div>
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold uppercase tracking-wider text-stone-400">Branch Management</span>
-                        <ChevronRight size={12} className="text-stone-300" />
-                        <span className="text-xs font-bold text-stone-600">{branch.name}</span>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => navigate('/branches')}
+                        className="p-2.5 rounded-xl bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:bg-stone-50 transition-all shadow-sm cursor-pointer"
+                    >
+                        <ArrowLeft size={16} />
+                    </button>
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-stone-400">Branch Management</span>
+                            <ChevronRight size={12} className="text-stone-300" />
+                            <span className="text-xs font-bold text-stone-600">{branch.name}</span>
+                        </div>
+                        <h2 className="text-2xl font-black text-stone-900 tracking-tight flex items-center gap-2.5 mt-0.5">
+                            <Building2 size={24} className="text-stone-700" />
+                            {branch.name}
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider ${
+                                branch.active
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-stone-200 text-stone-600'
+                            }`}>
+                                {branch.active ? 'Active' : 'Inactive'}
+                            </span>
+                        </h2>
                     </div>
-                    <h2 className="text-2xl font-black text-stone-900 tracking-tight flex items-center gap-2.5 mt-0.5">
-                        <Building2 size={24} className="text-stone-700" />
-                        {branch.name}
-                        <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider ${
-                            branch.active
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : 'bg-stone-200 text-stone-600'
-                        }`}>
-                            {branch.active ? 'Active' : 'Inactive'}
-                        </span>
-                    </h2>
                 </div>
+
+                <button
+                    type="button"
+                    onClick={() => setPasswordModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-stone-50 text-stone-700 rounded-xl text-xs font-bold transition-all cursor-pointer border border-stone-200 shadow-sm"
+                    title="Manage Cashier Price Override Password"
+                >
+                    <Key size={14} className="text-emerald-600" />
+                    <span>Cashier Password</span>
+                </button>
             </div>
 
             {/* Notification alert */}
@@ -3551,6 +3566,13 @@ const BranchDetail = () => {
                     </div>
                 </div>
             )}
+            {/* Cashier Price Password Management Modal */}
+            <BranchPasswordModal
+                isOpen={passwordModalOpen}
+                onClose={() => { setPasswordModalOpen(false); fetchBranch(); }}
+                branchId={branch?.id}
+                branchName={branch?.name}
+            />
         </div>
     );
 };

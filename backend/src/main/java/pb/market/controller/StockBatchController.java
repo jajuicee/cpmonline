@@ -38,6 +38,9 @@ public class StockBatchController {
             m.put("remainingQuantity", b.getRemainingQuantity());
             m.put("acquisitionPrice", b.getAcquisitionPrice());
             m.put("consigned", b.isConsigned());
+            m.put("partner", b.isPartner());
+            m.put("partnerName", b.getPartnerName());
+            m.put("partnerSplitPct", b.getPartnerSplitPct());
             m.put("restockedAt", b.getRestockedAt());
             m.put("batchId", b.getBatchId());
             if (b.getBranch() != null) {

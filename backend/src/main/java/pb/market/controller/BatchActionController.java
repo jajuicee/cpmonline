@@ -167,6 +167,11 @@ public class BatchActionController {
             Supplier itemSupplier = supplier != null ? supplier : variant.getDefaultSupplier();
             boolean isItemConsigned = item.getConsigned() != null ? item.getConsigned() : request.isConsigned();
 
+            boolean isItemPartner = item.getPartner() != null ? item.getPartner() : request.isPartner();
+            String itemPartnerName = item.getPartnerName() != null ? item.getPartnerName() : request.getPartnerName();
+            BigDecimal itemPartnerSplit = item.getPartnerSplitPct() != null ? item.getPartnerSplitPct() : request.getPartnerSplitPct();
+            if (itemPartnerSplit == null) itemPartnerSplit = new BigDecimal("50.00");
+
             StockBatch batch = new StockBatch();
             batch.setVariant(variant);
             batch.setQuantity(item.getQuantity());
@@ -175,6 +180,9 @@ public class BatchActionController {
             batch.setAcquisitionPrice(itemBaseCost);
             batch.setSupplier(itemSupplier);
             batch.setConsigned(isItemConsigned);
+            batch.setPartner(isItemPartner);
+            batch.setPartnerName(isItemPartner ? (itemPartnerName != null && !itemPartnerName.isBlank() ? itemPartnerName.trim() : "Pickle Gear") : null);
+            batch.setPartnerSplitPct(itemPartnerSplit);
             batch.setStatus(status);
             batch.setEta(request.getEta());
             batch.setBatchId(batchId);

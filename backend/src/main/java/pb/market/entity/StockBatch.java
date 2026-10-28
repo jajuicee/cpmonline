@@ -34,6 +34,16 @@ public class StockBatch {
     @Column(nullable = false)
     private boolean consigned = false;
 
+    // Whether this batch is a partner-owned / profit-sharing item (e.g. Pickle Gear 50/50)
+    @Column(columnDefinition = "boolean default false")
+    private boolean partner = false;
+
+    @Column(name = "partner_name")
+    private String partnerName;
+
+    @Column(name = "partner_split_pct")
+    private BigDecimal partnerSplitPct = new BigDecimal("50.00");
+
     // Status of the batch: PENDING, INCOMING, or RECEIVED
     @Column(nullable = false, length = 20)
     private String status = "RECEIVED";
@@ -56,6 +66,9 @@ public class StockBatch {
     public void prePersist() {
         if (this.restockedAt == null) {
             this.restockedAt = LocalDateTime.now();
+        }
+        if (this.partnerSplitPct == null) {
+            this.partnerSplitPct = new BigDecimal("50.00");
         }
         // remainingQuantity is always set explicitly by callers (addStock, batchReceive, etc.)
         // Do NOT auto-fill from quantity here — INCOMING batches intentionally set it to 0.

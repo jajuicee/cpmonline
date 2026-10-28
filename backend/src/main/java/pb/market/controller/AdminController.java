@@ -69,6 +69,7 @@ public class AdminController {
             map.put("address", b.getAddress());
             map.put("contactInfo", b.getContactInfo());
             map.put("active", b.isActive());
+            map.put("priceChangePassword", b.getEffectivePriceChangePassword());
 
             java.time.LocalDateTime startOfToday = java.time.LocalDate.now().atStartOfDay();
             java.time.LocalDateTime endOfToday = startOfToday.plusDays(1);
@@ -95,6 +96,9 @@ public class AdminController {
 
     @PostMapping("/branches")
     public Branch createBranch(@RequestBody Branch branch) {
+        if (branch.getPriceChangePassword() == null || branch.getPriceChangePassword().trim().isEmpty()) {
+            branch.setPriceChangePassword("admin123");
+        }
         return branchRepository.save(branch);
     }
 
@@ -106,6 +110,9 @@ public class AdminController {
                     branch.setAddress(updated.getAddress());
                     branch.setContactInfo(updated.getContactInfo());
                     branch.setActive(updated.isActive());
+                    if (updated.getPriceChangePassword() != null && !updated.getPriceChangePassword().trim().isEmpty()) {
+                        branch.setPriceChangePassword(updated.getPriceChangePassword().trim());
+                    }
                     return ResponseEntity.ok(branchRepository.save(branch));
                 })
                 .orElse(ResponseEntity.notFound().build());
@@ -176,6 +183,7 @@ public class AdminController {
                     map.put("address", b.getAddress());
                     map.put("contactInfo", b.getContactInfo());
                     map.put("active", b.isActive());
+                    map.put("priceChangePassword", b.getEffectivePriceChangePassword());
 
                     // Aggregates
                     java.math.BigDecimal totalRev = transactionRepository.sumFinalPriceAllByBranch(b.getId());
@@ -477,12 +485,13 @@ public class AdminController {
         }
     }
 
-    // ─── GET /api/admin/analytics/hq-direct ───────────────────────────────────
-    // Direct retail sales & margin made directly from Central HQ Master Inventory
-    @GetMapping("/analytics/hq-direct")
+    // ─── GET /api/admin/analytics/hq-direct & /api/admin/analytics/main-admin ──
+    // Comprehensive Analytics for Main Admin: Direct Shop + Consignee Network
+    @GetMapping({"/analytics/hq-direct", "/analytics/main-admin"})
     public ResponseEntity<?> getHqDirectAnalytics(
             @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false, defaultValue = "ALL") String scope) {
 
         LocalDateTime fromDt = parseDateTime(from, false);
         LocalDateTime toDt = parseDateTime(to, true);
@@ -490,67 +499,424 @@ public class AdminController {
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, 50000);
         List<Transaction> txs;
         if (fromDt != null && toDt != null) {
-            txs = transactionRepository.findAllWithDetailsByActivityDateHq(fromDt, toDt, page);
+            txs = transactionRepository.findAllMainAdminTransactionsInRange(fromDt, toDt, page);
         } else {
-            txs = transactionRepository.findAllWithDetailsHq(page);
+            txs = transactionRepository.findAllMainAdminTransactions(page);
         }
 
-        BigDecimal totalRevenue = BigDecimal.ZERO;
-        BigDecimal totalCost = BigDecimal.ZERO;
-        int totalUnits = 0;
-        Map<String, BigDecimal> paymentMethods = new LinkedHashMap<>();
+        // Direct Shop metrics
+        BigDecimal shopRevenue = BigDecimal.ZERO;
+        BigDecimal shopCost = BigDecimal.ZERO;
+        BigDecimal shopProfit = BigDecimal.ZERO;
+        int shopUnits = 0;
+        Map<String, BigDecimal> shopPaymentMethods = new LinkedHashMap<>();
+
+        // Consignee Network metrics
+        BigDecimal consigneeTotalValue = BigDecimal.ZERO;
+        BigDecimal consigneeCollected = BigDecimal.ZERO;
+        BigDecimal consigneePendingBalance = BigDecimal.ZERO;
+        BigDecimal consigneeCost = BigDecimal.ZERO;
+        BigDecimal consigneeRealizedProfit = BigDecimal.ZERO;
+        int consigneeTotalUnits = 0;
+        int consigneeUnitsPaid = 0;
+        int consigneeUnitsPending = 0;
+
+        Map<String, Map<String, Object>> consigneesMap = new LinkedHashMap<>();
         Map<String, Object[]> productsMap = new LinkedHashMap<>();
-        Map<String, BigDecimal> dailyRevenue = new TreeMap<>();
+        Map<String, Map<String, BigDecimal>> dailyTrendMap = new TreeMap<>();
+        List<Map<String, Object>> recentActivity = new ArrayList<>();
 
         for (Transaction t : txs) {
-            if ("UNPAID".equalsIgnoreCase(t.getStatus())) continue;
-            BigDecimal rev = t.getFinalPrice() != null ? t.getFinalPrice() : BigDecimal.ZERO;
-            BigDecimal cost = t.getCostPrice() != null ? t.getCostPrice() : BigDecimal.ZERO;
-            totalRevenue = totalRevenue.add(rev);
-            totalCost = totalCost.add(cost);
-            totalUnits++;
+            boolean isConsignment = "CONSIGNMENT".equalsIgnoreCase(t.getTransactionType()) || t.getConsignee() != null;
+            BigDecimal finalPrice = t.getFinalPrice() != null ? t.getFinalPrice() : BigDecimal.ZERO;
+            BigDecimal costPrice = t.getCostPrice() != null ? t.getCostPrice() : BigDecimal.ZERO;
+            BigDecimal downpayment = t.getDownpayment() != null ? t.getDownpayment() : BigDecimal.ZERO;
 
-            // Method
-            String pm = t.getPaymentMethod() != null ? t.getPaymentMethod() : "OTHER";
-            paymentMethods.put(pm, paymentMethods.getOrDefault(pm, BigDecimal.ZERO).add(rev));
+            if (!isConsignment) {
+                if ("UNPAID".equalsIgnoreCase(t.getStatus()) && downpayment.compareTo(BigDecimal.ZERO) == 0) continue;
 
-            // Product
-            if (t.getVariant() != null) {
-                String sku = t.getVariant().getSku();
-                String name = (t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : sku);
-                Object[] pArr = productsMap.computeIfAbsent(sku, k -> new Object[]{name, 0, BigDecimal.ZERO, BigDecimal.ZERO});
-                pArr[1] = ((int) pArr[1]) + 1;
-                pArr[2] = ((BigDecimal) pArr[2]).add(rev);
-                pArr[3] = ((BigDecimal) pArr[3]).add(rev.subtract(cost));
-            }
+                shopRevenue = shopRevenue.add(finalPrice);
+                shopCost = shopCost.add(costPrice);
+                BigDecimal profit = finalPrice.subtract(costPrice);
+                shopProfit = shopProfit.add(profit);
+                shopUnits++;
 
-            // Daily trend
-            if (t.getTransactionDate() != null) {
-                String dayKey = t.getTransactionDate().toLocalDate().toString();
-                dailyRevenue.put(dayKey, dailyRevenue.getOrDefault(dayKey, BigDecimal.ZERO).add(rev));
+                String pm = t.getPaymentMethod() != null ? t.getPaymentMethod() : "OTHER";
+                shopPaymentMethods.put(pm, shopPaymentMethods.getOrDefault(pm, BigDecimal.ZERO).add(finalPrice));
+
+                if (t.getVariant() != null) {
+                    String sku = t.getVariant().getSku();
+                    String name = (t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : sku);
+                    Object[] pArr = productsMap.computeIfAbsent(sku, k -> new Object[]{name, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO});
+                    pArr[1] = ((int) pArr[1]) + 1;
+                    pArr[3] = ((BigDecimal) pArr[3]).add(finalPrice);
+                    pArr[4] = ((BigDecimal) pArr[4]).add(profit);
+                }
+
+                if (t.getTransactionDate() != null) {
+                    String dayKey = t.getTransactionDate().toLocalDate().toString();
+                    Map<String, BigDecimal> day = dailyTrendMap.computeIfAbsent(dayKey, k -> new HashMap<>());
+                    day.put("shopRevenue", day.getOrDefault("shopRevenue", BigDecimal.ZERO).add(finalPrice));
+                    day.put("totalInflow", day.getOrDefault("totalInflow", BigDecimal.ZERO).add(finalPrice));
+                }
+
+                Map<String, Object> act = new LinkedHashMap<>();
+                act.put("id", t.getId());
+                act.put("orderId", t.getTransactionId() != null ? t.getTransactionId() : "TX-" + t.getId());
+                act.put("date", t.getTransactionDate());
+                act.put("type", "SHOP");
+                act.put("entityName", t.getCustomerName() != null && !t.getCustomerName().isBlank() ? t.getCustomerName() : "Walk-in Customer");
+                act.put("productName", t.getVariant() != null && t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : "Item");
+                act.put("sku", t.getVariant() != null ? t.getVariant().getSku() : "—");
+                act.put("finalPrice", finalPrice);
+                act.put("paidAmount", finalPrice);
+                act.put("balanceDue", BigDecimal.ZERO);
+                act.put("profit", profit);
+                act.put("status", t.getStatus());
+                act.put("paymentMethod", t.getPaymentMethod());
+                recentActivity.add(act);
+
+            } else {
+                consigneeTotalUnits++;
+                consigneeTotalValue = consigneeTotalValue.add(finalPrice);
+                consigneeCost = consigneeCost.add(costPrice);
+
+                BigDecimal collected = "FULL".equalsIgnoreCase(t.getStatus()) ? finalPrice : downpayment;
+                consigneeCollected = consigneeCollected.add(collected);
+
+                BigDecimal balanceDue = finalPrice.subtract(collected);
+                if (balanceDue.compareTo(BigDecimal.ZERO) < 0) balanceDue = BigDecimal.ZERO;
+                consigneePendingBalance = consigneePendingBalance.add(balanceDue);
+
+                if ("FULL".equalsIgnoreCase(t.getStatus())) {
+                    consigneeUnitsPaid++;
+                } else {
+                    consigneeUnitsPending++;
+                }
+
+                BigDecimal unitProfit = finalPrice.subtract(costPrice);
+                BigDecimal realizedP = BigDecimal.ZERO;
+                if (finalPrice.compareTo(BigDecimal.ZERO) > 0 && unitProfit.compareTo(BigDecimal.ZERO) > 0) {
+                    realizedP = unitProfit.multiply(collected).divide(finalPrice, 2, java.math.RoundingMode.HALF_UP);
+                }
+                consigneeRealizedProfit = consigneeRealizedProfit.add(realizedP);
+
+                String cName = t.getConsignee() != null ? t.getConsignee().getName() : (t.getCustomerName() != null ? t.getCustomerName() : "Consignee");
+                Long cId = t.getConsignee() != null ? t.getConsignee().getId() : 0L;
+                String cContact = t.getConsignee() != null ? t.getConsignee().getContactInfo() : "";
+
+                Map<String, Object> cMap = consigneesMap.computeIfAbsent(cName, k -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("id", cId);
+                    m.put("name", cName);
+                    m.put("contactInfo", cContact != null ? cContact : "");
+                    m.put("totalUnits", 0);
+                    m.put("unitsPaid", 0);
+                    m.put("unitsPending", 0);
+                    m.put("totalValue", BigDecimal.ZERO);
+                    m.put("amountPaid", BigDecimal.ZERO);
+                    m.put("balanceDue", BigDecimal.ZERO);
+                    m.put("realizedProfit", BigDecimal.ZERO);
+                    return m;
+                });
+                cMap.put("totalUnits", (int) cMap.get("totalUnits") + 1);
+                if ("FULL".equalsIgnoreCase(t.getStatus())) {
+                    cMap.put("unitsPaid", (int) cMap.get("unitsPaid") + 1);
+                } else {
+                    cMap.put("unitsPending", (int) cMap.get("unitsPending") + 1);
+                }
+                cMap.put("totalValue", ((BigDecimal) cMap.get("totalValue")).add(finalPrice));
+                cMap.put("amountPaid", ((BigDecimal) cMap.get("amountPaid")).add(collected));
+                cMap.put("balanceDue", ((BigDecimal) cMap.get("balanceDue")).add(balanceDue));
+                cMap.put("realizedProfit", ((BigDecimal) cMap.get("realizedProfit")).add(realizedP));
+
+                if (t.getVariant() != null) {
+                    String sku = t.getVariant().getSku();
+                    String name = (t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : sku);
+                    Object[] pArr = productsMap.computeIfAbsent(sku, k -> new Object[]{name, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO});
+                    pArr[2] = ((int) pArr[2]) + 1;
+                    pArr[3] = ((BigDecimal) pArr[3]).add(finalPrice);
+                    pArr[4] = ((BigDecimal) pArr[4]).add(realizedP);
+                }
+
+                if (t.getTransactionDate() != null) {
+                    String dayKey = t.getTransactionDate().toLocalDate().toString();
+                    Map<String, BigDecimal> day = dailyTrendMap.computeIfAbsent(dayKey, k -> new HashMap<>());
+                    day.put("consigneeCollected", day.getOrDefault("consigneeCollected", BigDecimal.ZERO).add(collected));
+                    day.put("totalInflow", day.getOrDefault("totalInflow", BigDecimal.ZERO).add(collected));
+                }
+
+                Map<String, Object> act = new LinkedHashMap<>();
+                act.put("id", t.getId());
+                act.put("orderId", t.getTransactionId() != null ? t.getTransactionId() : "TX-" + t.getId());
+                act.put("date", t.getTransactionDate());
+                act.put("type", "CONSIGNMENT");
+                act.put("entityName", cName + " (Consignee)");
+                act.put("productName", t.getVariant() != null && t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : "Item");
+                act.put("sku", t.getVariant() != null ? t.getVariant().getSku() : "—");
+                act.put("finalPrice", finalPrice);
+                act.put("paidAmount", collected);
+                act.put("balanceDue", balanceDue);
+                act.put("profit", realizedP);
+                act.put("status", t.getStatus());
+                act.put("paymentMethod", t.getPaymentMethod());
+                recentActivity.add(act);
             }
         }
 
-        BigDecimal grossProfit = totalRevenue.subtract(totalCost);
-        BigDecimal marginPct = totalRevenue.compareTo(BigDecimal.ZERO) > 0
-                ? grossProfit.divide(totalRevenue, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+        BigDecimal combinedInflow = shopRevenue.add(consigneeCollected);
+        BigDecimal combinedGrossProfit = shopProfit.add(consigneeRealizedProfit);
+        int combinedTotalUnits = shopUnits + consigneeTotalUnits;
+        BigDecimal combinedValue = shopRevenue.add(consigneeTotalValue);
+
+        BigDecimal shopMarginPct = shopRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? shopProfit.divide(shopRevenue, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                : BigDecimal.ZERO;
+
+        BigDecimal combinedMarginPct = combinedInflow.compareTo(BigDecimal.ZERO) > 0
+                ? combinedGrossProfit.divide(combinedInflow, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
                 : BigDecimal.ZERO;
 
         Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("totalRevenue", totalRevenue);
-        summary.put("totalCost", totalCost);
-        summary.put("grossProfit", grossProfit);
-        summary.put("marginPct", marginPct);
-        summary.put("unitsSold", totalUnits);
+        summary.put("combinedInflow", combinedInflow);
+        summary.put("combinedGrossProfit", combinedGrossProfit);
+        summary.put("combinedMarginPct", combinedMarginPct);
+        summary.put("combinedTotalUnits", combinedTotalUnits);
+        summary.put("combinedValue", combinedValue);
+
+        summary.put("shopRevenue", shopRevenue);
+        summary.put("shopCost", shopCost);
+        summary.put("shopProfit", shopProfit);
+        summary.put("shopMarginPct", shopMarginPct);
+        summary.put("shopUnitsSold", shopUnits);
+
+        summary.put("consigneeTotalValue", consigneeTotalValue);
+        summary.put("consigneeCollected", consigneeCollected);
+        summary.put("consigneePendingBalance", consigneePendingBalance);
+        summary.put("consigneeCost", consigneeCost);
+        summary.put("consigneeRealizedProfit", consigneeRealizedProfit);
+        summary.put("consigneeTotalUnits", consigneeTotalUnits);
+        summary.put("consigneeUnitsPaid", consigneeUnitsPaid);
+        summary.put("consigneeUnitsPending", consigneeUnitsPending);
+
+        summary.put("totalRevenue", shopRevenue);
+        summary.put("totalCost", shopCost);
+        summary.put("grossProfit", shopProfit);
+        summary.put("marginPct", shopMarginPct);
+        summary.put("unitsSold", shopUnits);
+
+        List<Map<String, Object>> consigneesList = consigneesMap.values().stream()
+                .map(cm -> {
+                    BigDecimal tv = (BigDecimal) cm.get("totalValue");
+                    BigDecimal ap = (BigDecimal) cm.get("amountPaid");
+                    double rate = tv.compareTo(BigDecimal.ZERO) > 0
+                            ? ap.multiply(BigDecimal.valueOf(100)).divide(tv, 1, java.math.RoundingMode.HALF_UP).doubleValue()
+                            : 0.0;
+                    cm.put("settlementRatePct", rate);
+                    return cm;
+                })
+                .sorted((a, b) -> ((BigDecimal) b.get("balanceDue")).compareTo((BigDecimal) a.get("balanceDue")))
+                .toList();
 
         List<Map<String, Object>> topProducts = productsMap.entrySet().stream()
                 .map(e -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("sku", e.getKey());
                     m.put("name", e.getValue()[0]);
-                    m.put("units", e.getValue()[1]);
+                    m.put("shopUnits", e.getValue()[1]);
+                    m.put("consigneeUnits", e.getValue()[2]);
+                    m.put("totalUnits", ((int) e.getValue()[1]) + ((int) e.getValue()[2]));
+                    m.put("units", ((int) e.getValue()[1]) + ((int) e.getValue()[2]));
+                    m.put("revenue", e.getValue()[3]);
+                    m.put("profit", e.getValue()[4]);
+                    return m;
+                })
+                .sorted((a, b) -> ((BigDecimal) b.get("revenue")).compareTo((BigDecimal) a.get("revenue")))
+                .toList();
+
+        List<Map<String, Object>> trend = dailyTrendMap.entrySet().stream()
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("date", e.getKey());
+                    m.put("shopRevenue", e.getValue().getOrDefault("shopRevenue", BigDecimal.ZERO));
+                    m.put("consigneeCollected", e.getValue().getOrDefault("consigneeCollected", BigDecimal.ZERO));
+                    m.put("revenue", e.getValue().getOrDefault("totalInflow", BigDecimal.ZERO));
+                    m.put("totalInflow", e.getValue().getOrDefault("totalInflow", BigDecimal.ZERO));
+                    return m;
+                })
+                .toList();
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("summary", summary);
+        res.put("consignees", consigneesList);
+        res.put("paymentMethods", shopPaymentMethods);
+        res.put("topProducts", topProducts);
+        res.put("trend", trend);
+        res.put("recentActivity", recentActivity);
+        res.put("totalTransactionsCount", txs.size());
+
+        return ResponseEntity.ok(res);
+    }
+
+    // ─── GET /api/admin/analytics/partner ──────────────────────────────────────
+    // Dedicated Analytics for partnered & co-owned products (e.g. Pickle Gear 50/50 split)
+    @GetMapping("/analytics/partner")
+    public ResponseEntity<?> getPartnerAnalytics(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String partnerName) {
+
+        LocalDateTime fromDt = parseDateTime(from, false);
+        LocalDateTime toDt = parseDateTime(to, true);
+
+        org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, 50000);
+        List<Transaction> txs;
+        if (fromDt != null && toDt != null) {
+            txs = transactionRepository.findAllPartnerWithDetailsInRange(fromDt, toDt, page);
+        } else {
+            txs = transactionRepository.findAllPartnerWithDetails(page);
+        }
+
+        // Filter by partnerName if specified
+        if (partnerName != null && !partnerName.isBlank() && !"ALL".equalsIgnoreCase(partnerName)) {
+            final String filterName = partnerName.trim().toLowerCase();
+            txs = txs.stream()
+                    .filter(t -> t.getPartnerName() != null && t.getPartnerName().toLowerCase().contains(filterName))
+                    .toList();
+        }
+
+        BigDecimal totalGrossRevenue = BigDecimal.ZERO;
+        BigDecimal totalCost = BigDecimal.ZERO;
+        BigDecimal totalPartnerShare = BigDecimal.ZERO;
+        BigDecimal totalCpmShare = BigDecimal.ZERO;
+        BigDecimal totalSettledPartnerShare = BigDecimal.ZERO;
+        BigDecimal totalUnsettledPartnerShare = BigDecimal.ZERO;
+        int totalUnitsSold = 0;
+
+        Map<String, Object[]> productsMap = new LinkedHashMap<>();
+        Map<String, BigDecimal> partnerTotals = new LinkedHashMap<>();
+        Map<String, BigDecimal> dailyRevenue = new TreeMap<>();
+        List<Map<String, Object>> salesLedger = new ArrayList<>();
+
+        for (Transaction t : txs) {
+            if ("UNPAID".equalsIgnoreCase(t.getStatus())) continue;
+            BigDecimal rev = t.getFinalPrice() != null ? t.getFinalPrice() : BigDecimal.ZERO;
+            BigDecimal cost = t.getCostPrice() != null ? t.getCostPrice() : BigDecimal.ZERO;
+            BigDecimal grossProfit = rev.subtract(cost);
+
+            BigDecimal pShare = t.getPartnerShare() != null ? t.getPartnerShare() : BigDecimal.ZERO;
+            BigDecimal cShare = t.getCpmShare() != null ? t.getCpmShare() : BigDecimal.ZERO;
+
+            if (pShare.compareTo(BigDecimal.ZERO) == 0 && cShare.compareTo(BigDecimal.ZERO) == 0 && grossProfit.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal split = t.getPartnerSplitPct() != null ? t.getPartnerSplitPct() : new BigDecimal("50.00");
+                pShare = grossProfit.multiply(split).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+                cShare = grossProfit.subtract(pShare);
+            }
+
+            totalGrossRevenue = totalGrossRevenue.add(rev);
+            totalCost = totalCost.add(cost);
+            totalPartnerShare = totalPartnerShare.add(pShare);
+            totalCpmShare = totalCpmShare.add(cShare);
+            totalUnitsSold++;
+
+            boolean isSettled = "PAID".equalsIgnoreCase(t.getPartnerSettlementStatus());
+            if (isSettled) {
+                totalSettledPartnerShare = totalSettledPartnerShare.add(pShare);
+            } else {
+                totalUnsettledPartnerShare = totalUnsettledPartnerShare.add(pShare);
+            }
+
+            String pName = t.getPartnerName() != null && !t.getPartnerName().isBlank() ? t.getPartnerName() : "Pickle Gear";
+            partnerTotals.put(pName, partnerTotals.getOrDefault(pName, BigDecimal.ZERO).add(pShare));
+
+            if (t.getVariant() != null) {
+                String sku = t.getVariant().getSku();
+                String name = (t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : sku);
+                Object[] pArr = productsMap.computeIfAbsent(sku, k -> new Object[]{name, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO});
+                pArr[1] = ((int) pArr[1]) + 1;
+                pArr[2] = ((BigDecimal) pArr[2]).add(rev);
+                pArr[3] = ((BigDecimal) pArr[3]).add(grossProfit);
+                pArr[4] = ((BigDecimal) pArr[4]).add(cShare);
+                pArr[5] = ((BigDecimal) pArr[5]).add(pShare);
+            }
+
+            if (t.getTransactionDate() != null) {
+                String dayKey = t.getTransactionDate().toLocalDate().toString();
+                dailyRevenue.put(dayKey, dailyRevenue.getOrDefault(dayKey, BigDecimal.ZERO).add(rev));
+            }
+
+            Map<String, Object> ledgerItem = new LinkedHashMap<>();
+            ledgerItem.put("id", t.getId());
+            ledgerItem.put("orderId", t.getTransactionId() != null ? t.getTransactionId() : "TX-" + t.getId());
+            ledgerItem.put("date", t.getTransactionDate());
+            ledgerItem.put("customerName", t.getCustomerName());
+            ledgerItem.put("sku", t.getVariant() != null ? t.getVariant().getSku() : "N/A");
+            ledgerItem.put("productName", t.getVariant() != null && t.getVariant().getProduct() != null ? t.getVariant().getProduct().getBrandName() + " " + t.getVariant().getProduct().getModelName() : "Item");
+            ledgerItem.put("finalPrice", rev);
+            ledgerItem.put("costPrice", cost);
+            ledgerItem.put("grossProfit", grossProfit);
+            ledgerItem.put("partnerName", pName);
+            ledgerItem.put("partnerSplitPct", t.getPartnerSplitPct() != null ? t.getPartnerSplitPct() : new BigDecimal("50.00"));
+            ledgerItem.put("partnerShare", pShare);
+            ledgerItem.put("cpmShare", cShare);
+            ledgerItem.put("settlementStatus", isSettled ? "PAID" : "UNPAID");
+            ledgerItem.put("paymentMethod", t.getPaymentMethod());
+            salesLedger.add(ledgerItem);
+        }
+
+        List<StockBatch> partnerBatches = stockBatchRepository.findAllPartnerBatchesWithDetails();
+        if (partnerName != null && !partnerName.isBlank() && !"ALL".equalsIgnoreCase(partnerName)) {
+            final String filterName = partnerName.trim().toLowerCase();
+            partnerBatches = partnerBatches.stream()
+                    .filter(b -> b.getPartnerName() != null && b.getPartnerName().toLowerCase().contains(filterName))
+                    .toList();
+        }
+
+        int activePartnerUnitsOnHand = 0;
+        BigDecimal partnerStockCostOnHand = BigDecimal.ZERO;
+        Map<String, Integer> onHandByProduct = new HashMap<>();
+
+        for (StockBatch b : partnerBatches) {
+            int rem = b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0;
+            if (rem > 0) {
+                activePartnerUnitsOnHand += rem;
+                BigDecimal unitCost = b.getAcquisitionPrice() != null ? b.getAcquisitionPrice() : BigDecimal.ZERO;
+                partnerStockCostOnHand = partnerStockCostOnHand.add(unitCost.multiply(BigDecimal.valueOf(rem)));
+                if (b.getVariant() != null && b.getVariant().getSku() != null) {
+                    onHandByProduct.merge(b.getVariant().getSku(), rem, Integer::sum);
+                }
+            }
+        }
+
+        BigDecimal totalGrossProfit = totalGrossRevenue.subtract(totalCost);
+        BigDecimal marginPct = totalGrossRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? totalGrossProfit.divide(totalGrossRevenue, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                : BigDecimal.ZERO;
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalGrossRevenue", totalGrossRevenue);
+        summary.put("totalCost", totalCost);
+        summary.put("totalGrossProfit", totalGrossProfit);
+        summary.put("marginPct", marginPct);
+        summary.put("totalPartnerShare", totalPartnerShare);
+        summary.put("totalCpmShare", totalCpmShare);
+        summary.put("totalSettledPartnerShare", totalSettledPartnerShare);
+        summary.put("totalUnsettledPartnerShare", totalUnsettledPartnerShare);
+        summary.put("unitsSold", totalUnitsSold);
+        summary.put("unitsOnHand", activePartnerUnitsOnHand);
+        summary.put("stockCostOnHand", partnerStockCostOnHand);
+
+        List<Map<String, Object>> productBreakdown = productsMap.entrySet().stream()
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("sku", e.getKey());
+                    m.put("name", e.getValue()[0]);
+                    m.put("unitsSold", e.getValue()[1]);
                     m.put("revenue", e.getValue()[2]);
-                    m.put("profit", e.getValue()[3]);
+                    m.put("grossProfit", e.getValue()[3]);
+                    m.put("cpmShare", e.getValue()[4]);
+                    m.put("partnerShare", e.getValue()[5]);
+                    m.put("unitsOnHand", onHandByProduct.getOrDefault(e.getKey(), 0));
                     return m;
                 })
                 .sorted((a, b) -> ((BigDecimal) b.get("revenue")).compareTo((BigDecimal) a.get("revenue")))
@@ -560,13 +926,30 @@ public class AdminController {
                 .map(e -> Map.of("date", (Object) e.getKey(), "revenue", (Object) e.getValue()))
                 .toList();
 
-        Map<String, Object> res = new LinkedHashMap<>();
-        res.put("summary", summary);
-        res.put("paymentMethods", paymentMethods);
-        res.put("topProducts", topProducts);
-        res.put("trend", trend);
-        res.put("totalTransactionsCount", txs.size());
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("summary", summary);
+        response.put("partnerTotals", partnerTotals);
+        response.put("productBreakdown", productBreakdown);
+        response.put("trend", trend);
+        response.put("salesLedger", salesLedger);
 
-        return ResponseEntity.ok(res);
+        return ResponseEntity.ok(response);
+    }
+
+    // ─── POST /api/admin/partner-transactions/{id}/settle ──────────────────────
+    @PostMapping("/partner-transactions/{id}/settle")
+    public ResponseEntity<?> togglePartnerSettlement(@PathVariable Long id, @RequestParam(required = false) String status) {
+        return transactionRepository.findById(id).map(t -> {
+            String newStatus = (status != null && !status.isBlank())
+                    ? status.toUpperCase()
+                    : ("PAID".equalsIgnoreCase(t.getPartnerSettlementStatus()) ? "UNPAID" : "PAID");
+            t.setPartnerSettlementStatus(newStatus);
+            transactionRepository.save(t);
+            return ResponseEntity.ok(Map.of(
+                "id", t.getId(),
+                "partnerSettlementStatus", newStatus,
+                "message", "Partner settlement updated to " + newStatus
+            ));
+        }).orElse(ResponseEntity.notFound().build());
     }
 }

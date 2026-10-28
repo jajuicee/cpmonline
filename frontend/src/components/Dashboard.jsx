@@ -28,6 +28,7 @@ import {
     DollarSign,
     CreditCard,
     Send,
+    Handshake,
     Wallet
 } from 'lucide-react';
 
@@ -146,7 +147,7 @@ const Dashboard = () => {
                     { name: 'HQ Direct POS',        path: '/orders?mode=hq',          icon: ShoppingCart },
                     { name: 'Master Inventory',     path: '/manage-inventory',        icon: ClipboardList },
                     { name: 'Direct Order History', path: '/history?mode=hq',         icon: History },
-                    { name: 'HQ Direct Analytics',  path: '/analytics?mode=hq',       icon: TrendingUp },
+                    { name: 'Main Admin Analytics',     path: '/analytics?mode=hq',       icon: TrendingUp },
                 ]
             },
             {
@@ -155,6 +156,7 @@ const Dashboard = () => {
                     { name: 'Branch Stores',        path: '/branches',                icon: Store },
                     { name: 'Stock Allocations',    path: '/branches?tab=allocations',icon: Boxes },
                     { name: 'Batch Profit & P&L',   path: '/analytics?tab=batch-profit', icon: DollarSign },
+                    { name: 'Partner Items (50/50)',path: '/analytics?tab=partner',       icon: Handshake },
                     { name: 'Branch Sales',         path: '/branch-sales',            icon: BarChart2 },
                 ]
             },

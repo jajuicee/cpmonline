@@ -19,7 +19,8 @@ import {
     CreditCard,
     ChevronRight,
     ArrowUpRight,
-    PackagePlus
+    PackagePlus,
+    Key
 } from 'lucide-react';
 
 const BranchesAdmin = () => {
@@ -32,6 +33,7 @@ const BranchesAdmin = () => {
     const [formName, setFormName] = useState('');
     const [formAddress, setFormAddress] = useState('');
     const [formContact, setFormContact] = useState('');
+    const [formPricePassword, setFormPricePassword] = useState('admin123');
     const [formActive, setFormActive] = useState(true);
 
     const [saving, setSaving] = useState(false);
@@ -77,11 +79,13 @@ const BranchesAdmin = () => {
             setFormName(branch.name || '');
             setFormAddress(branch.address || '');
             setFormContact(branch.contactInfo || '');
+            setFormPricePassword(branch.priceChangePassword || 'admin123');
             setFormActive(branch.active !== false);
         } else {
             setFormName('');
             setFormAddress('');
             setFormContact('');
+            setFormPricePassword('admin123');
             setFormActive(true);
         }
         setError('');
@@ -102,6 +106,7 @@ const BranchesAdmin = () => {
             name: formName.trim(),
             address: formAddress.trim(),
             contactInfo: formContact.trim(),
+            priceChangePassword: formPricePassword.trim() || 'admin123',
             active: formActive,
         };
 
@@ -249,6 +254,10 @@ const BranchesAdmin = () => {
                                                         <span>{b.contactInfo}</span>
                                                     </div>
                                                 )}
+                                                <div className="flex items-center gap-2">
+                                                    <Key size={13} className="text-stone-400 shrink-0" />
+                                                    <span className="font-mono text-[11px] text-stone-600">POS PWD: {b.priceChangePassword || 'admin123'}</span>
+                                                </div>
                                             </div>
 
                                             {/* KPI Metrics */}
@@ -382,6 +391,22 @@ const BranchesAdmin = () => {
                                     placeholder="e.g. 0917-123-4567"
                                     className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm font-medium text-stone-900 focus:outline-none focus:border-stone-900 focus:bg-white"
                                 />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-black uppercase tracking-wider text-stone-700 mb-1.5">
+                                    Cashier Price Change Password
+                                </label>
+                                <input
+                                    type="text"
+                                    value={formPricePassword}
+                                    onChange={(e) => setFormPricePassword(e.target.value)}
+                                    placeholder="admin123"
+                                    className="w-full bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2.5 text-sm font-mono font-medium text-stone-900 focus:outline-none focus:border-stone-900 focus:bg-white"
+                                />
+                                <p className="text-[11px] text-stone-400 mt-1 font-medium">
+                                    Required by cashiers to modify item prices in POS mode. Default: admin123
+                                </p>
                             </div>
 
                             <div className="pt-2">

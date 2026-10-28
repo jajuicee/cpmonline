@@ -1355,6 +1355,11 @@ const OrderHistory = () => {
                                                                 CONSIGNMENT
                                                             </span>
                                                         )}
+                                                        {group.items && group.items.some(i => i.partner) && (
+                                                            <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1">
+                                                                🤝 PARTNER (50/50)
+                                                            </span>
+                                                        )}
                                                         {item.isPaymentActivityOnly && (
                                                             <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
                                                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1618,9 +1623,18 @@ const OrderHistory = () => {
                                                                             >
                                                                                 <td className="py-2 text-zinc-500 font-mono w-24">{item.variant?.sku}</td>
                                                                                 <td className="py-2 font-bold text-zinc-800">
-                                                                                    {item.variant?.product
-                                                                                        ? `${item.variant.product.brandName} ${item.variant.product.modelName} ${item.variant?.color ? `(${item.variant.color})` : ''}`
-                                                                                        : '—'}
+                                                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                                                        <span>
+                                                                                            {item.variant?.product
+                                                                                                ? `${item.variant.product.brandName} ${item.variant.product.modelName} ${item.variant?.color ? `(${item.variant.color})` : ''}`
+                                                                                                : '—'}
+                                                                                        </span>
+                                                                                        {item.partner && (
+                                                                                            <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">
+                                                                                                🤝 {item.partnerName || 'Partner'} (50/50)
+                                                                                            </span>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </td>
                                                                                 <td className="py-2 font-mono text-xs text-center w-20">
                                                                                     {item.status === 'FULL' ? (

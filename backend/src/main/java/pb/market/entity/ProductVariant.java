@@ -69,6 +69,22 @@ public class ProductVariant {
     @Column(columnDefinition = "boolean default false")
     private boolean consigned = false;
 
+    // Default partner flag (e.g. Pickle Gear 50/50)
+    @Column(columnDefinition = "boolean default false")
+    private boolean partner = false;
+
+    @Column(name = "partner_name")
+    private String partnerName;
+
+    @Column(name = "partner_split_pct")
+    private BigDecimal partnerSplitPct = new BigDecimal("50.00");
+
+    @Transient
+    private Integer partnerStock = 0;
+
+    @Transient
+    private Integer ownedStock = 0;
+
     // Serialize the parent product (brand/model/category) but not its variants list
     // to avoid circular reference, and ignore Hibernate proxy handlers to prevent 500 errors on lazy loads.
     @JsonIgnoreProperties({"variants", "hibernateLazyInitializer", "handler"})

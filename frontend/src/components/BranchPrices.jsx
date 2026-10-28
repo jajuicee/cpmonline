@@ -12,8 +12,10 @@ import {
     Tag,
     Sparkles,
     Loader2,
-    TrendingUp
+    TrendingUp,
+    Key
 } from 'lucide-react';
+import BranchPasswordModal from './BranchPasswordModal';
 
 const formatCurrency = (val) =>
     `₱${Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -28,6 +30,7 @@ const BranchPrices = ({ products = [], refetchProducts }) => {
     const [savingId, setSavingId] = useState(null);
     const [successMessage, setSuccessMessage] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
+    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
     // Fetch existing overrides for this branch
     const fetchOverrides = async () => {
@@ -175,7 +178,16 @@ const BranchPrices = ({ products = [], refetchProducts }) => {
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setPasswordModalOpen(true)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400/40 font-black text-xs uppercase tracking-wider px-4 py-3 rounded-2xl flex items-center gap-2 transition-all cursor-pointer shadow-lg active:scale-95"
+                            title="Set or view password required for cashiers to change prices"
+                        >
+                            <Key size={16} />
+                            <span>Cashier Password</span>
+                        </button>
                         <div className="bg-stone-800/80 backdrop-blur-sm border border-stone-700/80 rounded-2xl px-5 py-3 text-center">
                             <span className="text-[10px] font-black uppercase tracking-wider text-stone-400 block">Active Overrides</span>
                             <span className="text-2xl font-black text-emerald-400">
@@ -385,6 +397,14 @@ const BranchPrices = ({ products = [], refetchProducts }) => {
                     </div>
                 )}
             </div>
+
+            {/* Cashier Password Management Modal */}
+            <BranchPasswordModal
+                isOpen={passwordModalOpen}
+                onClose={() => setPasswordModalOpen(false)}
+                branchId={currentBranchId || user?.branchId}
+                branchName={user?.branchName}
+            />
         </div>
     );
 };

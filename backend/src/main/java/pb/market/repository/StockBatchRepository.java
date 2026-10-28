@@ -115,7 +115,6 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
                                                    @Param("end") java.time.LocalDateTime end);
 
     // Per-supplier rollup of batches in a date range, split by consigned vs owned.
-    // Returns: supplier_id, consigned (boolean), count, total_units, total_cost, last_restocked_at
     @Query("SELECT b.supplier.id, b.consigned, COUNT(b), SUM(b.quantity), " +
            "SUM(b.quantity * b.acquisitionPrice), MAX(b.restockedAt) " +
            "FROM StockBatch b " +
@@ -129,4 +128,16 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
     @Query("SELECT b.supplier.id, MAX(b.restockedAt) FROM StockBatch b " +
            "WHERE b.supplier.id IS NOT NULL GROUP BY b.supplier.id")
     List<Object[]> findLastPurchaseDateBySupplier();
+
+    // ── Partner Queries ────────────────────────────────────────────────────────
+    @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' AND s.partner = true GROUP BY s.variant.id")
+    List<Object[]> sumPartnerRemainingQuantityByVariantId();
+
+    @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' AND s.partner = true " +
+           "AND (:branchId IS NULL OR s.branch.id = :branchId) GROUP BY s.variant.id")
+    List<Object[]> sumPartnerRemainingQuantityByVariantIdAndBranch(@Param("branchId") Long branchId);
+
+    @Query("SELECT b FROM StockBatch b JOIN FETCH b.variant v JOIN FETCH v.product LEFT JOIN FETCH b.supplier " +
+           "WHERE b.partner = true AND b.status = 'RECEIVED'")
+    List<StockBatch> findAllPartnerBatchesWithDetails();
 }

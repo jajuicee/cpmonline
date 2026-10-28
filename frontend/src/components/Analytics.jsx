@@ -4,6 +4,7 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import AdminBatchProfitAnalytics from './AdminBatchProfitAnalytics';
 import AdminHqDirectAnalytics from './AdminHqDirectAnalytics';
+import PartnerAnalytics from './PartnerAnalytics';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
     Legend, LabelList, PieChart, Pie, Cell
@@ -11,7 +12,7 @@ import {
 import {
     BarChart3, TrendingUp, DollarSign, Package, AlertCircle, RefreshCw, Trophy, Calendar,
     X, ChevronLeft, ChevronRight, CreditCard, ChevronDown, Store, PieChart as PieIcon, Layers,
-    Receipt, Sparkles, ShoppingCart
+    Receipt, Sparkles, ShoppingCart, Users, Handshake, ArrowRight
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
@@ -228,17 +229,22 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
     // Strict branch scope: when propBranchId is explicitly passed or logged in as a branch account
     const isExplicitBranchScope = propBranchId !== undefined || isBranch;
 
-    // Effective branch:
-    // 1) propBranchId if explicitly passed (e.g. from BranchDetail or wrapper)
-    // 2) user?.branchId if logged in as branch user
-    // 3) selectedBranchId for Admin (or null for Consolidated All Branches)
+    const isHqProp = propBranchId === 'HQ' || propBranchId === 0 || propBranchId === -1;
+    const isHqQuery = isAdmin && !isExplicitBranchScope && searchParams.get('mode') === 'hq';
+
+    const mode = (isAdmin && !isExplicitBranchScope && searchParams.get('tab') === 'partner')
+        ? 'partner'
+        : (isAdmin && !isExplicitBranchScope && searchParams.get('tab') === 'batch-profit')
+        ? 'batch-profit'
+        : (isHqQuery || isHqProp ? 'hq' : 'retail');
+
     const effectiveBranch = propBranchId !== undefined
         ? propBranchId
-        : (isBranch ? user?.branchId : selectedBranchId);
+        : (isBranch
+            ? user?.branchId
+            : (mode === 'hq' || selectedBranchId === 'HQ' || selectedBranchId === 0 ? 'HQ' : selectedBranchId));
 
-    const mode = (isAdmin && !isExplicitBranchScope && searchParams.get('tab') === 'batch-profit')
-        ? 'batch-profit'
-        : (isAdmin && !isExplicitBranchScope && searchParams.get('mode') === 'hq' ? 'hq' : 'retail');
+    const isHqScope = effectiveBranch === 'HQ' || effectiveBranch === 0 || effectiveBranch === -1;
 
     const [branches, setBranches] = useState([]);
     const [transactions, setTransactions] = useState([]);
@@ -267,13 +273,14 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
     // Resolved display branch name
     const currentBranchName = useMemo(() => {
         if (propBranchName) return propBranchName;
+        if (isHqScope) return 'Main Admin (Central HQ & Consignees)';
         if (effectiveBranch) {
             const found = branches.find(b => String(b.id) === String(effectiveBranch));
             if (found?.name) return found.name;
         }
         if (isBranch && user?.branchName) return user.branchName;
         return effectiveBranch ? `Branch #${effectiveBranch}` : null;
-    }, [propBranchName, effectiveBranch, branches, isBranch, user]);
+    }, [propBranchName, isHqScope, effectiveBranch, branches, isBranch, user]);
 
     useEffect(() => {
         const handler = (e) => { if (calendarRef.current && !calendarRef.current.contains(e.target)) setShowCalendar(false); };
@@ -322,16 +329,18 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
         setError('');
         const bounds = getDateBounds();
 
-        const branchParam = effectiveBranch ? `&branchId=${effectiveBranch}` : '';
+        const branchParam = isHqScope
+            ? '&onlyHq=true&branchId=0'
+            : (effectiveBranch ? `&branchId=${effectiveBranch}` : '');
         const txUrl = bounds
             ? `/api/transactions?from=${bounds.from}&to=${bounds.to}&limit=10000${branchParam}`
             : `/api/transactions?limit=10000${branchParam}`;
         const plUrl = bounds
-            ? `/api/payment-logs?from=${bounds.from}&to=${bounds.to}${effectiveBranch ? `&branchId=${effectiveBranch}` : ''}`
-            : `/api/payment-logs${effectiveBranch ? `?branchId=${effectiveBranch}` : ''}`;
+            ? `/api/payment-logs?from=${bounds.from}&to=${bounds.to}${isHqScope ? '&onlyHq=true' : (effectiveBranch ? `&branchId=${effectiveBranch}` : '')}`
+            : `/api/payment-logs${isHqScope ? '?onlyHq=true' : (effectiveBranch ? `?branchId=${effectiveBranch}` : '')}`;
         const expUrl = bounds
-            ? `/api/expenses?from=${bounds.from}&to=${bounds.to}${effectiveBranch ? `&branchId=${effectiveBranch}` : ''}`
-            : `/api/expenses${effectiveBranch ? `?branchId=${effectiveBranch}` : ''}`;
+            ? `/api/expenses?from=${bounds.from}&to=${bounds.to}${isHqScope ? '&onlyHq=true' : (effectiveBranch ? `&branchId=${effectiveBranch}` : '')}`
+            : `/api/expenses${isHqScope ? '?onlyHq=true' : (effectiveBranch ? `?branchId=${effectiveBranch}` : '')}`;
 
         Promise.all([
             axios.get(txUrl).catch(() => ({ data: [] })),
@@ -349,7 +358,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
 
     useEffect(() => {
         fetchData();
-    }, [timeRange, customRange, effectiveBranch]);
+    }, [timeRange, customRange, effectiveBranch, mode]);
 
     const processedData = useMemo(() => {
         const now = new Date();
@@ -451,7 +460,9 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
         // ── Units & Product Rankings: from TRANSACTIONS ───────────────────────
         const validTxs = transactions.filter(t => {
             // Strict branch match if effectiveBranch is set
-            if (effectiveBranch && t.branch?.id && String(t.branch.id) !== String(effectiveBranch)) {
+            if (isHqScope) {
+                if (t.branch?.id) return false;
+            } else if (effectiveBranch && t.branch?.id && String(t.branch.id) !== String(effectiveBranch)) {
                 return false;
             }
 
@@ -620,7 +631,9 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             if (eDate && (eDate < cutoffDate || eDate > toDate)) return;
 
             // Strict branch filter match if effectiveBranch is set
-            if (effectiveBranch && e.branch?.id && String(e.branch.id) !== String(effectiveBranch)) {
+            if (isHqScope) {
+                if (e.branch?.id) return;
+            } else if (effectiveBranch && e.branch?.id && String(e.branch.id) !== String(effectiveBranch)) {
                 return;
             }
 
@@ -641,6 +654,69 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
         const operatingMargin = totalRevenue > 0 ? (netOperatingProfit / totalRevenue) * 100 : 0;
         const totalUnits = validTxs.length;
 
+        // ── Consignees Network Breakdown (for HQ / Main Admin scope) ──
+        const consigneesMap = {};
+        let consigneeTotalValue = 0;
+        let consigneeTotalCollected = 0;
+        let consigneeTotalPending = 0;
+        let consigneeTotalProfit = 0;
+
+        validTxs.forEach(t => {
+            const isConsignment = (t.transactionType || '').toUpperCase() === 'CONSIGNMENT' || t.consignee != null;
+            if (!isConsignment) return;
+            const finalPrice = Number(t.finalPrice || 0);
+            const downpayment = Number(t.downpayment || 0);
+            const collected = t.status === 'FULL' ? finalPrice : downpayment;
+            const balance = Math.max(0, finalPrice - collected);
+            const cost = Number(t.costPrice || t.variant?.acquisitionPrice || 0);
+            const realizedProfit = finalPrice > 0 ? Math.max(0, (finalPrice - cost) * (collected / finalPrice)) : 0;
+
+            consigneeTotalValue += finalPrice;
+            consigneeTotalCollected += collected;
+            consigneeTotalPending += balance;
+            consigneeTotalProfit += realizedProfit;
+
+            const cName = t.consignee?.name || t.customerName || 'Consignee';
+            const cId = t.consignee?.id || cName;
+            if (!consigneesMap[cId]) {
+                consigneesMap[cId] = {
+                    id: cId,
+                    name: cName,
+                    contactInfo: t.consignee?.contactInfo || '—',
+                    totalUnits: 0,
+                    unitsPaid: 0,
+                    unitsPending: 0,
+                    totalValue: 0,
+                    amountPaid: 0,
+                    balanceDue: 0,
+                    realizedProfit: 0
+                };
+            }
+            consigneesMap[cId].totalUnits += 1;
+            if (t.status === 'FULL') {
+                consigneesMap[cId].unitsPaid += 1;
+            } else {
+                consigneesMap[cId].unitsPending += 1;
+            }
+            consigneesMap[cId].totalValue += finalPrice;
+            consigneesMap[cId].amountPaid += collected;
+            consigneesMap[cId].balanceDue += balance;
+            consigneesMap[cId].realizedProfit += realizedProfit;
+        });
+
+        const consigneesList = Object.values(consigneesMap).map(c => ({
+            ...c,
+            settlementRatePct: c.totalValue > 0 ? (c.amountPaid / c.totalValue) * 100 : 0
+        })).sort((a, b) => b.balanceDue - a.balanceDue);
+
+        const consigneeSummary = {
+            totalValue: consigneeTotalValue,
+            amountPaid: consigneeTotalCollected,
+            balanceDue: consigneeTotalPending,
+            realizedProfit: consigneeTotalProfit,
+            count: consigneesList.length
+        };
+
         return {
             chartData,
             topProducts,
@@ -650,6 +726,8 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             operatingExpenses: totalOperatingExpenses,
             expensesByCategory,
             periodExpensesList,
+            consigneesList,
+            consigneeSummary,
             summary: {
                 revenue: totalRevenue,
                 grossProfit,
@@ -672,7 +750,9 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
         summary,
         operatingExpenses = 0,
         expensesByCategory = {},
-        periodExpensesList = []
+        periodExpensesList = [],
+        consigneesList = [],
+        consigneeSummary = { totalValue: 0, amountPaid: 0, balanceDue: 0, realizedProfit: 0, count: 0 }
     } = processedData;
     const paddleChartHeight = Math.max(400, topProducts.length * 40 + 50);
 
@@ -682,6 +762,19 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             {/* ─── Admin Master Operational Mode Switcher (Wholesale B2B vs Store Retail vs Direct Sales) ─── */}
             {isAdmin && !isExplicitBranchScope && (
                 <div className="flex flex-wrap items-center gap-1.5 p-1 bg-stone-100/90 rounded-2xl border border-stone-200/90 w-fit shrink-0 shadow-2xs">
+                    <button
+                        onClick={() => setSearchParams({ tab: 'partner' })}
+                        className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                            mode === 'partner'
+                                ? 'bg-stone-900 text-white shadow-sm'
+                                : 'text-stone-500 hover:text-stone-900'
+                        }`}
+                    >
+                        <Handshake size={14} className={mode === 'partner' ? "text-purple-400" : ""} />
+                        <span>Partner Items</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 font-bold uppercase tracking-wider">50/50 Profit</span>
+                    </button>
+
                     <button
                         onClick={() => setSearchParams({ tab: 'batch-profit' })}
                         className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
@@ -716,21 +809,21 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                         }`}
                     >
                         <ShoppingCart size={14} className={mode === 'hq' ? "text-amber-400" : ""} />
-                        <span>HQ Direct Retail Sales</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold uppercase tracking-wider">Master Storage</span>
+                        <span>Main Admin Analytics</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-bold uppercase tracking-wider">Central HQ</span>
                     </button>
                 </div>
+            )}
+
+            {mode === 'partner' && (
+                <PartnerAnalytics />
             )}
 
             {mode === 'batch-profit' && (
                 <AdminBatchProfitAnalytics branches={branches} />
             )}
 
-            {mode === 'hq' && (
-                <AdminHqDirectAnalytics />
-            )}
-
-            {mode === 'retail' && (
+            {(mode === 'retail' || mode === 'hq') && (
                 <>
             {/* Header & Controls */}
             <div className="flex flex-wrap justify-between items-center gap-4 shrink-0">
@@ -740,33 +833,53 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                         <span>
                             {isExplicitBranchScope
                                 ? `${currentBranchName || 'Branch'} Performance Analytics & P&L`
-                                : 'Performance Analytics & P&L'}
+                                : isHqScope
+                                    ? 'Main Admin Performance Analytics & P&L'
+                                    : 'Performance Analytics & P&L'}
                         </span>
                     </h2>
-                    {isExplicitBranchScope && (
-                        <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs flex items-center gap-1.5">
-                            <Store size={12} className="text-emerald-600" />
-                            <span>{currentBranchName || 'Assigned Branch Scope'}</span>
+                    {(isExplicitBranchScope || isHqScope) && (
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-2xs flex items-center gap-1.5 ${
+                            isHqScope
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        }`}>
+                            {isHqScope ? (
+                                <>
+                                    <ShoppingCart size={12} className="text-amber-600" />
+                                    <span>Central HQ Shop & Consignees</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Store size={12} className="text-emerald-600" />
+                                    <span>{currentBranchName || 'Assigned Branch Scope'}</span>
+                                </>
+                            )}
                         </span>
                     )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                     {/* Branch Filter Selector (for Admin in consolidated mode only) */}
-                    {isAdmin && !isExplicitBranchScope && (
+                    {isAdmin && !isExplicitBranchScope && mode !== 'hq' && (
                         <div className="relative">
                             <select
-                                value={effectiveBranch ? String(effectiveBranch) : 'ALL'}
+                                value={isHqScope ? 'HQ' : (effectiveBranch ? String(effectiveBranch) : 'ALL')}
                                 onChange={(e) => {
                                     const val = e.target.value;
-                                    const nextId = (val === 'ALL' || !val) ? null : Number(val);
-                                    if (setSelectedBranchId) {
-                                        setSelectedBranchId(nextId);
+                                    if (val === 'HQ') {
+                                        setSearchParams({ mode: 'hq' });
+                                        if (setSelectedBranchId) setSelectedBranchId('HQ');
+                                    } else {
+                                        if (mode === 'hq') setSearchParams({});
+                                        const nextId = (val === 'ALL' || !val) ? null : Number(val);
+                                        if (setSelectedBranchId) setSelectedBranchId(nextId);
                                     }
                                 }}
                                 className="appearance-none pl-8 pr-7 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-bold text-zinc-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
                             >
-                                <option value="ALL">🏢 All Branches (Consolidated)</option>
+                                <option value="ALL">🏢 All Branches (Consolidated Retail)</option>
+                                <option value="HQ">👑 Main Admin (Central HQ & Consignees)</option>
                                 {branches.map(b => (
                                     <option key={b.id} value={b.id}>📍 {b.name}</option>
                                 ))}
@@ -860,7 +973,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 <div className="flex flex-wrap items-center gap-2 shrink-0 p-2.5 bg-stone-50 border border-stone-200/80 rounded-xl" style={{ animation: 'fadeSlideIn 200ms ease' }}>
                     <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider text-[10px]">Active Filters:</span>
                     
-                    {effectiveBranch && (
+                    {effectiveBranch && !isHqScope && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
                             <Store size={11} className="text-emerald-600" />
                             {currentBranchName || `Branch #${effectiveBranch}`}
@@ -914,7 +1027,10 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
 
                     <button
                         onClick={() => {
-                            if (isAdmin && !isExplicitBranchScope) setSelectedBranchId(null);
+                            if (isAdmin && !isExplicitBranchScope) {
+                                setSelectedBranchId(null);
+                                if (mode === 'hq') setSearchParams({});
+                            }
                             setTypeFilter('All');
                             setPaymentFilter('All');
                             setCategoryFilter('All');
@@ -953,7 +1069,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                     value={loading ? '...' : <CurrencyDisplay value={summary.expenses} />}
                     icon={<Receipt size={18} className="text-rose-600" />}
                     bg="bg-rose-50"
-                    subtitle="Store rent, bills, supplies"
+                    subtitle={isHqScope ? "HQ rent, bills, supplies" : "Store rent, bills, supplies"}
                 />
                 <StatCard
                     title="Net Operating Profit"
@@ -976,7 +1092,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 <button onClick={() => setMainTab('paddles')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'paddles' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Product Rankings</button>
                 <button onClick={() => setMainTab('categories')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'categories' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Category Breakdown</button>
                 <button onClick={() => setMainTab('pnl')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'pnl' ? 'bg-white shadow-xs text-emerald-800 font-black' : 'text-zinc-500 hover:text-zinc-700'}`}>
-                    📊 Branch P&L Statement
+                    📊 {isHqScope ? 'Main Admin P&L Statement' : (effectiveBranch ? 'Branch P&L Statement' : 'Consolidated P&L Statement')}
                 </button>
             </div>
 
@@ -1322,14 +1438,18 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                                         Profit & Loss Statement
                                     </div>
                                     <h3 className="text-xl font-black text-stone-900 tracking-tight">
-                                        {effectiveBranch
-                                            ? `${currentBranchName || 'Branch'} P&L Statement`
-                                            : 'Consolidated P&L Statement (All Locations)'}
+                                        {isHqScope
+                                            ? 'Main Admin P&L Statement'
+                                            : effectiveBranch
+                                                ? `${currentBranchName || 'Branch'} P&L Statement`
+                                                : 'Consolidated P&L Statement (All Locations)'}
                                     </h3>
                                     <p className="text-xs text-stone-500 mt-0.5">
-                                        {effectiveBranch
-                                            ? `Comprehensive financial breakdown strictly for ${currentBranchName || 'this store branch'}`
-                                            : 'Income from sales collections minus inventory cost and branch operating overhead'}
+                                        {isHqScope
+                                            ? 'Comprehensive financial breakdown for Central HQ operations and consignee collections'
+                                            : effectiveBranch
+                                                ? `Comprehensive financial breakdown strictly for ${currentBranchName || 'this store branch'}`
+                                                : 'Income from sales collections minus inventory cost and branch operating overhead'}
                                     </p>
                                 </div>
 

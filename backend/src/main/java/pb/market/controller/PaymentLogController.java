@@ -23,9 +23,20 @@ public class PaymentLogController {
             @RequestParam(value = "from", required = false) String fromStr,
             @RequestParam(value = "to", required = false) String toStr,
             @RequestParam(value = "branchId", required = false) Long branchId,
+            @RequestParam(value = "onlyHq", required = false, defaultValue = "false") boolean onlyHq,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
+            onlyHq = false;
+        }
+        boolean isHq = onlyHq || (branchId != null && (branchId == 0L || branchId == -1L));
+        if (isHq) {
+            if (fromStr != null && toStr != null) {
+                LocalDateTime from = LocalDateTime.parse(fromStr);
+                LocalDateTime to = LocalDateTime.parse(toStr);
+                return paymentLogRepository.findByPaymentDateBetweenHq(from, to);
+            }
+            return paymentLogRepository.findAllHqOrdered();
         }
         if (fromStr != null && toStr != null) {
             LocalDateTime from = LocalDateTime.parse(fromStr);

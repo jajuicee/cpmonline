@@ -23,6 +23,9 @@ public class Branch {
     @Column(nullable = false)
     private boolean active = true;
 
+    @Column(name = "price_change_password")
+    private String priceChangePassword = "admin123";
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -30,5 +33,14 @@ public class Branch {
         if (this.createdAt == null) {
             this.createdAt = LocalDateTime.now();
         }
+        if (this.priceChangePassword == null || this.priceChangePassword.trim().isEmpty()) {
+            this.priceChangePassword = "admin123";
+        }
+    }
+
+    public String getEffectivePriceChangePassword() {
+        return (this.priceChangePassword != null && !this.priceChangePassword.trim().isEmpty())
+                ? this.priceChangePassword.trim()
+                : "admin123";
     }
 }

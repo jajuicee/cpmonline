@@ -23,6 +23,12 @@ public interface PaymentLogRepository extends JpaRepository<PaymentLog, Long> {
     @Query("SELECT pl FROM PaymentLog pl ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findAllOrdered();
 
+    @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t LEFT JOIN t.consignee c WHERE (t.branch IS NULL OR (c IS NOT NULL AND c.branch IS NULL)) ORDER BY pl.paymentDate DESC")
+    List<PaymentLog> findAllHqOrdered();
+
+    @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t LEFT JOIN t.consignee c WHERE pl.paymentDate BETWEEN :from AND :to AND (t.branch IS NULL OR (c IS NOT NULL AND c.branch IS NULL)) ORDER BY pl.paymentDate DESC")
+    List<PaymentLog> findByPaymentDateBetweenHq(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
+
     @Query("SELECT pl FROM PaymentLog pl JOIN pl.transaction t LEFT JOIN t.consignee c WHERE (:branchId IS NULL OR t.branch.id = :branchId OR (c IS NOT NULL AND c.branch.id = :branchId)) ORDER BY pl.paymentDate DESC")
     List<PaymentLog> findAllOrderedByBranch(@Param("branchId") Long branchId);
 

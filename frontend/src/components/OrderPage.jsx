@@ -6,9 +6,11 @@ import {
     AlertCircle, CheckCircle, Loader2, ClipboardList, Trash2,
     Printer, Receipt, Store, Layers, Plus, Minus, ArrowRight,
     RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split,
-    Pen, DollarSign, Calendar, Eye, Landmark, Smartphone, Building2, FileText
+    Pen, DollarSign, Calendar, Eye, EyeOff, Lock, Key, ShieldCheck,
+    Landmark, Smartphone, Building2, FileText
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import BranchPasswordModal from './BranchPasswordModal';
 
 const EMPTY_FORM = {
     customerName: '',
@@ -74,6 +76,18 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const [newPriceInput, setNewPriceInput]     = useState('');
     const [savingPrice, setSavingPrice]         = useState(false);
 
+    // --- CASHIER PRICE CHANGE AUTHORIZATION STATE ---
+    const [authModalOpen, setAuthModalOpen]             = useState(false);
+    const [pendingEditData, setPendingEditData]         = useState(null); // { variant, currentCartPrice }
+    const [authPassword, setAuthPassword]               = useState('');
+    const [authVerifying, setAuthVerifying]             = useState(false);
+    const [authError, setAuthError]                     = useState('');
+    const [showAuthPassword, setShowAuthPassword]       = useState(false);
+    const [verifiedPassword, setVerifiedPassword]       = useState('');
+
+    // --- BRANCH OWNER PASSWORD MODAL ---
+    const [branchPasswordModalOpen, setBranchPasswordModalOpen] = useState(false);
+
     // --- RECEIPT SYSTEM STATE ---
     const [completedReceipt, setCompletedReceipt] = useState(null);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -83,13 +97,59 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     };
 
     const openPriceEdit = (variant, currentCartPrice = null) => {
+        if (isCashier) {
+            // In cashier mode, ask for manager/branch password first
+            setPendingEditData({ variant, currentCartPrice });
+            setAuthPassword('');
+            setAuthError('');
+            setShowAuthPassword(false);
+            setAuthModalOpen(true);
+            return;
+        }
+
+        // Branch Owner or Admin can directly edit price
         setEditingVariant(variant);
         const p = currentCartPrice != null ? currentCartPrice : (variant.sellingPrice || '');
-        setNewPriceInput(p.toString());
+        setNewPriceInput(p != null ? p.toString() : '');
+        setVerifiedPassword('');
         setPriceModalOpen(true);
     };
 
-    const handleSavePrice = async (e) => {
+    const handleVerifyCashierAuth = async (e) => {
+        e.preventDefault();
+        if (!authPassword.trim()) {
+            setAuthError('Please enter the authorization password.');
+            return;
+        }
+
+        setAuthVerifying(true);
+        setAuthError('');
+
+        try {
+            const targetBranchId = activeBranchId || user?.branchId || 1;
+            const res = await axios.post('/api/branches/verify-price-password', {
+                password: authPassword.trim(),
+                branchId: targetBranchId
+            });
+
+            if (res.data?.valid) {
+                const { variant, currentCartPrice } = pendingEditData || {};
+                setVerifiedPassword(authPassword.trim());
+                setAuthModalOpen(false);
+                setEditingVariant(variant);
+                const p = currentCartPrice != null ? currentCartPrice : (variant?.sellingPrice || '');
+                setNewPriceInput(p != null ? p.toString() : '');
+                setPriceModalOpen(true);
+            }
+        } catch (err) {
+            console.error('Password verification failed:', err);
+            setAuthError(err.response?.data?.error || 'Incorrect password. Authorization failed.');
+        } finally {
+            setAuthVerifying(false);
+        }
+    };
+
+    const handleSavePrice = (e) => {
         e.preventDefault();
         if (!editingVariant) return;
         const val = parseFloat(newPriceInput);
@@ -98,34 +158,29 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             return;
         }
 
-        const targetBranchId = activeBranchId || user?.branchId || 1;
+        // Temporary price adjustment strictly for this transaction / active sale
+        setCart(prev => {
+            const exists = prev.find(c => c.variant.id === editingVariant.id);
+            if (exists) {
+                return prev.map(c =>
+                    c.variant.id === editingVariant.id ? { ...c, finalPrice: val } : c
+                );
+            }
+            return [...prev, {
+                variant: editingVariant,
+                qty: 1,
+                finalPrice: val,
+                paymentStatus: 'PAID',
+                downpayment: ''
+            }];
+        });
 
-        setSavingPrice(true);
-        try {
-            await axios.put(`/api/products/variants/${editingVariant.id}/branch-price`, {
-                sellingPrice: val,
-                branchId: targetBranchId
-            });
-
-            // Update in active cart if present
-            setCart(prev => prev.map(c =>
-                c.variant.id === editingVariant.id ? { ...c, finalPrice: val } : c
-            ));
-
-            setPriceModalOpen(false);
-            setStatus({
-                type: 'success',
-                message: `Selling price for "${editingVariant.displayName || editingVariant.sku}" updated to ${fmt(val)}.`
-            });
-
-            if (refetchProducts) refetchProducts();
-        } catch (err) {
-            console.error('Failed to update price:', err);
-            const errMsg = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to update branch selling price.';
-            alert(errMsg);
-        } finally {
-            setSavingPrice(false);
-        }
+        setPriceModalOpen(false);
+        setVerifiedPassword('');
+        setStatus({
+            type: 'success',
+            message: `Sale price for "${editingVariant.displayName || editingVariant.sku}" set to ${fmt(val)} for this transaction.`
+        });
     };
 
     const fetchConsignees = async () => {
@@ -137,6 +192,24 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             console.error('Failed to fetch consignees');
         }
     };
+
+    useEffect(() => {
+        try {
+            const savedSuccess = sessionStorage.getItem('pos_order_success');
+            if (savedSuccess) {
+                const parsed = JSON.parse(savedSuccess);
+                if (parsed.message) {
+                    setStatus({ type: 'success', message: parsed.message });
+                }
+                if (parsed.receipt) {
+                    setCompletedReceipt(parsed.receipt);
+                }
+                sessionStorage.removeItem('pos_order_success');
+            }
+        } catch (e) {
+            console.error('Failed to parse saved order success:', e);
+        }
+    }, []);
 
     useEffect(() => {
         if (refetchProducts) refetchProducts();
@@ -439,11 +512,24 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     branchName: isHqDirectMode ? 'Central HQ Direct Store (Master Inventory)' : (user?.branchName || 'Cebu Pickleball Market')
                 };
 
+                try {
+                    sessionStorage.setItem('pos_order_success', JSON.stringify({
+                        ticketNumber: generatedTransactionId,
+                        message: `Order #${generatedTransactionId} placed successfully! Ready for next order.`,
+                        receipt: receiptData
+                    }));
+                } catch (e) {
+                    console.error('Failed to store order success in sessionStorage:', e);
+                }
+
                 setCompletedReceipt(receiptData);
-                setShowReceiptModal(true);
-                setStatus({ type: 'success', message: `Order #${generatedTransactionId} placed successfully!` });
+                setStatus({ type: 'success', message: `Order #${generatedTransactionId} placed successfully! Refreshing...` });
                 resetForm();
-                if (refetchProducts) refetchProducts();
+
+                // Refresh the page automatically instead of requiring cashier to press "New Order"
+                setTimeout(() => {
+                    window.location.reload();
+                }, 500);
             } else if (failedItems.length < payloads.length) {
                 setStatus({ type: 'error', message: `Order partially placed — ${payloads.length - failedItems.length} of ${payloads.length} items saved. ${failedItems[0]}` });
                 if (refetchProducts) refetchProducts();
@@ -639,7 +725,28 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     )}
                 </div>
 
-                <div className="flex items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Branch Owner / Admin: Manage Cashier Price Password */}
+                    {(isBranch || isAdmin) && !isHqDirectMode && (
+                        <button
+                            type="button"
+                            onClick={() => setBranchPasswordModalOpen(true)}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-xl text-xs font-bold transition-all cursor-pointer border border-stone-200/80"
+                            title="Set or view password required for cashiers to change prices"
+                        >
+                            <Key size={13} className="text-emerald-600" />
+                            <span>Cashier Password</span>
+                        </button>
+                    )}
+
+                    {/* Cashier Mode Badge */}
+                    {isCashier && (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-800 rounded-xl text-xs font-bold border border-amber-200/80">
+                            <Lock size={12} className="text-amber-600" />
+                            <span>Cashier Mode</span>
+                        </div>
+                    )}
+
                     {cart.length > 0 && (
                         <button
                             onClick={resetForm}
@@ -671,9 +778,21 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         {status.type === 'success' ? <CheckCircle2 size={18} className="text-emerald-600" /> : <AlertCircle size={18} className="text-red-600" />}
                         <span>{status.message}</span>
                     </div>
-                    <button onClick={() => setStatus({ type: '', message: '' })} className="hover:opacity-75">
-                        <X size={15} />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {completedReceipt && status.type === 'success' && (
+                            <button
+                                type="button"
+                                onClick={() => setShowReceiptModal(true)}
+                                className="px-3 py-1.5 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 rounded-lg text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+                            >
+                                <Printer size={13} />
+                                <span>View / Print Receipt</span>
+                            </button>
+                        )}
+                        <button onClick={() => setStatus({ type: '', message: '' })} className="hover:opacity-75 cursor-pointer">
+                            <X size={15} />
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -797,7 +916,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                                     type="button"
                                                     onClick={() => openPriceEdit(item)}
                                                     className="group flex items-center justify-end gap-1 hover:opacity-80 transition-opacity cursor-pointer"
-                                                    title="Click to edit branch selling price"
+                                                    title="Click to adjust price for this sale"
                                                 >
                                                     <span className="text-base font-black text-emerald-600 font-mono block">
                                                         {fmt(item.sellingPrice)}
@@ -947,17 +1066,41 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                                     type="button"
                                                     onClick={() => openPriceEdit(item.variant, item.finalPrice)}
                                                     className="group flex items-center justify-end gap-1 hover:opacity-80 cursor-pointer"
-                                                    title="Click to change price"
+                                                    title="Click to adjust price for this sale"
                                                 >
-                                                    <span className="text-xs font-black text-emerald-600 font-mono">
+                                                    {Number(item.finalPrice) !== Number(item.variant.sellingPrice) && (
+                                                        <span className="text-[10px] text-stone-400 line-through font-mono mr-0.5">
+                                                            {fmt(item.variant.sellingPrice * item.qty)}
+                                                        </span>
+                                                    )}
+                                                    <span className={`text-xs font-black font-mono ${
+                                                        Number(item.finalPrice) !== Number(item.variant.sellingPrice)
+                                                            ? 'text-amber-600'
+                                                            : 'text-emerald-600'
+                                                    }`}>
                                                         {fmt(item.finalPrice * item.qty)}
                                                     </span>
-                                                    <Pen size={10} className="text-stone-400 group-hover:text-emerald-700" />
+                                                    <Pen size={10} className="text-stone-400 group-hover:text-amber-700" />
                                                 </button>
                                                 {item.qty > 1 && (
                                                     <span className="text-[10px] text-stone-400 font-medium block">
                                                         ({fmt(item.finalPrice)}/ea)
                                                     </span>
+                                                )}
+                                                {Number(item.finalPrice) !== Number(item.variant.sellingPrice) && (
+                                                    <div className="flex items-center justify-end gap-1 mt-0.5">
+                                                        <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 py-0.2 rounded border border-amber-200">
+                                                            Custom Price
+                                                        </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => updateCartItem(item.variant.id, 'finalPrice', item.variant.sellingPrice)}
+                                                            className="text-[9px] text-stone-400 hover:text-rose-600 underline cursor-pointer"
+                                                            title="Reset to standard catalog price"
+                                                        >
+                                                            Reset
+                                                        </button>
+                                                    </div>
                                                 )}
                                             </div>
                                         </div>
@@ -1380,22 +1523,115 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 </div>
             )}
 
-            {/* ===== PRICE EDIT MODAL ===== */}
+            {/* ===== CASHIER AUTHORIZATION MODAL ===== */}
+            {authModalOpen && pendingEditData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pos-ticket-no-print animate-fade-in">
+                    <div className="bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-stone-200 overflow-hidden">
+                        <div className="p-5 bg-stone-900 text-white flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                                    <Lock size={18} />
+                                </div>
+                                <div>
+                                    <h3 className="text-base font-black tracking-tight">Manager Authorization</h3>
+                                    <p className="text-xs text-stone-400">Cashier Mode Price Change</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setAuthModalOpen(false); setPendingEditData(null); }}
+                                className="text-stone-400 hover:text-white transition-colors cursor-pointer"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleVerifyCashierAuth} className="p-5 space-y-4">
+                            <div className="bg-stone-50 p-3 rounded-2xl border border-stone-200 text-xs space-y-1">
+                                <div className="font-black text-stone-900 text-xs truncate">
+                                    {pendingEditData.variant.productBrand || ''} {pendingEditData.variant.productModel || ''}
+                                </div>
+                                <div className="text-stone-500 font-medium text-[11px]">
+                                    {pendingEditData.variant.variantSpecs || pendingEditData.variant.sku}
+                                </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-stone-200/60 mt-1">
+                                    <span className="text-[11px] text-stone-400 font-medium">Current Selling Price:</span>
+                                    <span className="font-mono font-black text-emerald-600 text-xs">
+                                        {fmt(pendingEditData.currentCartPrice != null ? pendingEditData.currentCartPrice : pendingEditData.variant.sellingPrice)}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-black uppercase tracking-wider text-stone-700 mb-1.5">
+                                    Branch Owner / Manager Password
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        type={showAuthPassword ? 'text' : 'password'}
+                                        autoFocus
+                                        value={authPassword}
+                                        onChange={(e) => { setAuthPassword(e.target.value); setAuthError(''); }}
+                                        placeholder="Enter password (default: admin123)"
+                                        className="w-full pl-3.5 pr-10 py-2.5 bg-white border border-stone-300 rounded-xl font-mono text-sm font-medium text-stone-900 focus:outline-none focus:border-stone-900 focus:ring-1 focus:ring-stone-900"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAuthPassword(!showAuthPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 cursor-pointer"
+                                    >
+                                        {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                    </button>
+                                </div>
+                                <p className="text-[11px] text-stone-400 mt-1">
+                                    Default password is <span className="font-mono font-bold text-stone-600">admin123</span>
+                                </p>
+                            </div>
+
+                            {authError && (
+                                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+                                    <AlertCircle size={15} className="shrink-0 text-rose-500" />
+                                    <span>{authError}</span>
+                                </div>
+                            )}
+
+                            <div className="pt-2 flex items-center justify-end gap-2.5">
+                                <button
+                                    type="button"
+                                    onClick={() => { setAuthModalOpen(false); setPendingEditData(null); }}
+                                    className="px-4 py-2.5 rounded-xl border border-stone-200 text-stone-700 font-bold text-xs hover:bg-stone-100 transition-colors cursor-pointer"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={authVerifying || !authPassword}
+                                    className="px-5 py-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                                >
+                                    {authVerifying ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+                                    <span>Authorize</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ===== TEMPORARY SALE PRICE ADJUSTMENT MODAL ===== */}
             {priceModalOpen && editingVariant && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 pos-ticket-no-print animate-fade-in">
                     <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-stone-200 overflow-hidden">
                         <div className="p-6 bg-stone-900 text-white flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black">
+                                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-black">
                                     ₱
                                 </div>
                                 <div>
-                                    <h3 className="text-base font-black tracking-tight">Edit Branch Selling Price</h3>
-                                    <p className="text-xs text-stone-400">Updates live POS catalog and future sales</p>
+                                    <h3 className="text-base font-black tracking-tight">Adjust Price (This Sale Only)</h3>
+                                    <p className="text-xs text-stone-400">Temporary price — catalog price stays unchanged</p>
                                 </div>
                             </div>
                             <button
-                                onClick={() => setPriceModalOpen(false)}
+                                onClick={() => { setPriceModalOpen(false); setVerifiedPassword(''); }}
                                 className="text-stone-400 hover:text-white transition-colors cursor-pointer"
                             >
                                 <X size={20} />
@@ -1403,6 +1639,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         </div>
 
                         <form onSubmit={handleSavePrice} className="p-6 space-y-4">
+                            {isCashier && (
+                                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+                                    <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
+                                    <span>Manager Authorized • Ready to set custom price</span>
+                                </div>
+                            )}
+
                             <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200 text-xs space-y-1">
                                 <div className="font-black text-stone-900 text-sm">
                                     {editingVariant.productBrand} {editingVariant.productModel}
@@ -1410,14 +1653,15 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 <div className="text-stone-500 font-medium">
                                     {editingVariant.variantSpecs}
                                 </div>
-                                <div className="font-mono text-stone-400 text-[11px]">
-                                    SKU: {editingVariant.sku}
+                                <div className="font-mono text-stone-400 text-[11px] flex items-center justify-between pt-1 border-t border-stone-200/60 mt-1">
+                                    <span>SKU: {editingVariant.sku}</span>
+                                    <span>Standard Catalog Price: <strong className="text-stone-800">{fmt(editingVariant.sellingPrice)}</strong></span>
                                 </div>
                             </div>
 
                             <div>
                                 <label className="block text-xs font-black uppercase tracking-wider text-stone-700 mb-1.5">
-                                    New Branch Selling Price (₱)
+                                    Temporary Sale Price per Unit (₱)
                                 </label>
                                 <div className="relative">
                                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-black text-stone-500 text-sm">
@@ -1434,33 +1678,39 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         className="w-full pl-8 pr-4 py-3 bg-white border border-stone-300 rounded-xl font-mono text-base font-black text-stone-900 focus:outline-none focus:border-stone-900 focus:ring-1 focus:ring-stone-900"
                                     />
                                 </div>
-                                <p className="text-[11px] text-stone-400 mt-1">
-                                    This customized price will apply specifically to {user?.branchName || branchDisplayName || 'your branch'}.
+                                <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 mt-2 font-medium">
+                                    💡 This custom price applies <strong>strictly to the current sale</strong> and will not overwrite the branch catalog price.
                                 </p>
                             </div>
 
                             <div className="pt-2 flex items-center justify-end gap-2.5">
                                 <button
                                     type="button"
-                                    onClick={() => setPriceModalOpen(false)}
-                                    disabled={savingPrice}
+                                    onClick={() => { setPriceModalOpen(false); setVerifiedPassword(''); }}
                                     className="px-4 py-2.5 rounded-xl border border-stone-200 text-stone-700 font-bold text-xs hover:bg-stone-100 transition-colors cursor-pointer"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     type="submit"
-                                    disabled={savingPrice}
-                                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                    className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                                 >
-                                    {savingPrice ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                                    <span>Save Price</span>
+                                    <Check size={14} />
+                                    <span>Apply to Sale</span>
                                 </button>
                             </div>
                         </form>
                     </div>
                 </div>
             )}
+
+            {/* ===== BRANCH OWNER CASHIER PASSWORD MODAL ===== */}
+            <BranchPasswordModal
+                isOpen={branchPasswordModalOpen}
+                onClose={() => setBranchPasswordModalOpen(false)}
+                branchId={activeBranchId}
+                branchName={user?.branchName}
+            />
 
             {/* ===== COMPLETED ORDER RECEIPT MODAL ===== */}
             {showReceiptModal && completedReceipt && (
@@ -1591,11 +1841,14 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setShowReceiptModal(false)}
+                                onClick={() => {
+                                    setShowReceiptModal(false);
+                                    window.location.reload();
+                                }}
                                 className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                             >
-                                <Plus size={15} />
-                                <span>New Order</span>
+                                <RefreshCw size={15} />
+                                <span>New Order (Refresh)</span>
                             </button>
                         </div>
                     </div>

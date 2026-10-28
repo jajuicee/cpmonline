@@ -92,6 +92,27 @@ public class TransactionController {
         transaction.setConsigned(oldestBatch.isConsigned());
         transaction.setStockBatch(oldestBatch);
 
+        // Partner item tracking (e.g. 50/50 profit split with Pickle Gear)
+        transaction.setPartner(oldestBatch.isPartner());
+        transaction.setPartnerName(oldestBatch.getPartnerName());
+        BigDecimal splitPct = oldestBatch.getPartnerSplitPct() != null ? oldestBatch.getPartnerSplitPct() : new BigDecimal("50.00");
+        transaction.setPartnerSplitPct(splitPct);
+        if (oldestBatch.isPartner()) {
+            BigDecimal fp = transaction.getFinalPrice() != null ? transaction.getFinalPrice() : BigDecimal.ZERO;
+            BigDecimal cp = oldestBatch.getAcquisitionPrice() != null ? oldestBatch.getAcquisitionPrice() : BigDecimal.ZERO;
+            BigDecimal profit = fp.subtract(cp);
+            if (profit.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal pShare = profit.multiply(splitPct).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+                BigDecimal cShare = profit.subtract(pShare);
+                transaction.setPartnerShare(pShare);
+                transaction.setCpmShare(cShare);
+            } else {
+                transaction.setPartnerShare(BigDecimal.ZERO);
+                transaction.setCpmShare(profit);
+            }
+            transaction.setPartnerSettlementStatus("UNPAID");
+        }
+
         if ("CONSIGNMENT".equals(transaction.getTransactionType()) && transaction.getConsignee() != null && transaction.getConsignee().getId() != null) {
             Consignee consignee = consigneeRepository.findById(transaction.getConsignee().getId()).orElse(null);
             transaction.setConsignee(consignee);
@@ -153,13 +174,14 @@ public class TransactionController {
             onlyHq = false;
         }
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
-        if (onlyHq) {
+        boolean isHq = onlyHq || (branchId != null && (branchId == 0L || branchId == -1L));
+        if (isHq) {
             if (fromStr != null && toStr != null) {
                 java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
                 java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
-                return transactionRepository.findAllWithDetailsByActivityDateHq(from, to, page);
+                return transactionRepository.findAllMainAdminTransactionsInRange(from, to, page);
             }
-            return transactionRepository.findAllWithDetailsHq(page);
+            return transactionRepository.findAllMainAdminTransactions(page);
         }
         if (fromStr != null && toStr != null) {
             java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);

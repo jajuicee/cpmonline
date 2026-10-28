@@ -22,6 +22,7 @@ public class ExpenseController {
             @RequestParam(required = false) Long branchId,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
+            @RequestParam(required = false, defaultValue = "false") boolean onlyHq,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
@@ -37,7 +38,7 @@ public class ExpenseController {
         }
 
         // Specific filter for Admin-only expenses (no branch assigned)
-        if (branchId != null && (branchId == 0L || branchId == -1L)) {
+        if (onlyHq || (branchId != null && (branchId == 0L || branchId == -1L))) {
             if (fromDt != null || toDt != null) {
                 java.time.LocalDateTime f = fromDt != null ? fromDt : java.time.LocalDateTime.of(2020, 1, 1, 0, 0);
                 java.time.LocalDateTime t = toDt != null ? toDt : java.time.LocalDateTime.now();

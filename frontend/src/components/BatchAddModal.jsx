@@ -7,7 +7,11 @@ import {
 
 const EMPTY_FORM = {
     supplierId: '',
+    ownershipType: 'owned',
+    partnerName: 'Pickle Gear',
+    partnerSplitPct: '50',
     consigned: false,
+    partner: false,
     status: 'RECEIVED',
     eta: '',
     totalExpense: ''
@@ -93,16 +97,25 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
         setSubmitting(true);
         setStatus({ type: '', message: '' });
 
+        const isConsigned = formData.ownershipType === 'consigned';
+        const isPartner = formData.ownershipType === 'partner';
         const payload = {
             supplierId: formData.supplierId ? parseInt(formData.supplierId) : null,
-            consigned: formData.consigned,
+            consigned: isConsigned,
+            partner: isPartner,
+            partnerName: isPartner ? (formData.partnerName || 'Pickle Gear') : null,
+            partnerSplitPct: isPartner ? (parseFloat(formData.partnerSplitPct) || 50) : null,
             status: formData.status,
             eta: formData.status === 'INCOMING' ? formData.eta : null,
             totalExpense: parsedTotalExpense,
             items: cart.map(item => ({
                 variantId: item.variant.id,
                 quantity: parseInt(item.qty) || 1,
-                baseCost: parseFloat(item.baseCost) || 0
+                baseCost: parseFloat(item.baseCost) || 0,
+                consigned: isConsigned,
+                partner: isPartner,
+                partnerName: isPartner ? (formData.partnerName || 'Pickle Gear') : null,
+                partnerSplitPct: isPartner ? (parseFloat(formData.partnerSplitPct) || 50) : null
             }))
         };
 
@@ -280,24 +293,57 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
 
                         <div>
                             <label className="block text-sm font-bold text-zinc-700 mb-2">Ownership & Status</label>
-                            <div className="flex flex-col sm:flex-row gap-3">
-                                <div className="flex flex-1 gap-2 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
+                            <div className="space-y-2">
+                                <div className="grid grid-cols-3 gap-1.5 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
                                     <button
                                         type="button"
-                                        onClick={() => setFormData(f => ({ ...f, consigned: false }))}
-                                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${!formData.consigned ? 'bg-white text-green-700 shadow border border-stone-200' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'owned', consigned: false, partner: false }))}
+                                        className={`py-2 rounded-lg text-xs font-bold transition-all ${formData.ownershipType === 'owned' ? 'bg-white text-green-700 shadow border border-stone-200' : 'text-zinc-500 hover:text-zinc-700'}`}
                                     >
                                         ✅ Owned
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setFormData(f => ({ ...f, consigned: true }))}
-                                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${formData.consigned ? 'bg-amber-100 text-amber-800 shadow border border-amber-200' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'partner', consigned: false, partner: true }))}
+                                        className={`py-2 rounded-lg text-xs font-bold transition-all ${formData.ownershipType === 'partner' ? 'bg-purple-100 text-purple-800 shadow border border-purple-200' : 'text-zinc-500 hover:text-zinc-700'}`}
+                                    >
+                                        🤝 Partner (50/50)
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'consigned', consigned: true, partner: false }))}
+                                        className={`py-2 rounded-lg text-xs font-bold transition-all ${formData.ownershipType === 'consigned' ? 'bg-amber-100 text-amber-800 shadow border border-amber-200' : 'text-zinc-500 hover:text-zinc-700'}`}
                                     >
                                         📦 Consigned
                                     </button>
                                 </div>
-                                <div className="flex flex-1 gap-2 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
+
+                                {formData.ownershipType === 'partner' && (
+                                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-2">
+                                        <div className="flex justify-between items-center text-xs font-bold text-purple-900">
+                                            <span>Partner Attribution</span>
+                                            <span className="text-[10px] bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded font-black">50% Net Profit Share</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-purple-800 mb-1">Partner Name</label>
+                                                <input type="text" value={formData.partnerName || ''}
+                                                    onChange={e => setFormData({ ...formData, partnerName: e.target.value })}
+                                                    className="w-full px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-purple-600"
+                                                    placeholder="e.g. Pickle Gear" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[11px] font-bold text-purple-800 mb-1">Partner Share %</label>
+                                                <input type="number" min="1" max="99" value={formData.partnerSplitPct || '50'}
+                                                    onChange={e => setFormData({ ...formData, partnerSplitPct: e.target.value })}
+                                                    className="w-full px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-purple-600"
+                                                    placeholder="50" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex gap-2 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
                                     <button
                                         type="button"
                                         onClick={() => setFormData(f => ({ ...f, status: 'RECEIVED' }))}

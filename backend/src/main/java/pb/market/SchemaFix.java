@@ -25,6 +25,11 @@ public class SchemaFix implements CommandLineRunner {
                 "Updated users_role_check constraint to include CASHIER.");
 
         // ── Column migrations (idempotent) ─────────────────────────────────────
+        safeExecute("ALTER TABLE branches ADD COLUMN IF NOT EXISTS price_change_password VARCHAR(255) DEFAULT 'admin123'",
+                "Column 'price_change_password' checked/added to 'branches' table.");
+        safeExecute("UPDATE branches SET price_change_password = 'admin123' WHERE price_change_password IS NULL OR price_change_password = ''",
+                "Backfilled existing branches with default 'admin123' price_change_password.");
+
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS consigned BOOLEAN DEFAULT FALSE",
                 "Column 'consigned' checked/added to 'transactions' table.");
 
@@ -42,6 +47,34 @@ public class SchemaFix implements CommandLineRunner {
 
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS notes TEXT",
                 "Column 'notes' checked/added to 'transactions' table.");
+
+        // ── Partner Gear (Co-ownership & 50/50 Split) Migrations ───────────────
+        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS partner BOOLEAN DEFAULT FALSE",
+                "Column 'partner' checked/added to 'stock_batches' table.");
+        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS partner_name VARCHAR(255)",
+                "Column 'partner_name' checked/added to 'stock_batches' table.");
+        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS partner_split_pct DECIMAL(5,2) DEFAULT 50.00",
+                "Column 'partner_split_pct' checked/added to 'stock_batches' table.");
+
+        safeExecute("ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS partner BOOLEAN DEFAULT FALSE",
+                "Column 'partner' checked/added to 'product_variants' table.");
+        safeExecute("ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS partner_name VARCHAR(255)",
+                "Column 'partner_name' checked/added to 'product_variants' table.");
+        safeExecute("ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS partner_split_pct DECIMAL(5,2) DEFAULT 50.00",
+                "Column 'partner_split_pct' checked/added to 'product_variants' table.");
+
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner BOOLEAN DEFAULT FALSE",
+                "Column 'partner' checked/added to 'transactions' table.");
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_name VARCHAR(255)",
+                "Column 'partner_name' checked/added to 'transactions' table.");
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_split_pct DECIMAL(5,2) DEFAULT 50.00",
+                "Column 'partner_split_pct' checked/added to 'transactions' table.");
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_share DECIMAL(19,2) DEFAULT 0",
+                "Column 'partner_share' checked/added to 'transactions' table.");
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS cpm_share DECIMAL(19,2) DEFAULT 0",
+                "Column 'cpm_share' checked/added to 'transactions' table.");
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_settlement_status VARCHAR(50) DEFAULT 'UNPAID'",
+                "Column 'partner_settlement_status' checked/added to 'transactions' table.");
 
         // Backfill old transactions
         safeExecute("UPDATE transactions SET transaction_type = 'REGULAR' WHERE transaction_type IS NULL",

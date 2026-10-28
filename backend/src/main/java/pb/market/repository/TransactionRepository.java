@@ -105,6 +105,26 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("SELECT t.paymentMethod, COALESCE(SUM(t.finalPrice), 0) FROM Transaction t WHERE (:branchId IS NULL OR t.branch.id = :branchId) GROUP BY t.paymentMethod")
     List<Object[]> sumFinalPriceByPaymentMethodAllByBranch(@Param("branchId") Long branchId);
 
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.variant v JOIN FETCH v.product LEFT JOIN FETCH v.defaultSupplier LEFT JOIN FETCH t.supplier LEFT JOIN FETCH t.stockBatch LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.branch WHERE t.transactionId = :transactionId")
+    List<Transaction> findByTransactionId(@Param("transactionId") String transactionId);
+
+    @Query("SELECT t FROM Transaction t JOIN FETCH t.variant v JOIN FETCH v.product LEFT JOIN FETCH v.defaultSupplier LEFT JOIN FETCH t.supplier LEFT JOIN FETCH t.stockBatch LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.branch WHERE t.id = :id")
+    java.util.Optional<Transaction> findByIdWithDetails(@Param("id") Long id);
+
+    @Query("SELECT t.supplier.id, COUNT(t) FROM Transaction t " +
+           "WHERE t.consigned = true AND t.status != 'UNPAID' " +
+           "AND t.transactionDate >= :start AND t.transactionDate <= :end " +
+           "GROUP BY t.supplier.id")
+    List<Object[]> countSoldConsignedBySupplierInRange(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    List<Transaction> findBySupplierId(Long supplierId);
+
+    List<Transaction> findByVariantId(Long variantId);
+
+    boolean existsByVariantId(Long variantId);
+
+    List<Transaction> findByStockBatchIn(List<pb.market.entity.StockBatch> batches);
+
     // ── Batch sales lookups ──────────────────────────────────────────────────
     @Query("SELECT t FROM Transaction t LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.variant v LEFT JOIN FETCH v.product WHERE t.stockBatch IN :batches ORDER BY t.transactionDate DESC")
     List<Transaction> findByStockBatchInWithConsignee(@Param("batches") List<pb.market.entity.StockBatch> batches);

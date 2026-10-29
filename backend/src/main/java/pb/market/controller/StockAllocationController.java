@@ -776,7 +776,6 @@ public class StockAllocationController {
         holdingBatch.setPartnerName(partnerName);
         holdingBatch.setPartnerSplitPct(partnerSplitPct);
         holdingBatch.setBatchId("PULLOUT-" + branch.getName().toUpperCase().replaceAll("[^A-Z0-9]+", "-") + "-" + System.currentTimeMillis());
-        holdingBatch.setNotes("Pulled out " + quantity + " units from " + branch.getName() + (notes.isBlank() ? "" : ": " + notes));
         stockBatchRepository.save(holdingBatch);
 
         // 4. Record stock adjustments for audit trail

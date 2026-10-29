@@ -368,6 +368,16 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
         );
     }, [products]);
 
+    // Auto-sync locationModalVariant whenever inventory products refresh
+    useEffect(() => {
+        if (locationModalVariant) {
+            const updated = flattenedInventory.find(item => item.variantId === locationModalVariant.variantId);
+            if (updated) {
+                setLocationModalVariant(updated);
+            }
+        }
+    }, [flattenedInventory]);
+
     const filteredInventory = useMemo(() => {
         let result = [...flattenedInventory];
         
@@ -1285,6 +1295,30 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                                                                     </span>
                                                                 )}
                                                             </div>
+                                                            {!isMain && qty > 0 && (
+                                                                <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex justify-end">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setPullOutModalItem({
+                                                                            variantId: row.variantId,
+                                                                            sku: row.sku,
+                                                                            brandName: row.brand,
+                                                                            modelName: row.name,
+                                                                            color: row.color,
+                                                                            thicknessMm: row.thicknessMm,
+                                                                            branchStock: qty,
+                                                                            adminStock: row.mainStock,
+                                                                            branchId: loc.branchId,
+                                                                            branchName: loc.branchName
+                                                                        })}
+                                                                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
+                                                                        title={`Pull out stock from ${loc.branchName} back to Master Admin`}
+                                                                    >
+                                                                        <ArrowLeft size={12} className="text-amber-600" />
+                                                                        <span>Pull Out to Admin</span>
+                                                                    </button>
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     );
                                                 })}
@@ -2227,10 +2261,9 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                     isOpen={!!pullOutModalItem}
                     onClose={() => setPullOutModalItem(null)}
                     item={pullOutModalItem}
-                    onSuccess={() => {
-                        if (refetchProducts) refetchProducts();
-                        if (fetchAllocations) fetchAllocations();
-                        setLocationModalVariant(null);
+                    onSuccess={async () => {
+                        if (refetchProducts) await refetchProducts();
+                        if (fetchAllocations) await fetchAllocations();
                     }}
                 />
             )}

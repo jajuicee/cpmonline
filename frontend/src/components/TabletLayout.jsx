@@ -52,16 +52,21 @@ const TabletLayout = () => {
     const [products, setProducts] = useState([]);
     const [loadingProducts, setLoadingProducts] = useState(true);
 
-    const fetchProducts = useCallback(() => {
+    const fetchProducts = useCallback(async () => {
         setLoadingProducts(true);
         const url = currentBranchId ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
-        axios.get(url)
-            .then(res => setProducts(Array.isArray(res.data) ? res.data : []))
-            .catch(err => {
-                console.error('Failed to load products:', err);
-                setProducts([]);
-            })
-            .finally(() => setLoadingProducts(false));
+        try {
+            const res = await axios.get(url);
+            const data = Array.isArray(res.data) ? res.data : [];
+            setProducts(data);
+            return data;
+        } catch (err) {
+            console.error('Failed to load products:', err);
+            setProducts([]);
+            return [];
+        } finally {
+            setLoadingProducts(false);
+        }
     }, [currentBranchId]);
 
     useEffect(() => {

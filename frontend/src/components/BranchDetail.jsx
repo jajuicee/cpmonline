@@ -3618,10 +3618,14 @@ const BranchDetail = () => {
                     isOpen={!!pullOutModalItem}
                     onClose={() => setPullOutModalItem(null)}
                     item={pullOutModalItem}
-                    onSuccess={() => {
-                        fetchBranchProducts();
-                        fetchAdminProducts();
-                        fetchAllocations();
+                    onSuccess={async () => {
+                        await Promise.allSettled([
+                            fetchBranch(),
+                            fetchBranchProducts(),
+                            fetchAdminProducts(),
+                            fetchAllocations(),
+                            fetchRemittableSales()
+                        ]);
                     }}
                 />
             )}

@@ -29,7 +29,25 @@ export const AuthProvider = ({ children }) => {
         }
     });
     // For admin to filter views globally: null = All Branches, or branchId number
-    const [selectedBranchId, setSelectedBranchId] = useState(null);
+    const [selectedBranchId, setSelectedBranchId] = useState(() => {
+        try {
+            const s = sessionStorage.getItem('cpm_selected_branch');
+            return s ? Number(s) : null;
+        } catch {
+            return null;
+        }
+    });
+
+    const setAndPersistSelectedBranchId = (id) => {
+        setSelectedBranchId(id);
+        try {
+            if (id != null) {
+                sessionStorage.setItem('cpm_selected_branch', String(id));
+            } else {
+                sessionStorage.removeItem('cpm_selected_branch');
+            }
+        } catch {}
+    };
     const [loading, setLoading] = useState(true);
 
     // Synchronize Axios default header and interceptors
@@ -132,7 +150,7 @@ export const AuthProvider = ({ children }) => {
                 isBranch,
                 isCashier,
                 selectedBranchId,
-                setSelectedBranchId,
+                setSelectedBranchId: setAndPersistSelectedBranchId,
                 currentBranchId,
             }}
         >

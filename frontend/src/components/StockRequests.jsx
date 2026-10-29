@@ -39,6 +39,7 @@ const StockRequests = () => {
     const [loading, setLoading] = useState(true);
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [branchFilter, setBranchFilter] = useState('ALL');
+    const [requestSearch, setRequestSearch] = useState('');
     const [branches, setBranches] = useState([]);
 
     // Branch New Request Modal
@@ -307,9 +308,21 @@ const StockRequests = () => {
         return requests.filter(r => {
             const matchesStatus = statusFilter === 'ALL' || r.status === statusFilter;
             const matchesBranch = branchFilter === 'ALL' || String(r.branchId) === String(branchFilter);
-            return matchesStatus && matchesBranch;
+            const q = requestSearch.toLowerCase().trim();
+            const matchesSearch = !q ||
+                (r.requestCode && r.requestCode.toLowerCase().includes(q)) ||
+                (r.branchName && r.branchName.toLowerCase().includes(q)) ||
+                (r.reason && r.reason.toLowerCase().includes(q)) ||
+                (r.adminNotes && r.adminNotes.toLowerCase().includes(q)) ||
+                (r.items && r.items.some(item =>
+                    (item.modelName && item.modelName.toLowerCase().includes(q)) ||
+                    (item.brandName && item.brandName.toLowerCase().includes(q)) ||
+                    (item.sku && item.sku.toLowerCase().includes(q))
+                ));
+
+            return matchesStatus && matchesBranch && matchesSearch;
         });
-    }, [requests, statusFilter, branchFilter]);
+    }, [requests, statusFilter, branchFilter, requestSearch]);
 
     const pendingCount = useMemo(() => {
         return requests.filter(r => r.status === 'PENDING').length;
@@ -392,22 +405,45 @@ const StockRequests = () => {
                     ))}
                 </div>
 
-                {/* Admin Branch Filter */}
-                {isAdmin && branches.length > 0 && (
-                    <div className="flex items-center gap-2">
-                        <Filter size={13} className="text-stone-400" />
-                        <select
-                            value={branchFilter}
-                            onChange={(e) => setBranchFilter(e.target.value)}
-                            className="bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-stone-800 focus:outline-none"
-                        >
-                            <option value="ALL">All Branches</option>
-                            {branches.map(b => (
-                                <option key={b.id} value={b.id}>{b.name}</option>
-                            ))}
-                        </select>
+                <div className="flex items-center gap-2.5 w-full md:w-auto">
+                    {/* Search Bar */}
+                    <div className="relative flex-1 md:w-64">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={requestSearch}
+                            onChange={(e) => setRequestSearch(e.target.value)}
+                            placeholder="Search request #, branch, SKU..."
+                            className="w-full pl-8.5 pr-7 py-1.5 bg-stone-50 border border-stone-200 rounded-xl text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:outline-none focus:bg-white focus:border-stone-900 transition-all"
+                        />
+                        {requestSearch && (
+                            <button
+                                type="button"
+                                onClick={() => setRequestSearch('')}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-0.5 rounded cursor-pointer"
+                            >
+                                <X size={12} />
+                            </button>
+                        )}
                     </div>
-                )}
+
+                    {/* Admin Branch Filter */}
+                    {isAdmin && branches.length > 0 && (
+                        <div className="flex items-center gap-1.5">
+                            <Filter size={13} className="text-stone-400" />
+                            <select
+                                value={branchFilter}
+                                onChange={(e) => setBranchFilter(e.target.value)}
+                                className="bg-stone-50 border border-stone-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-stone-800 focus:outline-none cursor-pointer"
+                            >
+                                <option value="ALL">All Branches</option>
+                                {branches.map(b => (
+                                    <option key={b.id} value={b.id}>{b.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Requests List */}

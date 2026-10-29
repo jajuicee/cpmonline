@@ -632,12 +632,16 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                 (allocationStatusFilter === 'PENDING' && (a.status === 'PENDING' || !a.status)) ||
                 (allocationStatusFilter === 'OVERDUE' && a.deadline && new Date(a.deadline) < new Date() && parseFloat(a.amountPaid || 0) < parseFloat(a.totalCost || 0));
 
-            const q = allocationSearch.toLowerCase();
+            const q = allocationSearch.toLowerCase().trim();
             const matchesSearch = !q ||
                 (a.branchName && a.branchName.toLowerCase().includes(q)) ||
                 (a.modelName && a.modelName.toLowerCase().includes(q)) ||
+                (a.brandName && a.brandName.toLowerCase().includes(q)) ||
+                (a.category && a.category.toLowerCase().includes(q)) ||
+                (a.adminBatchId && a.adminBatchId.toLowerCase().includes(q)) ||
                 (a.sku && a.sku.toLowerCase().includes(q)) ||
-                (a.notes && a.notes.toLowerCase().includes(q));
+                (a.notes && a.notes.toLowerCase().includes(q)) ||
+                (a.deadline && a.deadline.toLowerCase().includes(q));
 
             return matchesStatus && matchesSearch;
         });
@@ -1393,16 +1397,26 @@ const ManageInventory = ({ products = [], loading = false, refetchProducts }) =>
                     </div>
 
                     {/* FILTER & SEARCH */}
-                    <div className="bg-white p-3 rounded-xl border border-stone-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between shrink-0">
-                        <div className="relative w-full md:w-80">
-                            <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400" />
+                    <div className="bg-white p-3.5 rounded-2xl border border-stone-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between shrink-0">
+                        <div className="relative w-full md:w-96">
+                            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
                             <input
                                 type="text"
                                 value={allocationSearch}
                                 onChange={(e) => setAllocationSearch(e.target.value)}
-                                placeholder="Search branch, product, SKU..."
-                                className="w-full pl-9 pr-3 py-1.5 text-xs font-medium rounded-lg border border-stone-300 bg-stone-50 focus:bg-white focus:outline-none"
+                                placeholder="Search branch, SKU, paddle model, batch #, notes..."
+                                className="w-full pl-9.5 pr-8 py-2 text-xs font-semibold rounded-xl border border-stone-200 bg-stone-50 text-stone-900 placeholder:text-stone-400 focus:bg-white focus:outline-none focus:border-stone-900 focus:ring-1 focus:ring-stone-900 transition-all shadow-2xs"
                             />
+                            {allocationSearch && (
+                                <button
+                                    type="button"
+                                    onClick={() => setAllocationSearch('')}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-1 rounded-md cursor-pointer"
+                                    title="Clear search"
+                                >
+                                    <X size={13} />
+                                </button>
+                            )}
                         </div>
 
                         <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto">

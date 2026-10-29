@@ -106,6 +106,8 @@ const BranchDetail = () => {
     // Batch Accordion & Payment State (Consignment style)
     const [expandedBatches, setExpandedBatches] = useState(() => new Set());
     const [selectedBatch, setSelectedBatch] = useState(null);
+    const [historySearch, setHistorySearch] = useState('');
+    const [historyStatusFilter, setHistoryStatusFilter] = useState('ALL');
 
     // Inline branch price editing in Tab 4 (Branch Inventory Tracker)
     const [editingPriceVariantId, setEditingPriceVariantId] = useState(null);
@@ -966,6 +968,37 @@ const BranchDetail = () => {
         });
     }, [allocations]);
 
+    // Filtered Grouped Allocations based on search query and status filter
+    const filteredGroupedAllocations = useMemo(() => {
+        const q = historySearch.toLowerCase().trim();
+
+        return groupedAllocations.filter(group => {
+            if (historyStatusFilter === 'OVERDUE' && !group.hasOverdue) return false;
+            if (historyStatusFilter === 'PENDING' && group.status !== 'PENDING') return false;
+            if (historyStatusFilter === 'PARTIAL' && group.status !== 'PARTIAL') return false;
+            if (historyStatusFilter === 'PAID' && !group.isPaid) return false;
+
+            if (!q) return true;
+
+            const matchesBatch =
+                (group.rawBatchId && group.rawBatchId.toLowerCase().includes(q)) ||
+                (group.shortId && group.shortId.toLowerCase().includes(q)) ||
+                (group.notes && group.notes.toLowerCase().includes(q)) ||
+                (group.deadline && group.deadline.toLowerCase().includes(q));
+
+            if (matchesBatch) return true;
+
+            return (group.items || []).some(item =>
+                (item.sku && item.sku.toLowerCase().includes(q)) ||
+                (item.modelName && item.modelName.toLowerCase().includes(q)) ||
+                (item.brandName && item.brandName.toLowerCase().includes(q)) ||
+                (item.variant?.color && item.variant.color.toLowerCase().includes(q)) ||
+                (item.variant?.sku && item.variant.sku.toLowerCase().includes(q)) ||
+                (item.notes && item.notes.toLowerCase().includes(q))
+            );
+        });
+    }, [groupedAllocations, historySearch, historyStatusFilter]);
+
     // ── Filtered Remittable Items ──────────────────────────────────────────────
     const filteredRemittableItems = useMemo(() => {
         const list = remittableSalesData.items || [];
@@ -1091,6 +1124,9 @@ const BranchDetail = () => {
         title = "Stock Allocation & Batch History",
         subtitle = "Batch records of dispatched inventory with live sales tracking and payments"
     ) => {
+        const hasSearchOrFilter = historySearch.trim().length > 0 || historyStatusFilter !== 'ALL';
+        const displayGroups = filteredGroupedAllocations;
+
         return (
             <div className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden space-y-0">
                 {/* Section Header */}
@@ -1099,26 +1135,99 @@ const BranchDetail = () => {
                         <div className="flex items-center gap-2">
                             <h4 className="font-black text-stone-900 text-base">{title}</h4>
                             <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-stone-200/80 text-stone-700">
-                                {groupedAllocations.length} {groupedAllocations.length === 1 ? 'batch' : 'batches'}
+                                {hasSearchOrFilter
+                                    ? `${displayGroups.length} of ${groupedAllocations.length} batches`
+                                    : `${groupedAllocations.length} ${groupedAllocations.length === 1 ? 'batch' : 'batches'}`}
                             </span>
                         </div>
                         <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p>
                     </div>
 
                     <div className="flex items-center gap-2">
-                        {groupedAllocations.length > 0 && (
+                        {displayGroups.length > 0 && (
                             <button
                                 type="button"
                                 onClick={() => {
-                                    if (expandedBatches.size === groupedAllocations.length) {
+                                    if (expandedBatches.size === displayGroups.length) {
                                         setExpandedBatches(new Set());
                                     } else {
-                                        setExpandedBatches(new Set(groupedAllocations.map(g => g.batchId)));
+                                        setExpandedBatches(new Set(displayGroups.map(g => g.batchId)));
                                     }
                                 }}
                                 className="px-3 py-1.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-xs font-bold text-stone-700 transition-colors shadow-2xs cursor-pointer"
                             >
-                                {expandedBatches.size === groupedAllocations.length ? 'Collapse All' : 'Expand All'}
+                                {expandedBatches.size === displayGroups.length ? 'Collapse All' : 'Expand All'}
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* SEARCH & STATUS FILTER TOOLBAR */}
+                <div className="p-4 bg-stone-50/70 border-b border-stone-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                    {/* Search Bar */}
+                    <div className="relative flex-1 max-w-md">
+                        <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                        <input
+                            type="text"
+                            value={historySearch}
+                            onChange={(e) => setHistorySearch(e.target.value)}
+                            placeholder="Search batch #, SKU, paddle model, remarks..."
+                            className="w-full pl-9.5 pr-8 py-2 bg-white border border-stone-200 rounded-xl text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-stone-900 focus:ring-1 focus:ring-stone-900 shadow-2xs transition-all"
+                        />
+                        {historySearch && (
+                            <button
+                                type="button"
+                                onClick={() => setHistorySearch('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-700 p-1 rounded-md cursor-pointer"
+                                title="Clear search"
+                            >
+                                <X size={13} />
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Status Filter Tabs */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto">
+                        {[
+                            { id: 'ALL', label: 'All Batches', count: groupedAllocations.length },
+                            { id: 'OVERDUE', label: 'Overdue', count: groupedAllocations.filter(g => g.hasOverdue).length, isAlert: groupedAllocations.some(g => g.hasOverdue) },
+                            { id: 'PENDING', label: 'Pending', count: groupedAllocations.filter(g => g.status === 'PENDING').length },
+                            { id: 'PARTIAL', label: 'Partial', count: groupedAllocations.filter(g => g.status === 'PARTIAL').length },
+                            { id: 'PAID', label: 'Settled', count: groupedAllocations.filter(g => g.isPaid).length },
+                        ].map(tab => (
+                            <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => setHistoryStatusFilter(tab.id)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                                    historyStatusFilter === tab.id
+                                        ? 'bg-stone-900 text-white shadow-xs'
+                                        : tab.isAlert && tab.count > 0
+                                        ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                                        : 'bg-white text-stone-600 hover:bg-stone-100 border border-stone-200'
+                                }`}
+                            >
+                                <span>{tab.label}</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                                    historyStatusFilter === tab.id
+                                        ? 'bg-stone-700 text-white'
+                                        : 'bg-stone-100 text-stone-600 font-bold'
+                                }`}>
+                                    {tab.count}
+                                </span>
+                            </button>
+                        ))}
+
+                        {hasSearchOrFilter && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setHistorySearch('');
+                                    setHistoryStatusFilter('ALL');
+                                }}
+                                className="px-2.5 py-1 text-xs text-stone-500 hover:text-stone-900 underline font-bold cursor-pointer shrink-0 ml-1"
+                            >
+                                Reset
                             </button>
                         )}
                     </div>
@@ -1126,15 +1235,19 @@ const BranchDetail = () => {
 
                 {/* Batch List */}
                 <div className="p-5 space-y-3.5 bg-stone-50/30">
-                    {groupedAllocations.length === 0 ? (
+                    {displayGroups.length === 0 ? (
                         <div className="p-16 text-center text-stone-400 bg-white rounded-2xl border border-dashed border-stone-200">
                             <PackagePlus size={28} className="mx-auto mb-2 opacity-30 text-stone-400" />
-                            <p className="text-xs font-bold text-stone-600">No stock allocations on record</p>
-                            <p className="text-[11px] text-stone-400 mt-0.5">Use the manifest above to dispatch stock to this branch</p>
+                            <p className="text-xs font-bold text-stone-600">
+                                {hasSearchOrFilter ? 'No matching dispatch or allocation batches found' : 'No stock allocations on record'}
+                            </p>
+                            <p className="text-[11px] text-stone-400 mt-0.5">
+                                {hasSearchOrFilter ? 'Try clearing your search query or switching status filters' : 'Use the manifest above to dispatch stock to this branch'}
+                            </p>
                         </div>
                     ) : (
-                        groupedAllocations.map(group => {
-                            const isExpanded = expandedBatches.has(group.batchId);
+                        displayGroups.map(group => {
+                            const isExpanded = expandedBatches.has(group.batchId) || (historySearch.trim().length > 0);
                             const isUnfinished = !group.isPaid;
 
                             return (

@@ -19,11 +19,16 @@ public class ConsigneeController {
     @GetMapping
     public List<Consignee> getAllConsignees(
             @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false, defaultValue = "false") Boolean onlyHq,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
+            onlyHq = false;
+        } else if (branchId != null && (branchId == 0L || branchId == -1L)) {
+            onlyHq = true;
+            branchId = null;
         }
-        return consigneeRepository.findAllByBranch(branchId);
+        return consigneeRepository.findAllByBranchOrHq(branchId, Boolean.TRUE.equals(onlyHq));
     }
 
     @PostMapping
@@ -34,22 +39,26 @@ public class ConsigneeController {
         if (consignee.getName() == null || consignee.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("Consignee name is required.");
         }
-        Long resolvedBranchId = null;
-        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
-            resolvedBranchId = user.getBranchId();
-        } else if (branchId != null) {
-            resolvedBranchId = branchId;
-        } else if (consignee.getBranch() != null && consignee.getBranch().getId() != null) {
-            resolvedBranchId = consignee.getBranch().getId();
-        }
-
-        if (resolvedBranchId != null) {
-            branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+        boolean isBranchUser = user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()));
+        if (isBranchUser) {
+            Long bId = user.getBranchId();
+            if (bId != null) {
+                branchRepository.findById(bId).ifPresent(consignee::setBranch);
+            }
         } else {
-            branchRepository.findAll().stream()
-                    .filter(pb.market.entity.Branch::isActive)
-                    .findFirst()
-                    .ifPresent(consignee::setBranch);
+            Long resolvedBranchId = null;
+            if (branchId != null) {
+                resolvedBranchId = branchId;
+            } else if (consignee.getBranch() != null && consignee.getBranch().getId() != null) {
+                resolvedBranchId = consignee.getBranch().getId();
+            }
+
+            if (resolvedBranchId != null && resolvedBranchId > 0) {
+                branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+            } else {
+                // Main Admin (Central HQ)
+                consignee.setBranch(null);
+            }
         }
         return consigneeRepository.save(consignee);
     }
@@ -66,21 +75,30 @@ public class ConsigneeController {
             consignee.setName(updated.getName().trim());
         }
         if (updated.getContactInfo() != null) {
-            consignee.setContactInfo(updated.getContactInfo());
+            consignee.setContactInfo(updated.getContactInfo().trim());
         }
 
-        // Branch update: only admin or if not branch-restricted
-        Long resolvedBranchId = null;
-        if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
-            resolvedBranchId = user.getBranchId();
-        } else if (branchId != null) {
-            resolvedBranchId = branchId;
-        } else if (updated.getBranch() != null && updated.getBranch().getId() != null) {
-            resolvedBranchId = updated.getBranch().getId();
-        }
+        boolean isBranchUser = user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()));
+        if (!isBranchUser) {
+            Long resolvedBranchId = null;
+            boolean branchSpecified = false;
 
-        if (resolvedBranchId != null) {
-            branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+            if (branchId != null) {
+                resolvedBranchId = branchId;
+                branchSpecified = true;
+            } else if (updated.getBranch() != null) {
+                resolvedBranchId = updated.getBranch().getId();
+                branchSpecified = true;
+            }
+
+            if (branchSpecified) {
+                if (resolvedBranchId != null && resolvedBranchId > 0) {
+                    branchRepository.findById(resolvedBranchId).ifPresent(consignee::setBranch);
+                } else {
+                    // Set to Main Admin
+                    consignee.setBranch(null);
+                }
+            }
         }
 
         return consigneeRepository.save(consignee);

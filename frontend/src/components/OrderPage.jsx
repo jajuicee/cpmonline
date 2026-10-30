@@ -221,9 +221,9 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         try {
             const payload = {
                 name: newConsigneeName.trim(),
-                branch: activeBranchId ? { id: activeBranchId } : undefined
+                branch: activeBranchId ? { id: activeBranchId } : null
             };
-            const params = activeBranchId ? { branchId: activeBranchId } : {};
+            const params = activeBranchId ? { branchId: activeBranchId } : { branchId: 0 };
             const res = await axios.post(`/api/consignees`, payload, { params });
             setConsignees(prev => [...prev, res.data]);
             setSelectedConsigneeId(res.data.id.toString());
@@ -1171,7 +1171,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2 text-xs font-bold focus:outline-none"
                                         >
                                             <option value="" disabled>-- Select Consignee --</option>
-                                            {consignees.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                            {consignees.map(c => <option key={c.id} value={c.id}>{c.name} {c.branch?.name ? `(${c.branch.name})` : '(Main Admin)'}</option>)}
                                         </select>
                                         <button
                                             type="button"

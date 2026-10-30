@@ -28,6 +28,13 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
            "WHERE t.transactionType = 'CONSIGNMENT' AND (:branchId IS NULL OR t.branch.id = :branchId) ORDER BY t.transactionDate DESC")
     List<Transaction> findAllConsignmentWithDetailsByBranch(@Param("branchId") Long branchId, org.springframework.data.domain.Pageable pageable);
 
+    @Query("SELECT DISTINCT t FROM Transaction t JOIN FETCH t.variant v JOIN FETCH v.product LEFT JOIN FETCH v.defaultSupplier LEFT JOIN FETCH t.supplier LEFT JOIN FETCH t.stockBatch LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.branch " +
+           "WHERE t.transactionType = 'CONSIGNMENT' AND (" +
+           "(:onlyHq = true AND (t.branch IS NULL OR (t.consignee IS NOT NULL AND t.consignee.branch IS NULL))) OR " +
+           "(:onlyHq = false AND (:branchId IS NULL OR t.branch.id = :branchId OR (t.consignee IS NOT NULL AND t.consignee.branch.id = :branchId)))" +
+           ") ORDER BY t.transactionDate DESC")
+    List<Transaction> findAllConsignmentWithDetailsByBranchOrHq(@Param("branchId") Long branchId, @Param("onlyHq") boolean onlyHq, org.springframework.data.domain.Pageable pageable);
+
     @Query("SELECT t FROM Transaction t JOIN FETCH t.variant v JOIN FETCH v.product LEFT JOIN FETCH v.defaultSupplier LEFT JOIN FETCH t.supplier LEFT JOIN FETCH t.stockBatch LEFT JOIN FETCH t.consignee LEFT JOIN FETCH t.branch WHERE t.transactionDate >= :from AND t.transactionDate <= :to ORDER BY t.transactionDate DESC")
     List<Transaction> findAllWithDetailsInRange(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to, org.springframework.data.domain.Pageable pageable);
 

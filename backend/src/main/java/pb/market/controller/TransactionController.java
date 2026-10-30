@@ -210,12 +210,17 @@ public class TransactionController {
     @GetMapping("/consignment")
     public List<Transaction> getConsignmentAll(
             @RequestParam(value = "branchId", required = false) Long branchId,
+            @RequestParam(value = "onlyHq", required = false, defaultValue = "false") Boolean onlyHq,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
+            onlyHq = false;
+        } else if (branchId != null && (branchId == 0L || branchId == -1L)) {
+            onlyHq = true;
+            branchId = null;
         }
-        return transactionRepository.findAllConsignmentWithDetailsByBranch(
-                branchId, org.springframework.data.domain.PageRequest.of(0, 100000));
+        return transactionRepository.findAllConsignmentWithDetailsByBranchOrHq(
+                branchId, Boolean.TRUE.equals(onlyHq), org.springframework.data.domain.PageRequest.of(0, 100000));
     }
 
     // ── Category Sales breakdown & percentages ──────────────────────────────

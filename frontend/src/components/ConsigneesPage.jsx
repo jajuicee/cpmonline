@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
     Users, UserPlus, CreditCard, CheckCircle2, Loader2,
     AlertCircle, X, Undo2, ChevronDown, Trash2, Search, Tag,
-    Store, Lock, Phone, Filter
+    Store, Lock, Phone, Filter, Edit2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -32,8 +32,15 @@ const ConsigneesPage = () => {
     const [newConsigneeContact, setNewConsigneeContact] = useState('');
     const [newConsigneeBranchId, setNewConsigneeBranchId] = useState(() => {
         if (isBranch && user?.branchId) return user.branchId;
-        return (selectedBranchFilter !== 'ALL' && selectedBranchFilter) ? Number(selectedBranchFilter) : '';
+        return (selectedBranchFilter !== 'ALL' && selectedBranchFilter) ? selectedBranchFilter : 'MAIN';
     });
+
+    // Edit Consignee State
+    const [editingConsignee, setEditingConsignee] = useState(null);
+    const [editConsigneeName, setEditConsigneeName] = useState('');
+    const [editConsigneeContact, setEditConsigneeContact] = useState('');
+    const [editConsigneeBranchId, setEditConsigneeBranchId] = useState('MAIN');
+    const [savingEdit, setSavingEdit] = useState(false);
 
     const [deleteConfirm, setDeleteConfirm] = useState(null);
 
@@ -118,11 +125,15 @@ const ConsigneesPage = () => {
 
     // ── Branch Counts for Filter Tabs ──────────────────────────────────────────
     const branchCounts = useMemo(() => {
-        const counts = { ALL: allConsignees.length };
+        const counts = { ALL: allConsignees.length, MAIN: 0 };
         branches.forEach(b => { counts[b.id] = 0; });
         allConsignees.forEach(c => {
-            const bid = c.branch?.id || 1;
-            counts[bid] = (counts[bid] || 0) + 1;
+            if (!c.branch || !c.branch.id) {
+                counts.MAIN = (counts.MAIN || 0) + 1;
+            } else {
+                const bid = c.branch.id;
+                counts[bid] = (counts[bid] || 0) + 1;
+            }
         });
         return counts;
     }, [allConsignees, branches]);
@@ -130,24 +141,30 @@ const ConsigneesPage = () => {
     // ── Strictly Scoped Consignees per selected branch ──────────────────────────
     const visibleConsignees = useMemo(() => {
         if (isBranch) {
-            // Backend already restricts /api/consignees, but reinforce on client:
-            return allConsignees.filter(c => !user?.branchId || (c.branch?.id || 1) === user.branchId);
+            return allConsignees.filter(c => !user?.branchId || c.branch?.id === user.branchId);
         }
         if (selectedBranchFilter === 'ALL') {
             return allConsignees;
         }
-        return allConsignees.filter(c => (c.branch?.id || 1) === Number(selectedBranchFilter));
+        if (selectedBranchFilter === 'MAIN' || selectedBranchFilter === 0 || selectedBranchFilter === '0') {
+            return allConsignees.filter(c => !c.branch || !c.branch.id);
+        }
+        return allConsignees.filter(c => c.branch?.id === Number(selectedBranchFilter));
     }, [allConsignees, selectedBranchFilter, isBranch, user?.branchId]);
 
     // ── Strictly Scoped Transactions per selected branch ───────────────────────
     const visibleTransactions = useMemo(() => {
         if (isBranch) {
-            return transactions.filter(t => !user?.branchId || (t.branch?.id || 1) === user.branchId);
+            return transactions.filter(t => !user?.branchId || (t.branch?.id || t.consignee?.branch?.id) === user.branchId);
         }
         if (selectedBranchFilter === 'ALL') {
             return transactions;
         }
-        return transactions.filter(t => (t.branch?.id || 1) === Number(selectedBranchFilter));
+        if (selectedBranchFilter === 'MAIN' || selectedBranchFilter === 0 || selectedBranchFilter === '0') {
+            return transactions.filter(t => (!t.branch && !t.consignee?.branch) || (!t.branch?.id && !t.consignee?.branch?.id));
+        }
+        const bId = Number(selectedBranchFilter);
+        return transactions.filter(t => (t.branch?.id === bId) || (t.consignee?.branch?.id === bId));
     }, [transactions, selectedBranchFilter, isBranch, user?.branchId]);
 
     // Keep selectedConsigneeId valid when filtering
@@ -165,23 +182,59 @@ const ConsigneesPage = () => {
         e.preventDefault();
         if (!newConsigneeName.trim()) return;
         try {
-            const targetBranchId = isBranch ? user?.branchId : newConsigneeBranchId;
+            const isMain = !isBranch && (newConsigneeBranchId === 'MAIN' || newConsigneeBranchId === '' || newConsigneeBranchId === 0 || newConsigneeBranchId === '0');
+            const targetBranchId = isBranch ? user?.branchId : (isMain ? null : Number(newConsigneeBranchId));
             const payload = {
                 name: newConsigneeName.trim(),
                 contactInfo: newConsigneeContact.trim() || undefined,
-                branch: targetBranchId ? { id: Number(targetBranchId) } : undefined
+                branch: targetBranchId ? { id: targetBranchId } : null
             };
-            const res = await axios.post(`${BASE}/api/consignees`, payload, {
-                params: targetBranchId ? { branchId: targetBranchId } : {}
-            });
+            const params = {
+                branchId: targetBranchId ? targetBranchId : 0
+            };
+            const res = await axios.post(`${BASE}/api/consignees`, payload, { params });
             setAllConsignees(prev => [...prev, res.data]);
             setSelectedConsigneeId(res.data.id);
             setShowAddConsignee(false);
             setNewConsigneeName('');
             setNewConsigneeContact('');
-            showToast(`Consignee added to ${res.data.branch?.name || 'branch'}!`, 'success');
+            showToast(`Consignee added to ${res.data.branch?.name || 'Main Admin'}!`, 'success');
         } catch (err) {
             showToast(err.response?.data?.error || 'Failed to add consignee.', 'error');
+        }
+    };
+
+    const handleOpenEditConsignee = (c, e) => {
+        if (e) e.stopPropagation();
+        setEditingConsignee(c);
+        setEditConsigneeName(c.name || '');
+        setEditConsigneeContact(c.contactInfo || '');
+        setEditConsigneeBranchId(c.branch?.id ? c.branch.id : 'MAIN');
+    };
+
+    const handleSaveEditConsignee = async (e) => {
+        e.preventDefault();
+        if (!editingConsignee || !editConsigneeName.trim()) return;
+        setSavingEdit(true);
+        try {
+            const isMain = !isBranch && (editConsigneeBranchId === 'MAIN' || editConsigneeBranchId === '' || editConsigneeBranchId === 0 || editConsigneeBranchId === '0');
+            const targetBranchId = isBranch ? user?.branchId : (isMain ? null : Number(editConsigneeBranchId));
+            const payload = {
+                name: editConsigneeName.trim(),
+                contactInfo: editConsigneeContact.trim() || '',
+                branch: targetBranchId ? { id: targetBranchId } : null
+            };
+            const params = {
+                branchId: targetBranchId ? targetBranchId : 0
+            };
+            const res = await axios.put(`${BASE}/api/consignees/${editingConsignee.id}`, payload, { params });
+            setAllConsignees(prev => prev.map(c => c.id === res.data.id ? res.data : c));
+            setEditingConsignee(null);
+            showToast('Consignee updated successfully!', 'success');
+        } catch (err) {
+            showToast(err.response?.data?.error || 'Failed to update consignee.', 'error');
+        } finally {
+            setSavingEdit(false);
         }
     };
 
@@ -260,7 +313,7 @@ const ConsigneesPage = () => {
         const branchMap = {};
         allConsignees.forEach(c => {
             consigneeMap[c.id] = c.name;
-            branchMap[c.id] = c.branch?.name || 'Master Storage';
+            branchMap[c.id] = c.branch?.name || 'Main Admin';
         });
 
         // When searchScope is 'SELECTED' and a consignee is selected, search ONLY that consignee's items!
@@ -522,7 +575,11 @@ const ConsigneesPage = () => {
                     </h2>
                     <button
                         onClick={() => {
-                            setNewConsigneeBranchId(selectedBranchFilter !== 'ALL' ? Number(selectedBranchFilter) : (branches[0]?.id || 1));
+                            if (isBranch && user?.branchId) {
+                                setNewConsigneeBranchId(user.branchId);
+                            } else {
+                                setNewConsigneeBranchId(selectedBranchFilter !== 'ALL' ? selectedBranchFilter : 'MAIN');
+                            }
                             setShowAddConsignee(true);
                         }}
                         className="px-2.5 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors flex items-center gap-1.5 text-xs font-bold shadow-sm"
@@ -576,6 +633,23 @@ const ConsigneesPage = () => {
                                     selectedBranchFilter === 'ALL' ? 'bg-zinc-700 text-white' : 'bg-stone-100 text-stone-500'
                                 }`}>
                                     {allConsignees.length}
+                                </span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => setSelectedBranchFilter('MAIN')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm ${
+                                    selectedBranchFilter === 'MAIN'
+                                        ? 'bg-amber-600 text-white'
+                                        : 'bg-white text-stone-700 border border-stone-200 hover:bg-stone-100'
+                                }`}
+                            >
+                                <span>👑 Main Admin</span>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                                    selectedBranchFilter === 'MAIN' ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-500'
+                                }`}>
+                                    {branchCounts.MAIN || 0}
                                 </span>
                             </button>
 
@@ -659,7 +733,8 @@ const ConsigneesPage = () => {
                     ) : (
                         filteredConsignees.map(c => {
                             const isSelected = selectedConsigneeId === c.id;
-                            const branchName = c.branch?.name || 'Master Storage';
+                            const isMainAdmin = !c.branch || !c.branch.id;
+                            const branchName = isMainAdmin ? 'Main Admin' : c.branch.name;
                             return (
                                 <button
                                     key={c.id}
@@ -675,25 +750,42 @@ const ConsigneesPage = () => {
                                 >
                                     <div className="flex items-center justify-between w-full">
                                         <span className="font-bold text-sm truncate">{c.name}</span>
-                                        <div
-                                            onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.id); }}
-                                            className={`p-1 rounded-lg transition-opacity ${
-                                                isSelected 
-                                                    ? 'text-zinc-400 hover:text-white hover:bg-zinc-800 opacity-80 group-hover:opacity-100' 
-                                                    : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-600 hover:bg-red-50'
-                                            }`}
-                                            title="Delete Consignee"
-                                        >
-                                            <Trash2 size={13} />
+                                        <div className="flex items-center gap-1">
+                                            {!isBranch && (
+                                                <div
+                                                    onClick={(e) => handleOpenEditConsignee(c, e)}
+                                                    className={`p-1 rounded-lg transition-opacity ${
+                                                        isSelected 
+                                                            ? 'text-zinc-400 hover:text-white hover:bg-zinc-800 opacity-80 group-hover:opacity-100' 
+                                                            : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-blue-600 hover:bg-blue-50'
+                                                    }`}
+                                                    title="Edit Consignee"
+                                                >
+                                                    <Edit2 size={13} />
+                                                </div>
+                                            )}
+                                            <div
+                                                onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.id); }}
+                                                className={`p-1 rounded-lg transition-opacity ${
+                                                    isSelected 
+                                                        ? 'text-zinc-400 hover:text-white hover:bg-zinc-800 opacity-80 group-hover:opacity-100' 
+                                                        : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-600 hover:bg-red-50'
+                                                }`}
+                                                title="Delete Consignee"
+                                            >
+                                                <Trash2 size={13} />
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
                                             isSelected 
                                                 ? 'bg-zinc-800 text-zinc-200 border border-zinc-700' 
-                                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                                : isMainAdmin
+                                                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                                    : 'bg-blue-50 text-blue-700 border border-blue-200'
                                         }`}>
-                                            <Store size={10} /> {branchName}
+                                            {isMainAdmin ? '👑 Main Admin' : <><Store size={10} /> {branchName}</>}
                                         </span>
                                         {c.contactInfo && (
                                             <span className={`text-[10px] truncate ${isSelected ? 'text-zinc-400' : 'text-zinc-400'}`}>
@@ -891,9 +983,25 @@ const ConsigneesPage = () => {
                                         <h2 className="text-xl font-black text-zinc-900">
                                             {selectedConsignee?.name}'s Consignments
                                         </h2>
-                                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                                            <Store size={12} /> {selectedConsignee?.branch?.name || 'Master Storage'}
-                                        </span>
+                                        {(!selectedConsignee?.branch || !selectedConsignee?.branch?.id) ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                                👑 Main Admin (Central HQ)
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                                <Store size={12} /> {selectedConsignee.branch.name}
+                                            </span>
+                                        )}
+                                        {!isBranch && selectedConsignee && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleOpenEditConsignee(selectedConsignee)}
+                                                className="p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 rounded-lg transition-colors"
+                                                title="Edit Consignee"
+                                            >
+                                                <Edit2 size={14} />
+                                            </button>
+                                        )}
                                     </div>
                                     <p className="text-xs text-zinc-500 mt-1">Manage consigned items strictly assigned to this consignee.</p>
                                 </div>
@@ -1107,9 +1215,10 @@ const ConsigneesPage = () => {
                                 ) : (
                                     <select
                                         value={newConsigneeBranchId}
-                                        onChange={e => setNewConsigneeBranchId(Number(e.target.value))}
+                                        onChange={e => setNewConsigneeBranchId(e.target.value)}
                                         className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-bold bg-white"
                                     >
+                                        <option value="MAIN">👑 Main Admin (Central HQ)</option>
                                         {branches.map(b => (
                                             <option key={b.id} value={b.id}>
                                                 🏬 {b.name}
@@ -1118,7 +1227,7 @@ const ConsigneesPage = () => {
                                     </select>
                                 )}
                                 <p className="text-[11px] text-stone-400 mt-1">
-                                    Consignees strictly belong to their assigned branch.
+                                    Assign this consignee to Main Admin (Central HQ) or a specific retail branch.
                                 </p>
                             </div>
 
@@ -1439,6 +1548,103 @@ const ConsigneesPage = () => {
             })()}
 
             {/* ── Delete Confirm Modal ────────────────────────────────────── */}
+            {/* Edit Consignee Modal */}
+            {editingConsignee && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden border border-stone-200 animate-in fade-in zoom-in-95 duration-150">
+                        <div className="p-4 bg-stone-50 border-b border-stone-200 flex justify-between items-center">
+                            <h3 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
+                                <Edit2 size={16} className="text-blue-600" /> Edit Consignee
+                            </h3>
+                            <button
+                                onClick={() => setEditingConsignee(null)}
+                                className="text-stone-400 hover:text-stone-600 p-1"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleSaveEditConsignee} className="p-6 flex flex-col gap-4">
+                            <div>
+                                <label className="block text-xs font-bold text-stone-600 mb-1.5">
+                                    Consignee Name *
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={editConsigneeName}
+                                    onChange={e => setEditConsigneeName(e.target.value)}
+                                    placeholder="e.g. Coach Dennis, Manila Club"
+                                    className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-medium"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-stone-600 mb-1.5">
+                                    Contact Info (Optional)
+                                </label>
+                                <input
+                                    type="text"
+                                    value={editConsigneeContact}
+                                    onChange={e => setEditConsigneeContact(e.target.value)}
+                                    placeholder="e.g. 0917-xxx-xxxx / dennis@email.com"
+                                    className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-medium"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="text-xs font-bold text-stone-600 flex items-center justify-between mb-1.5">
+                                    <span>Assigned Branch / Location *</span>
+                                    {isBranch && (
+                                        <span className="text-[10px] text-amber-600 font-bold flex items-center gap-1">
+                                            <Lock size={10} /> Strict Branch
+                                        </span>
+                                    )}
+                                </label>
+                                {isBranch ? (
+                                    <div className="w-full px-3 py-2.5 bg-stone-100 border-2 border-stone-200 rounded-xl text-stone-700 text-sm font-bold flex items-center gap-2">
+                                        <Store size={15} className="text-stone-500" />
+                                        <span>{user?.branchName || branches.find(b => b.id === user?.branchId)?.name || 'Current Branch'}</span>
+                                    </div>
+                                ) : (
+                                    <select
+                                        value={editConsigneeBranchId}
+                                        onChange={e => setEditConsigneeBranchId(e.target.value)}
+                                        className="w-full px-3 py-2.5 border-2 border-stone-200 rounded-xl focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all text-sm font-bold bg-white"
+                                    >
+                                        <option value="MAIN">👑 Main Admin (Central HQ)</option>
+                                        {branches.map(b => (
+                                            <option key={b.id} value={b.id}>
+                                                🏬 {b.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                )}
+                                <p className="text-[11px] text-stone-400 mt-1">
+                                    Select Main Admin (Central HQ) or a specific store branch.
+                                </p>
+                            </div>
+
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setEditingConsignee(null)}
+                                    className="flex-1 py-2.5 border border-stone-200 text-stone-600 font-bold rounded-xl hover:bg-stone-50 transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={!editConsigneeName.trim() || savingEdit}
+                                    className="flex-1 py-2.5 bg-zinc-900 text-white font-bold rounded-xl hover:bg-zinc-700 transition-colors disabled:opacity-50 shadow-sm flex items-center justify-center gap-1.5"
+                                >
+                                    {savingEdit ? <Loader2 size={16} className="animate-spin" /> : 'Save Changes'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             {deleteConfirm && (
                 <div className="fixed inset-0 bg-zinc-950/60 z-[300] flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm text-center animate-fade-in-up">

@@ -90,7 +90,6 @@ const TabletLayout = () => {
             { name: 'Sales',      path: `${basePath}/branch-sales`,     icon: TrendingUp },
             { name: 'Add Stock',  path: `${basePath}/add-stock`,        icon: PackagePlus },
             { name: 'Inventory',  path: `${basePath}/inventory`,        icon: Boxes },
-            { name: 'Consignees', path: `${basePath}/consignees`,       icon: Users },
             { name: 'History',    path: `${basePath}/history`,          icon: History },
         ]
         : [
@@ -210,7 +209,6 @@ const TabletLayout = () => {
                                     <Route path="branch-sales"     element={<BranchSales />} />
                                     <Route path="add-stock"        element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
                                     <Route path="inventory"        element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                                    <Route path="consignees"       element={<ConsigneesPage />} />
                                     <Route path="history"          element={<OrderHistory />} />
                                     <Route path="*"                element={<Navigate to={`${basePath}/orders`} replace />} />
                                 </>

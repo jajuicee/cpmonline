@@ -245,6 +245,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             : (mode === 'hq' || selectedBranchId === 'HQ' || selectedBranchId === 0 ? 'HQ' : selectedBranchId));
 
     const isHqScope = effectiveBranch === 'HQ' || effectiveBranch === 0 || effectiveBranch === -1;
+    const isBranchScope = isBranch || isCashier || (!isAdmin) || (effectiveBranch != null && !isHqScope);
 
     const [branches, setBranches] = useState([]);
     const [transactions, setTransactions] = useState([]);
@@ -426,6 +427,9 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             const inPayment = paymentFilter === 'All'
                 || (pl.paymentMethod && pl.paymentMethod.toLowerCase() === paymentFilter.toLowerCase());
             const txType = (txTypeMap[pl.orderId] || 'REGULAR').toUpperCase();
+            if (isBranchScope && txType === 'CONSIGNMENT') {
+                return false;
+            }
             const inType = typeFilter === 'All'
                 ? true
                 : typeFilter === 'REGULAR'
@@ -462,7 +466,12 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             // Strict branch match if effectiveBranch is set
             if (isHqScope) {
                 if (t.branch?.id) return false;
-            } else if (effectiveBranch && t.branch?.id && String(t.branch.id) !== String(effectiveBranch)) {
+            } else if (effectiveBranch) {
+                if (!t.branch || String(t.branch.id) !== String(effectiveBranch)) return false;
+            }
+
+            // Exclude consignees / consignment completely from branch accounts & branch analytics
+            if (isBranchScope && ((t.transactionType || '').toUpperCase() === 'CONSIGNMENT' || t.consignee != null)) {
                 return false;
             }
 
@@ -889,22 +898,24 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                         </div>
                     )}
 
-                    {/* Transaction Type Filter */}
-                    <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
-                        {['All', 'REGULAR', 'CONSIGNMENT'].map(tType => (
-                            <button
-                                key={tType}
-                                onClick={() => setTypeFilter(tType)}
-                                className="px-3 py-1.5 text-xs font-bold rounded-md transition-all"
-                                style={{
-                                    backgroundColor: typeFilter === tType ? '#09090b' : 'transparent',
-                                    color: typeFilter === tType ? '#ffffff' : '#71717a',
-                                }}
-                            >
-                                {tType === 'All' ? 'All Types' : tType === 'REGULAR' ? 'Regular' : 'Consignment'}
-                            </button>
-                        ))}
-                    </div>
+                    {/* Transaction Type Filter - strictly for Admin side */}
+                    {!isBranchScope && (
+                        <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
+                            {['All', 'REGULAR', 'CONSIGNMENT'].map(tType => (
+                                <button
+                                    key={tType}
+                                    onClick={() => setTypeFilter(tType)}
+                                    className="px-3 py-1.5 text-xs font-bold rounded-md transition-all"
+                                    style={{
+                                        backgroundColor: typeFilter === tType ? '#09090b' : 'transparent',
+                                        color: typeFilter === tType ? '#ffffff' : '#71717a',
+                                    }}
+                                >
+                                    {tType === 'All' ? 'All Types' : tType === 'REGULAR' ? 'Regular' : 'Consignment'}
+                                </button>
+                            ))}
+                        </div>
+                    )}
 
                     <div className="w-px h-5 bg-stone-200 mx-1" />
 
@@ -985,7 +996,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                         </span>
                     )}
 
-                    {typeFilter !== 'All' && (
+                    {!isBranchScope && typeFilter !== 'All' && (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-purple-700 text-xs font-bold rounded-lg shadow-xs">
                             <Layers size={11} className="text-purple-600" />
                             {typeFilter === 'REGULAR' ? 'Regular Sales' : 'Consignment'}

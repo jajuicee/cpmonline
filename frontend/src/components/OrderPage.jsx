@@ -494,8 +494,10 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
     useEffect(() => {
         if (refetchProducts) refetchProducts();
-        fetchConsignees();
-    }, [activeBranchId]);
+        if (isAdmin) {
+            fetchConsignees();
+        }
+    }, [activeBranchId, isAdmin]);
 
     const handleAddConsignee = async () => {
         if (!newConsigneeName.trim()) return;
@@ -1457,30 +1459,32 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     {/* Customer & Checkout Controls */}
                     {cart.length > 0 && (
                         <div className="pt-3 border-t border-stone-200 space-y-3 shrink-0">
-                            {/* Mode Toggle */}
-                            <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-bold">
-                                <button
-                                    type="button"
-                                    onClick={() => setOrderMode('REGULAR')}
-                                    className={`flex-1 py-1.5 rounded-lg transition-all ${
-                                        orderMode === 'REGULAR' ? 'bg-white text-stone-900 shadow-sm font-black' : 'text-stone-500 hover:text-stone-800'
-                                    }`}
-                                >
-                                    Regular Sale
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setOrderMode('CONSIGNMENT')}
-                                    className={`flex-1 py-1.5 rounded-lg transition-all ${
-                                        orderMode === 'CONSIGNMENT' ? 'bg-white text-stone-900 shadow-sm font-black' : 'text-stone-500 hover:text-stone-800'
-                                    }`}
-                                >
-                                    Consignment
-                                </button>
-                            </div>
+                            {/* Mode Toggle - strictly Admin side */}
+                            {isAdmin && (
+                                <div className="flex bg-stone-100 p-1 rounded-xl text-xs font-bold">
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrderMode('REGULAR')}
+                                        className={`flex-1 py-1.5 rounded-lg transition-all ${
+                                            orderMode === 'REGULAR' ? 'bg-white text-stone-900 shadow-sm font-black' : 'text-stone-500 hover:text-stone-800'
+                                        }`}
+                                    >
+                                        Regular Sale
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setOrderMode('CONSIGNMENT')}
+                                        className={`flex-1 py-1.5 rounded-lg transition-all ${
+                                            orderMode === 'CONSIGNMENT' ? 'bg-white text-stone-900 shadow-sm font-black' : 'text-stone-500 hover:text-stone-800'
+                                        }`}
+                                    >
+                                        Consignment
+                                    </button>
+                                </div>
+                            )}
 
                             {/* Customer / Consignee Input */}
-                            {orderMode === 'REGULAR' ? (
+                            {(!isAdmin || orderMode === 'REGULAR') ? (
                                 <div>
                                     <input
                                         type="text"

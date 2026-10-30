@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Navigate } from 'react-router-dom';
 import axios from 'axios';
 import {
     Users, UserPlus, CreditCard, CheckCircle2, Loader2,
@@ -592,6 +593,11 @@ const ConsigneesPage = () => {
     const selectedConsignee = allConsignees.find(c => c.id === selectedConsigneeId);
     const totalOutstanding = groupedTransactions.reduce((s, g) => s + g.totalUnpaid, 0);
     const totalValue = groupedTransactions.reduce((s, g) => s + g.totalPrice, 0);
+
+    // Consignees management is strictly Admin-only; redirect branch accounts safely
+    if (!isAdmin) {
+        return <Navigate to="/orders" replace />;
+    }
 
     return (
         <div className="w-full h-full flex flex-col md:flex-row bg-stone-50 overflow-hidden relative">

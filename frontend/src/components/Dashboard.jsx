@@ -135,7 +135,6 @@ const Dashboard = () => {
                     { name: 'Current Inventory', path: '/inventory',        icon: Boxes },
                     { name: 'Stock Requests',    path: '/stock-requests',   icon: Send },
                     { name: 'Set Prices',        path: '/branch-prices',    icon: DollarSign },
-                    { name: 'Consignees',        path: '/consignees',       icon: Users },
                 ]
             },
             {
@@ -450,7 +449,6 @@ const Dashboard = () => {
                                         <Route path="/analytics" element={<BranchAnalytics />} />
                                         <Route path="/expenses" element={<Expenses />} />
                                         <Route path="/history" element={<OrderHistory />} />
-                                        <Route path="/consignees" element={<ConsigneesPage />} />
                                         {/* Fallback for unauthorized branch routes */}
                                         <Route path="*" element={<Navigate to="/orders" replace />} />
                                     </>

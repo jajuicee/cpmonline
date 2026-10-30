@@ -85,6 +85,9 @@ public class ProductVariant {
     @Transient
     private Integer ownedStock = 0;
 
+    @Transient
+    private String activePartnerName;
+
     // Serialize the parent product (brand/model/category) but not its variants list
     // to avoid circular reference, and ignore Hibernate proxy handlers to prevent 500 errors on lazy loads.
     @JsonIgnoreProperties({"variants", "hibernateLazyInitializer", "handler"})

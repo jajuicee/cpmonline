@@ -140,4 +140,11 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
     @Query("SELECT b FROM StockBatch b JOIN FETCH b.variant v JOIN FETCH v.product LEFT JOIN FETCH b.supplier " +
            "WHERE b.partner = true AND b.status = 'RECEIVED'")
     List<StockBatch> findAllPartnerBatchesWithDetails();
+
+    @Query("SELECT s.variant.id, s.partnerName, COALESCE(SUM(s.remainingQuantity), 0) " +
+           "FROM StockBatch s " +
+           "WHERE s.status = 'RECEIVED' AND s.partner = true AND s.remainingQuantity > 0 " +
+           "AND (:branchId IS NULL OR s.branch.id = :branchId) " +
+           "GROUP BY s.variant.id, s.partnerName")
+    List<Object[]> findRemainingPartnerStockByVariantAndPartnerName(@Param("branchId") Long branchId);
 }

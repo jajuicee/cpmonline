@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, X, Search, Building2, Boxes, Coins, AlertTriangle, PackageX, Tag, Store, RefreshCw, Send, PackagePlus } from 'lucide-react';
+import { Package, X, Search, Building2, Boxes, Coins, AlertTriangle, PackageX, Tag, Store, RefreshCw, Send, PackagePlus, Handshake } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const DEFAULT_LOW_STOCK_THRESHOLD = 5;
@@ -22,6 +22,7 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
     const [sortOrder, setSortOrder] = useState('name-asc');
     const [categoryFilter, setCategoryFilter] = useState('All'); // All, Paddles, Accessories, Shoes
     const [stockFilter, setStockFilter] = useState('all'); // all | low | out
+    const [sourceFilter, setSourceFilter] = useState('all'); // all | cpm | partner
 
     // --- FLATTEN DATA ---
     const flattenedInventory = useMemo(() => {
@@ -34,6 +35,11 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                 const mainStock = variant.mainStock != null ? variant.mainStock : qty;
                 const branchStock = variant.branchStock || 0;
                 const locationBreakdown = variant.locationBreakdown || [];
+
+                const partnerStock = variant.partnerStock ?? 0;
+                const ownedStock = variant.ownedStock ?? (variant.partner ? 0 : qty);
+                const partnerName = variant.activePartnerName || variant.partnerName || '';
+                const isPartner = variant.partner || partnerStock > 0 || Boolean(partnerName);
 
                 return {
                     variantId: variant.id,
@@ -49,6 +55,10 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                     quantity: qty,
                     mainStock,
                     branchStock,
+                    partnerStock,
+                    ownedStock,
+                    partnerName,
+                    isPartner,
                     locationBreakdown,
                     sellingPrice: variant.sellingPrice ?? 0,
                     acquisitionPrice: variant.acquisitionPrice ?? 0,
@@ -80,6 +90,8 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
         let lowStock = 0;
         let outOfStock = 0;
         let consignedUnits = 0;
+        let partnerUnits = 0;
+        let cpmUnits = 0;
         for (const row of flattenedInventory) {
             totalUnits += row.quantity;
             warehouseUnits += (row.mainStock || 0);
@@ -88,8 +100,14 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
             if (row.isOutOfStock) outOfStock++;
             else if (row.isLowStock) lowStock++;
             if (row.consigned) consignedUnits += row.quantity;
+            if (row.isPartner || (row.partnerStock || 0) > 0) {
+                partnerUnits += (row.partnerStock || row.quantity || 0);
+                cpmUnits += (row.ownedStock || 0);
+            } else {
+                cpmUnits += row.quantity;
+            }
         }
-        return { totalSkus, totalUnits, warehouseUnits, branchUnits, value, lowStock, outOfStock, consignedUnits };
+        return { totalSkus, totalUnits, warehouseUnits, branchUnits, value, lowStock, outOfStock, consignedUnits, partnerUnits, cpmUnits };
     }, [flattenedInventory]);
 
     const filteredInventory = useMemo(() => {
@@ -97,6 +115,12 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
         
         if (categoryFilter !== 'All') {
             list = list.filter(i => i.category === categoryFilter);
+        }
+
+        if (sourceFilter === 'cpm') {
+            list = list.filter(i => (i.ownedStock > 0 || !i.isPartner) && !i.consigned);
+        } else if (sourceFilter === 'partner') {
+            list = list.filter(i => i.isPartner || (i.partnerStock && i.partnerStock > 0));
         }
 
         if (stockFilter === 'low') list = list.filter(i => i.isLowStock);
@@ -219,21 +243,62 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
 
             {/* CONTROLS BAR: CATEGORIES, SORT, SEARCH */}
             <div className="bg-white p-2 px-3 rounded-xl border border-stone-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-2">
-                {/* Category Pills */}
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 md:pb-0 no-scrollbar">
-                    {['All', 'Paddles', 'Accessories', 'Balls', 'Apparel', 'Shoes', 'Bags'].map(cat => (
+                <div className="flex items-center gap-2 overflow-x-auto pb-0.5 md:pb-0 no-scrollbar">
+                    {/* Source Selector: All, CPM, Partner */}
+                    <div className="flex items-center p-0.5 bg-stone-100 border border-stone-200 rounded-lg">
                         <button
-                            key={cat}
-                            onClick={() => { setCategoryFilter(cat); setDisplayedCount(15); }}
-                            className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                                categoryFilter === cat 
-                                    ? 'bg-stone-900 text-white shadow-sm font-black' 
-                                    : 'bg-stone-100 hover:bg-stone-200 text-stone-600'
+                            onClick={() => { setSourceFilter('all'); setDisplayedCount(15); }}
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                                sourceFilter === 'all'
+                                    ? 'bg-white text-stone-900 shadow-xs font-black'
+                                    : 'text-stone-500 hover:text-stone-800'
                             }`}
                         >
-                            {cat}
+                            All Sources
                         </button>
-                    ))}
+                        <button
+                            onClick={() => { setSourceFilter('cpm'); setDisplayedCount(15); }}
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                sourceFilter === 'cpm'
+                                    ? 'bg-emerald-600 text-white shadow-xs font-black'
+                                    : 'text-emerald-700 hover:bg-emerald-50'
+                            }`}
+                            title="Master Admin / CPM Owned Items"
+                        >
+                            <span>👑 CPM</span>
+                        </button>
+                        <button
+                            onClick={() => { setSourceFilter('partner'); setDisplayedCount(15); }}
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                                sourceFilter === 'partner'
+                                    ? 'bg-purple-600 text-white shadow-xs font-black'
+                                    : 'text-purple-700 hover:bg-purple-50'
+                            }`}
+                            title="Partner / 50-50 Items (e.g. Uly)"
+                        >
+                            <Handshake size={11} />
+                            <span>Partner</span>
+                        </button>
+                    </div>
+
+                    <div className="h-4 w-px bg-stone-200 shrink-0" />
+
+                    {/* Category Pills */}
+                    <div className="flex items-center gap-1">
+                        {['All', 'Paddles', 'Accessories', 'Balls', 'Apparel', 'Shoes', 'Bags'].map(cat => (
+                            <button
+                                key={cat}
+                                onClick={() => { setCategoryFilter(cat); setDisplayedCount(15); }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                                    categoryFilter === cat 
+                                        ? 'bg-stone-900 text-white shadow-sm font-black' 
+                                        : 'bg-stone-100 hover:bg-stone-200 text-stone-600'
+                                }`}
+                            >
+                                {cat}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
@@ -298,7 +363,7 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                             <th className="px-3 py-2">Color</th>
                             <th className="px-3 py-2">Variant</th>
                             {isAdmin && <th className="px-3 py-2">Supplier</th>}
-                            <th className="px-3 py-2">Type</th>
+                            <th className="px-3 py-2">Source / Type</th>
                             <th className="px-3 py-2 text-right">Price</th>
                             <th className="px-3 py-2 text-right">Total Value</th>
                             <th className="px-3 py-2 text-right">Status / Tracking</th>
@@ -333,12 +398,27 @@ const Inventory = ({ products = [], loading = false, refetchProducts }) => {
                                         </td>
                                     )}
                                     <td className="px-3 py-2">
-                                        {row.category === 'Paddles'
-                                            ? row.consigned
-                                                ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-200">Consigned</span>
-                                                : <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full text-[10px] font-bold border border-green-200">Owned</span>
-                                            : <span className="text-zinc-400 text-xs font-medium">{row.category}</span>
-                                        }
+                                        {row.consigned ? (
+                                            <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-black border border-amber-200">
+                                                Consigned
+                                            </span>
+                                        ) : (row.isPartner || (row.partnerStock && row.partnerStock > 0)) ? (
+                                            <div className="flex flex-col gap-1 items-start">
+                                                <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-900 px-2 py-0.5 rounded-md text-[10px] font-black border border-purple-200 whitespace-nowrap shadow-xs">
+                                                    <Handshake size={10} className="text-purple-700" />
+                                                    {row.partnerName || 'Uly'} {row.partnerStock > 0 ? `(${row.partnerStock})` : ''}
+                                                </span>
+                                                {row.ownedStock > 0 && (
+                                                    <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-[10px] font-black border border-emerald-200 whitespace-nowrap">
+                                                        👑 CPM ({row.ownedStock})
+                                                    </span>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-[10px] font-black border border-emerald-200 whitespace-nowrap">
+                                                👑 CPM
+                                            </span>
+                                        )}
                                     </td>
                                     <td className="px-3 py-2 text-right font-bold text-emerald-700 whitespace-nowrap">
                                         {formatPHP(row.sellingPrice)}

@@ -19,7 +19,8 @@ import {
     Users,
     LogOut,
     Store,
-    ShieldCheck
+    ShieldCheck,
+    Handshake
 } from 'lucide-react';
 
 // Main Page Components
@@ -27,6 +28,7 @@ const OrderPage = lazy(() => import('./OrderPage'));
 const OrderHistory = lazy(() => import('./OrderHistory'));
 const AddProduct = lazy(() => import('./AddProduct'));
 const AddBranchStock = lazy(() => import('./AddBranchStock'));
+const PartnerProducts = lazy(() => import('./PartnerProducts'));
 const Inventory = lazy(() => import('./Inventory'));
 const ManageInventory = lazy(() => import('./ManageInventory'));
 const Suppliers = lazy(() => import('./Suppliers'));
@@ -88,6 +90,7 @@ const TabletLayout = () => {
         ? [
             { name: 'POS',        path: `${basePath}/orders`,           icon: ShoppingCart },
             { name: 'Sales',      path: `${basePath}/branch-sales`,     icon: TrendingUp },
+            { name: 'Partner',    path: `${basePath}/partner-products`, icon: Handshake },
             { name: 'Add Stock',  path: `${basePath}/add-stock`,        icon: PackagePlus },
             { name: 'Inventory',  path: `${basePath}/inventory`,        icon: Boxes },
             { name: 'History',    path: `${basePath}/history`,          icon: History },
@@ -186,6 +189,7 @@ const TabletLayout = () => {
                                     <Route path="branch-sales"     element={<BranchSales />} />
                                     <Route path="add-stock"        element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
                                     <Route path="inventory"        element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                    <Route path="partner-products" element={<PartnerProducts products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                     <Route path="consignees"       element={<ConsigneesPage />} />
                                     <Route path="history"          element={<OrderHistory />} />
                                     <Route path="add-product"      element={<AddProduct onProductAdded={fetchProducts} />} />
@@ -209,6 +213,7 @@ const TabletLayout = () => {
                                     <Route path="branch-sales"     element={<BranchSales />} />
                                     <Route path="add-stock"        element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
                                     <Route path="inventory"        element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
+                                    <Route path="partner-products" element={<PartnerProducts products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                     <Route path="history"          element={<OrderHistory />} />
                                     <Route path="*"                element={<Navigate to={`${basePath}/orders`} replace />} />
                                 </>

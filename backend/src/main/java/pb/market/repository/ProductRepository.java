@@ -20,4 +20,5 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
         @org.springframework.data.repository.query.Param("model") String model,
         @org.springframework.data.repository.query.Param("category") String category
     );
+    Optional<Product> findFirstByBrandNameIgnoreCaseAndModelNameIgnoreCase(String brandName, String modelName);
 }

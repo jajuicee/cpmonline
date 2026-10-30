@@ -54,7 +54,9 @@ const TabletLayout = () => {
 
     const fetchProducts = useCallback(async () => {
         setLoadingProducts(true);
-        const url = currentBranchId ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
+        // Central Admin always loads the complete master catalog with all location breakdowns.
+        // Branch-scoped filtering is only applied for retail branch / cashier users.
+        const url = (!isAdmin && currentBranchId) ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
         try {
             const res = await axios.get(url);
             const data = Array.isArray(res.data) ? res.data : [];
@@ -67,7 +69,7 @@ const TabletLayout = () => {
         } finally {
             setLoadingProducts(false);
         }
-    }, [currentBranchId]);
+    }, [isAdmin, currentBranchId]);
 
     useEffect(() => {
         fetchProducts();

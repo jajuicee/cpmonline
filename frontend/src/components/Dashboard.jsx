@@ -84,7 +84,9 @@ const Dashboard = () => {
 
     const fetchProducts = useCallback(async () => {
         setLoadingProducts(true);
-        const url = currentBranchId ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
+        // Central Admin always loads the complete master catalog with all location breakdowns.
+        // Branch-scoped filtering is only applied for retail branch / cashier users.
+        const url = (!isAdmin && currentBranchId) ? `/api/products?branchId=${currentBranchId}` : `/api/products`;
         try {
             const res = await axios.get(url);
             const data = Array.isArray(res.data) ? res.data : [];
@@ -97,7 +99,7 @@ const Dashboard = () => {
         } finally {
             setLoadingProducts(false);
         }
-    }, [currentBranchId]);
+    }, [isAdmin, currentBranchId]);
 
     useEffect(() => {
         fetchProducts();
@@ -344,6 +346,16 @@ const Dashboard = () => {
                                             </option>
                                         ))}
                                 </select>
+                                {selectedBranchId != null && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedBranchId(null)}
+                                        className="text-[11px] text-stone-400 hover:text-rose-600 font-black px-1 transition-colors cursor-pointer"
+                                        title="Reset to Consolidated View (All Branches)"
+                                    >
+                                        ✕
+                                    </button>
+                                )}
                             </div>
                         )}
 

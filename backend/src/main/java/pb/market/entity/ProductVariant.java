@@ -23,6 +23,9 @@ public class ProductVariant {
 
     private BigDecimal acquisitionPrice;
     private BigDecimal sellingPrice;
+
+    @Column(name = "recommended_selling_price")
+    private BigDecimal recommendedSellingPrice;
     // Computed from stock_batches in ProductService.getAllProducts() — NOT stored in DB.
     // Using @Transient instead of @Formula avoids N+1 subqueries and stale-read bugs.
     @Transient

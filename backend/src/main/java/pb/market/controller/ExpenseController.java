@@ -2,6 +2,7 @@ package pb.market.controller;
 
 import pb.market.entity.Expense;
 import pb.market.repository.ExpenseRepository;
+import pb.market.util.DateTimeUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -28,14 +29,8 @@ public class ExpenseController {
             branchId = user.getBranchId();
         }
 
-        java.time.LocalDateTime fromDt = null;
-        java.time.LocalDateTime toDt = null;
-        if (from != null && !from.isBlank()) {
-            try { fromDt = java.time.LocalDateTime.parse(from); } catch (Exception ignored) {}
-        }
-        if (to != null && !to.isBlank()) {
-            try { toDt = java.time.LocalDateTime.parse(to); } catch (Exception ignored) {}
-        }
+        java.time.LocalDateTime fromDt = DateTimeUtil.parseStart(from);
+        java.time.LocalDateTime toDt = DateTimeUtil.parseEnd(to);
 
         // Specific filter for Admin-only expenses (no branch assigned)
         if (onlyHq || (branchId != null && (branchId == 0L || branchId == -1L))) {

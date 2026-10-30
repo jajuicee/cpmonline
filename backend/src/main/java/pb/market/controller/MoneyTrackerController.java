@@ -10,6 +10,7 @@ import pb.market.entity.BranchStockAllocation;
 import pb.market.entity.Expense;
 import pb.market.entity.PaymentLog;
 import pb.market.repository.*;
+import pb.market.util.DateTimeUtil;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -44,14 +45,8 @@ public class MoneyTrackerController {
             branchId = user.getBranchId();
         }
 
-        LocalDateTime fromDt = null;
-        LocalDateTime toDt = null;
-        if (from != null && !from.isBlank()) {
-            try { fromDt = LocalDateTime.parse(from); } catch (Exception ignored) {}
-        }
-        if (to != null && !to.isBlank()) {
-            try { toDt = LocalDateTime.parse(to); } catch (Exception ignored) {}
-        }
+        LocalDateTime fromDt = DateTimeUtil.parseStart(from);
+        LocalDateTime toDt = DateTimeUtil.parseEnd(to);
         boolean hasDateFilter = (fromDt != null || toDt != null);
         LocalDateTime effectiveFrom = fromDt != null ? fromDt : LocalDateTime.of(2020, 1, 1, 0, 0);
         LocalDateTime effectiveTo = toDt != null ? toDt : LocalDateTime.now();

@@ -11,6 +11,7 @@ import pb.market.entity.StockBatch;
 import pb.market.entity.Supplier;
 import pb.market.repository.StockBatchRepository;
 import pb.market.repository.SupplierRepository;
+import pb.market.util.DateTimeUtil;
 import pb.market.repository.TransactionRepository;
 
 import java.math.BigDecimal;
@@ -42,8 +43,10 @@ public class SupplierController {
     public List<SupplierWithStatsDTO> getAllWithStats(
             @RequestParam("start") String startStr,
             @RequestParam("end") String endStr) {
-        LocalDateTime start = LocalDateTime.parse(startStr);
-        LocalDateTime end = LocalDateTime.parse(endStr);
+        LocalDateTime start = DateTimeUtil.parseStart(startStr);
+        LocalDateTime end = DateTimeUtil.parseEnd(endStr);
+        if (start == null) start = LocalDateTime.of(2020, 1, 1, 0, 0);
+        if (end == null) end = LocalDateTime.now();
 
         List<Supplier> suppliers = supplierRepository.findAll();
 
@@ -53,8 +56,8 @@ public class SupplierController {
         Map<Long, LocalDateTime> lastPurchase = new HashMap<>();
 
         for (Object[] row : stockBatchRepository.sumPurchasesBySupplierInRange(start, end)) {
-            Long sid = (Long) row[0];
-            boolean consigned = (Boolean) row[1];
+            Long sid = ((Number) row[0]).longValue();
+            boolean consigned = Boolean.TRUE.equals(row[1]);
             long count = ((Number) row[2]).longValue();
             long units = row[3] != null ? ((Number) row[3]).longValue() : 0L;
             BigDecimal cost = row[4] != null ? (BigDecimal) row[4] : BigDecimal.ZERO;
@@ -73,8 +76,8 @@ public class SupplierController {
 
         Map<Long, Long> consignedSold = transactionRepository.countSoldConsignedBySupplierInRange(start, end).stream()
                 .collect(Collectors.toMap(
-                        row -> (Long) row[0],
-                        row -> (Long) row[1]
+                        row -> ((Number) row[0]).longValue(),
+                        row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
         return suppliers.stream().map(s -> {
@@ -95,8 +98,10 @@ public class SupplierController {
     public SupplierStatsDTO getStats(
             @RequestParam("start") String startStr,
             @RequestParam("end") String endStr) {
-        LocalDateTime start = LocalDateTime.parse(startStr);
-        LocalDateTime end = LocalDateTime.parse(endStr);
+        LocalDateTime start = DateTimeUtil.parseStart(startStr);
+        LocalDateTime end = DateTimeUtil.parseEnd(endStr);
+        if (start == null) start = LocalDateTime.of(2020, 1, 1, 0, 0);
+        if (end == null) end = LocalDateTime.now();
 
         long totalSuppliers = supplierRepository.count();
 
@@ -105,8 +110,8 @@ public class SupplierController {
         Map<Long, BigDecimal> spendBySupplier = new HashMap<>();
 
         for (Object[] row : stockBatchRepository.sumPurchasesBySupplierInRange(start, end)) {
-            Long sid = (Long) row[0];
-            boolean consigned = (Boolean) row[1];
+            Long sid = ((Number) row[0]).longValue();
+            boolean consigned = Boolean.TRUE.equals(row[1]);
             BigDecimal cost = row[4] != null ? (BigDecimal) row[4] : BigDecimal.ZERO;
             if (consigned) consignedOwed = consignedOwed.add(cost);
             else           ownedSpend    = ownedSpend.add(cost);
@@ -139,8 +144,10 @@ public class SupplierController {
         if (!supplierRepository.existsById(id)) {
             return ResponseEntity.notFound().build();
         }
-        LocalDateTime start = LocalDateTime.parse(startStr);
-        LocalDateTime end = LocalDateTime.parse(endStr);
+        LocalDateTime start = DateTimeUtil.parseStart(startStr);
+        LocalDateTime end = DateTimeUtil.parseEnd(endStr);
+        if (start == null) start = LocalDateTime.of(2020, 1, 1, 0, 0);
+        if (end == null) end = LocalDateTime.now();
 
         List<SupplierPurchaseDTO> result = new ArrayList<>();
         for (StockBatch b : stockBatchRepository.findPurchasesBySupplierInRange(id, start, end)) {
@@ -174,14 +181,16 @@ public class SupplierController {
             @RequestParam("start") String startStr,
             @RequestParam("end") String endStr) {
 
-        LocalDateTime start = LocalDateTime.parse(startStr);
-        LocalDateTime end = LocalDateTime.parse(endStr);
+        LocalDateTime start = DateTimeUtil.parseStart(startStr);
+        LocalDateTime end = DateTimeUtil.parseEnd(endStr);
+        if (start == null) start = LocalDateTime.of(2020, 1, 1, 0, 0);
+        if (end == null) end = LocalDateTime.now();
 
         List<Supplier> suppliers = supplierRepository.findAll();
         Map<Long, Long> counts = transactionRepository.countSoldConsignedBySupplierInRange(start, end).stream()
                 .collect(Collectors.toMap(
-                        row -> (Long) row[0],
-                        row -> (Long) row[1]
+                        row -> ((Number) row[0]).longValue(),
+                        row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
         return suppliers.stream().map(s -> new SupplierConsignmentDTO(

@@ -2,6 +2,7 @@ package pb.market.controller;
 
 import pb.market.entity.PaymentLog;
 import pb.market.repository.PaymentLogRepository;
+import pb.market.util.DateTimeUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,18 +30,16 @@ public class PaymentLogController {
             branchId = user.getBranchId();
             onlyHq = false;
         }
+        LocalDateTime from = DateTimeUtil.parseStart(fromStr);
+        LocalDateTime to = DateTimeUtil.parseEnd(toStr);
         boolean isHq = onlyHq || (branchId != null && (branchId == 0L || branchId == -1L));
         if (isHq) {
-            if (fromStr != null && toStr != null) {
-                LocalDateTime from = LocalDateTime.parse(fromStr);
-                LocalDateTime to = LocalDateTime.parse(toStr);
+            if (from != null && to != null) {
                 return paymentLogRepository.findByPaymentDateBetweenHq(from, to);
             }
             return paymentLogRepository.findAllHqOrdered();
         }
-        if (fromStr != null && toStr != null) {
-            LocalDateTime from = LocalDateTime.parse(fromStr);
-            LocalDateTime to = LocalDateTime.parse(toStr);
+        if (from != null && to != null) {
             return branchId == null
                     ? paymentLogRepository.findByPaymentDateBetween(from, to)
                     : paymentLogRepository.findByPaymentDateBetweenAndBranch(from, to, branchId);

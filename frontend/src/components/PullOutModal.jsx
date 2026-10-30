@@ -90,8 +90,8 @@ const PullOutModal = ({ isOpen, onClose, item, onSuccess }) => {
 
     const parsedQty = parseInt(quantity, 10) || 0;
     const branchRemainingAfter = Math.max(0, maxQty - parsedQty);
-    const adminHoldingCurrent = item.adminStock != null ? item.adminStock : (item.mainStock != null ? item.mainStock : 0);
-    const adminHoldingAfter = adminHoldingCurrent + parsedQty;
+    const adminHoldingCurrent = item.adminStock != null ? item.adminStock : (item.mainStock != null ? item.mainStock : null);
+    const adminHoldingAfter = adminHoldingCurrent != null ? adminHoldingCurrent + parsedQty : null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">

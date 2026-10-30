@@ -10,6 +10,7 @@ import pb.market.config.UserPrincipal;
 import pb.market.dto.StockAllocationRequest;
 import pb.market.entity.*;
 import pb.market.repository.*;
+import pb.market.util.DateTimeUtil;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -285,8 +286,8 @@ public class StockAllocationController {
                 : allocationRepo.findAllWithDetails();
 
         // Optional date filtering on allocatedAt
-        LocalDateTime fromDt = (from != null && !from.isBlank()) ? LocalDateTime.parse(from) : null;
-        LocalDateTime toDt   = (to != null && !to.isBlank())     ? LocalDateTime.parse(to)   : null;
+        LocalDateTime fromDt = DateTimeUtil.parseStart(from);
+        LocalDateTime toDt   = DateTimeUtil.parseEnd(to);
 
         if (fromDt != null || toDt != null || (status != null && !status.equalsIgnoreCase("ALL"))) {
             list = list.stream().filter(a -> {
@@ -712,6 +713,9 @@ public class StockAllocationController {
         Supplier defaultOrBatchSupplier = variant.getDefaultSupplier();
 
         // 2. FIFO deduction across branch batches & credit associated allocations
+        Set<Long> adjustedAllocIds = new HashSet<>();
+        int creditedUnits = 0;
+
         for (StockBatch bBatch : branchBatches) {
             if (remainingToPull <= 0) break;
             int avail = bBatch.getRemainingQuantity() != null ? bBatch.getRemainingQuantity() : 0;
@@ -740,21 +744,28 @@ public class StockAllocationController {
                 List<BranchStockAllocation> linkedAllocs = allocationRepo.findByStockBatchId(bBatch.getId());
                 for (BranchStockAllocation alloc : linkedAllocs) {
                     adjustAllocationForPullOut(alloc, deduct);
+                    adjustedAllocIds.add(alloc.getId());
+                    creditedUnits += deduct;
                 }
             }
 
             remainingToPull -= deduct;
         }
 
-        // Also check uncredited allocations for this branch and variant where status != 'PAID'
-        List<BranchStockAllocation> variantAllocs = allocationRepo.findByBranchIdAndVariantId(branchId, variantId);
-        int uncreditedPull = quantity;
-        for (BranchStockAllocation alloc : variantAllocs) {
-            if (uncreditedPull <= 0) break;
-            if (!"PAID".equals(alloc.getStatus()) && alloc.getQuantity() != null && alloc.getQuantity() > 0) {
-                int deductFromAlloc = Math.min(uncreditedPull, alloc.getQuantity());
-                adjustAllocationForPullOut(alloc, deductFromAlloc);
-                uncreditedPull -= deductFromAlloc;
+        // If any pulled units were not credited via direct stockBatchId link (e.g. legacy allocations),
+        // apply remaining pull credits across other unpaid allocations for this variant.
+        int uncreditedPull = quantity - creditedUnits;
+        if (uncreditedPull > 0) {
+            List<BranchStockAllocation> variantAllocs = allocationRepo.findByBranchIdAndVariantId(branchId, variantId);
+            for (BranchStockAllocation alloc : variantAllocs) {
+                if (uncreditedPull <= 0) break;
+                if (adjustedAllocIds.contains(alloc.getId())) continue;
+                if (!"PAID".equals(alloc.getStatus()) && alloc.getQuantity() != null && alloc.getQuantity() > 0) {
+                    int deductFromAlloc = Math.min(uncreditedPull, alloc.getQuantity());
+                    adjustAllocationForPullOut(alloc, deductFromAlloc);
+                    adjustedAllocIds.add(alloc.getId());
+                    uncreditedPull -= deductFromAlloc;
+                }
             }
         }
 

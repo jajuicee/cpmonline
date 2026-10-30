@@ -1,5 +1,7 @@
 package pb.market.controller;
 
+import pb.market.util.DateTimeUtil;
+
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -372,7 +374,7 @@ public class AdminController {
                     pendingPortion = BigDecimal.ZERO;
                 } else if ("PARTIAL".equalsIgnoreCase(alloc.getStatus()) && alloc.getTotalCost() != null && alloc.getTotalCost().compareTo(BigDecimal.ZERO) > 0) {
                     remittanceStatus = "PARTIAL";
-                    BigDecimal paidRatio = alloc.getAmountPaid().divide(alloc.getTotalCost(), 4, java.math.RoundingMode.HALF_UP);
+                    BigDecimal paidRatio = (alloc.getAmountPaid() != null ? alloc.getAmountPaid() : BigDecimal.ZERO).divide(alloc.getTotalCost(), 4, java.math.RoundingMode.HALF_UP);
                     remittedPortion = costPrice.multiply(paidRatio).setScale(2, java.math.RoundingMode.HALF_UP);
                     if (remittedPortion.compareTo(costPrice) > 0) remittedPortion = costPrice;
                     pendingPortion = costPrice.subtract(remittedPortion);
@@ -476,16 +478,7 @@ public class AdminController {
     }
 
     private LocalDateTime parseDateTime(String str, boolean isEnd) {
-        if (str == null || str.isBlank()) return null;
-        try {
-            if (str.length() == 10) {
-                LocalDate ld = LocalDate.parse(str);
-                return isEnd ? ld.atTime(23, 59, 59) : ld.atStartOfDay();
-            }
-            return LocalDateTime.parse(str);
-        } catch (Exception e) {
-            return null;
-        }
+        return DateTimeUtil.parse(str, isEnd);
     }
 
     // ─── GET /api/admin/analytics/hq-direct & /api/admin/analytics/main-admin ──

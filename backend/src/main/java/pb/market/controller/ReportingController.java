@@ -1,5 +1,7 @@
 package pb.market.controller;
 
+import pb.market.util.DateTimeUtil;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,13 +41,9 @@ public class ReportingController {
     @Transactional(readOnly = true)
     @GetMapping("/inventory-ledger")
     public ResponseEntity<?> getInventoryLedger(@RequestParam(required = false) String date) {
-        LocalDateTime start;
-        LocalDateTime end;
-        if (date != null && !date.isBlank()) {
-            LocalDate d = LocalDate.parse(date);
-            start = d.atStartOfDay();
-            end = d.plusDays(1).atStartOfDay();
-        } else {
+        LocalDateTime start = DateTimeUtil.parseStart(date);
+        LocalDateTime end = DateTimeUtil.parseEnd(date);
+        if (start == null || end == null) {
             LocalDate today = LocalDate.now();
             start = today.atStartOfDay();
             end = today.plusDays(1).atStartOfDay();
@@ -80,9 +78,9 @@ public class ReportingController {
         List<Object[]> currentStockData = stockBatchRepository.sumRemainingQuantityByVariantId();
         Map<Long, Integer> stockMap = new HashMap<>();
         for (Object[] row : currentStockData) {
-            Long vId = (Long) row[0];
-            Long qtyLong = (Long) row[1];
-            stockMap.put(vId, qtyLong.intValue());
+            Long vId = ((Number) row[0]).longValue();
+            Number qtyNum = row[1] != null ? (Number) row[1] : 0;
+            stockMap.put(vId, qtyNum.intValue());
         }
 
         // Initialize DTOs with Current Stock as the anchor
@@ -96,8 +94,8 @@ public class ReportingController {
         // 1. Restocks
         List<Object[]> batches = stockBatchRepository.findAllVariantIdsQuantitiesAndDates();
         for (Object[] row : batches) {
-            Long variantId = (Long) row[0];
-            Integer quantity = (Integer) row[1];
+            Long variantId = ((Number) row[0]).longValue();
+            Integer quantity = row[1] != null ? ((Number) row[1]).intValue() : 0;
             LocalDateTime restockedAt = (LocalDateTime) row[2];
 
             DailyInventoryDTO dto = map.get(variantId);
@@ -117,7 +115,7 @@ public class ReportingController {
         // 2. Sales
         List<Object[]> transactions = transactionRepository.findAllVariantIdsAndDates();
         for (Object[] row : transactions) {
-            Long variantId = (Long) row[0];
+            Long variantId = ((Number) row[0]).longValue();
             LocalDateTime txDate = (LocalDateTime) row[1];
 
             DailyInventoryDTO dto = map.get(variantId);
@@ -137,8 +135,8 @@ public class ReportingController {
         // 3. Adjustments
         List<Object[]> adjustments = stockAdjustmentRepository.findAllVariantIdsQuantitiesAndDates();
         for (Object[] row : adjustments) {
-            Long variantId = (Long) row[0];
-            Integer quantity = (Integer) row[1];
+            Long variantId = ((Number) row[0]).longValue();
+            Integer quantity = row[1] != null ? ((Number) row[1]).intValue() : 0;
             LocalDateTime adjustedAt = (LocalDateTime) row[2];
 
             DailyInventoryDTO dto = map.get(variantId);
@@ -179,13 +177,8 @@ public class ReportingController {
     @Transactional(readOnly = true)
     @GetMapping("/financials")
     public ResponseEntity<?> getFinancialSummary(@RequestParam(required = false) String date) {
-        LocalDateTime start = null;
-        LocalDateTime end = null;
-        if (date != null && !date.isBlank()) {
-            LocalDate d = LocalDate.parse(date);
-            start = d.atStartOfDay();
-            end = d.plusDays(1).atStartOfDay();
-        }
+        LocalDateTime start = DateTimeUtil.parseStart(date);
+        LocalDateTime end = DateTimeUtil.parseEnd(date);
 
         // Use lightweight aggregate queries — one SQL call each, returns only numbers
         BigDecimal expectedRevenue;
@@ -243,9 +236,9 @@ public class ReportingController {
         java.math.BigDecimal totalIncome;
         java.util.List<Object[]> methodRows;
 
-        if (from != null && to != null) {
-            LocalDateTime fromDt = LocalDateTime.parse(from);
-            LocalDateTime toDt   = LocalDateTime.parse(to);
+        LocalDateTime fromDt = DateTimeUtil.parseStart(from);
+        LocalDateTime toDt   = DateTimeUtil.parseEnd(to);
+        if (fromDt != null && toDt != null) {
             if (branchId != null) {
                 totalIncome = transactionRepository.sumFinalPriceInRangeAndBranch(fromDt, toDt, branchId);
                 methodRows  = transactionRepository.sumFinalPriceByPaymentMethodInRangeAndBranch(fromDt, toDt, branchId);

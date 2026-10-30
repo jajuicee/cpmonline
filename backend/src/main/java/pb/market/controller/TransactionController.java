@@ -7,6 +7,7 @@ import pb.market.entity.StockBatch;
 import pb.market.entity.Transaction;
 import pb.market.entity.PaymentLog;
 import pb.market.repository.StockBatchRepository;
+import pb.market.util.DateTimeUtil;
 import pb.market.repository.TransactionRepository;
 import pb.market.repository.VariantRepository;
 import pb.market.repository.ConsigneeRepository;
@@ -175,17 +176,15 @@ public class TransactionController {
         }
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
         boolean isHq = onlyHq || (branchId != null && (branchId == 0L || branchId == -1L));
+        java.time.LocalDateTime from = DateTimeUtil.parseStart(fromStr);
+        java.time.LocalDateTime to   = DateTimeUtil.parseEnd(toStr);
         if (isHq) {
-            if (fromStr != null && toStr != null) {
-                java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
-                java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+            if (from != null && to != null) {
                 return transactionRepository.findAllMainAdminTransactionsInRange(from, to, page);
             }
             return transactionRepository.findAllMainAdminTransactions(page);
         }
-        if (fromStr != null && toStr != null) {
-            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
-            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+        if (from != null && to != null) {
             return transactionRepository.findAllWithDetailsByActivityDateAndBranch(from, to, branchId, page);
         }
         return transactionRepository.findAllWithDetailsByBranch(branchId, page);
@@ -198,9 +197,9 @@ public class TransactionController {
             @RequestParam(value = "to",   required = false) String toStr,
             @RequestParam(value = "limit", required = false, defaultValue = "100000") int limit) {
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
-        if (fromStr != null && toStr != null) {
-            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
-            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+        java.time.LocalDateTime from = DateTimeUtil.parseStart(fromStr);
+        java.time.LocalDateTime to   = DateTimeUtil.parseEnd(toStr);
+        if (from != null && to != null) {
             return transactionRepository.findAllWithDetailsByActivityDateHq(from, to, page);
         }
         return transactionRepository.findAllWithDetailsHq(page);
@@ -231,9 +230,9 @@ public class TransactionController {
         }
 
         List<Object[]> rows;
-        if (fromStr != null && !fromStr.isBlank() && toStr != null && !toStr.isBlank()) {
-            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
-            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+        java.time.LocalDateTime from = DateTimeUtil.parseStart(fromStr);
+        java.time.LocalDateTime to   = DateTimeUtil.parseEnd(toStr);
+        if (from != null && to != null) {
             rows = transactionRepository.findCategorySalesInRange(from, to, branchId);
         } else {
             rows = transactionRepository.findCategorySalesAllTime(branchId);
@@ -315,9 +314,9 @@ public class TransactionController {
         }
 
         List<Object[]> rows;
-        if (fromStr != null && !fromStr.isBlank() && toStr != null && !toStr.isBlank()) {
-            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
-            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+        java.time.LocalDateTime from = DateTimeUtil.parseStart(fromStr);
+        java.time.LocalDateTime to   = DateTimeUtil.parseEnd(toStr);
+        if (from != null && to != null) {
             rows = transactionRepository.findVariantSalesInRange(from, to, branchId);
         } else {
             rows = transactionRepository.findVariantSalesAllTime(branchId);
@@ -350,9 +349,9 @@ public class TransactionController {
 
         org.springframework.data.domain.Pageable page = org.springframework.data.domain.PageRequest.of(0, limit);
         List<Object[]> rows;
-        if (fromStr != null && !fromStr.isBlank() && toStr != null && !toStr.isBlank()) {
-            java.time.LocalDateTime from = java.time.LocalDateTime.parse(fromStr);
-            java.time.LocalDateTime to   = java.time.LocalDateTime.parse(toStr);
+        java.time.LocalDateTime from = DateTimeUtil.parseStart(fromStr);
+        java.time.LocalDateTime to   = DateTimeUtil.parseEnd(toStr);
+        if (from != null && to != null) {
             rows = transactionRepository.findTopRankingUnitsInRange(from, to, branchId, page);
         } else {
             rows = transactionRepository.findTopRankingUnitsAllTime(branchId, page);

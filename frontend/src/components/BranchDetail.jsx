@@ -1471,17 +1471,22 @@ const BranchDetail = () => {
                                                                             {(item.remainingQuantity != null ? item.remainingQuantity : item.quantity) > 0 && (
                                                                                 <button
                                                                                     type="button"
-                                                                                    onClick={() => setPullOutModalItem({
-                                                                                        variantId: item.variant?.id || item.variantId,
-                                                                                        sku: item.sku,
-                                                                                        brandName: item.brandName,
-                                                                                        modelName: item.modelName,
-                                                                                        color: item.variant?.color,
-                                                                                        thicknessMm: item.variant?.thicknessMm,
-                                                                                        branchStock: item.remainingQuantity != null ? item.remainingQuantity : item.quantity,
-                                                                                        branchId: branch?.id,
-                                                                                        branchName: branch?.name
-                                                                                    })}
+                                                                                    onClick={() => {
+                                                                                        const targetVariantId = item.variant?.id || item.variantId;
+                                                                                        const matchingInv = inventory.find(inv => inv.variantId === targetVariantId);
+                                                                                        setPullOutModalItem({
+                                                                                            variantId: targetVariantId,
+                                                                                            sku: item.sku,
+                                                                                            brandName: item.brandName,
+                                                                                            modelName: item.modelName,
+                                                                                            color: item.variant?.color,
+                                                                                            thicknessMm: item.variant?.thicknessMm,
+                                                                                            branchStock: item.remainingQuantity != null ? item.remainingQuantity : item.quantity,
+                                                                                            adminStock: matchingInv?.adminStock != null ? matchingInv.adminStock : null,
+                                                                                            branchId: branch?.id,
+                                                                                            branchName: branch?.name
+                                                                                        });
+                                                                                    }}
                                                                                     className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-[11px] font-bold transition-all shadow-xs cursor-pointer active:scale-95"
                                                                                     title="Pull out unsold units from this batch back to Master Admin"
                                                                                 >

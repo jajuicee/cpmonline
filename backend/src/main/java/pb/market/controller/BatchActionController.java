@@ -320,16 +320,24 @@ public class BatchActionController {
             // Collect item details
             List<Map<String, Object>> itemDtos = items.stream().map(item -> {
                 Map<String, Object> i = new java.util.HashMap<>();
-                i.put("variantId", item.getVariant().getId());
-                i.put("sku", item.getVariant().getSku());
-                i.put("name", item.getVariant().getProduct().getBrandName() + " "
-                        + item.getVariant().getProduct().getModelName() + " (" + item.getVariant().getColor() + ")");
-                i.put("quantity", item.getQuantity());
+                Long vId = item.getVariant() != null ? item.getVariant().getId() : null;
+                String sku = item.getVariant() != null ? item.getVariant().getSku() : "";
+                String brand = (item.getVariant() != null && item.getVariant().getProduct() != null) ? item.getVariant().getProduct().getBrandName() : "";
+                String model = (item.getVariant() != null && item.getVariant().getProduct() != null) ? item.getVariant().getProduct().getModelName() : "";
+                String color = item.getVariant() != null && item.getVariant().getColor() != null ? item.getVariant().getColor() : "";
+                String name = (brand + " " + model).trim();
+                if (!color.isBlank()) name += " (" + color + ")";
+                if (name.isBlank()) name = sku.isBlank() ? "Item" : sku;
+
+                i.put("variantId", vId);
+                i.put("sku", sku);
+                i.put("name", name);
+                i.put("quantity", item.getQuantity() != null ? item.getQuantity() : 0);
                 i.put("baseCost", item.getAcquisitionPrice());
                 return i;
             }).collect(Collectors.toList());
 
-            int totalQty = items.stream().mapToInt(StockBatch::getQuantity).sum();
+            int totalQty = items.stream().mapToInt(b -> b.getQuantity() != null ? b.getQuantity() : 0).sum();
 
             Map<String, Object> batchMap = new java.util.HashMap<>();
             batchMap.put("batchId", batchId);

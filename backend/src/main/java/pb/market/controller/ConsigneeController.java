@@ -20,6 +20,7 @@ public class ConsigneeController {
     public List<Consignee> getAllConsignees(
             @RequestParam(required = false) Long branchId,
             @RequestParam(required = false, defaultValue = "false") Boolean onlyHq,
+            @RequestParam(required = false, defaultValue = "false") Boolean includeArchived,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         if (user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()))) {
             branchId = user.getBranchId();
@@ -28,7 +29,7 @@ public class ConsigneeController {
             onlyHq = true;
             branchId = null;
         }
-        return consigneeRepository.findAllByBranchOrHq(branchId, Boolean.TRUE.equals(onlyHq));
+        return consigneeRepository.findAllByBranchOrHq(branchId, Boolean.TRUE.equals(onlyHq), Boolean.TRUE.equals(includeArchived));
     }
 
     @PostMapping
@@ -77,6 +78,7 @@ public class ConsigneeController {
         if (updated.getContactInfo() != null) {
             consignee.setContactInfo(updated.getContactInfo().trim());
         }
+        consignee.setArchived(updated.isArchived());
 
         boolean isBranchUser = user != null && ("BRANCH".equals(user.getRole()) || "CASHIER".equals(user.getRole()));
         if (!isBranchUser) {
@@ -101,6 +103,20 @@ public class ConsigneeController {
             }
         }
 
+        return consigneeRepository.save(consignee);
+    }
+
+    @PatchMapping("/{id}/archive")
+    public Consignee toggleArchive(
+            @PathVariable("id") Long id,
+            @RequestParam(required = false) Boolean archived) {
+        Consignee consignee = consigneeRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Consignee not found."));
+        if (archived != null) {
+            consignee.setArchived(archived);
+        } else {
+            consignee.setArchived(!consignee.isArchived());
+        }
         return consigneeRepository.save(consignee);
     }
 

@@ -22,6 +22,9 @@ public class Consignee {
     @JoinColumn(name = "branch_id")
     private Branch branch;
 
+    @Column(name = "archived", nullable = false, columnDefinition = "boolean default false")
+    private boolean archived = false;
+
     private LocalDateTime createdAt;
 
     @PrePersist

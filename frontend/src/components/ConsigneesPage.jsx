@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
     Users, UserPlus, CreditCard, CheckCircle2, Loader2,
     AlertCircle, X, Undo2, ChevronDown, Trash2, Search, Tag,
-    Store, Lock, Phone, Filter, Edit2
+    Store, Lock, Phone, Filter, Edit2, Archive, ArchiveRestore, Eye, EyeOff
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -35,11 +35,15 @@ const ConsigneesPage = () => {
         return (selectedBranchFilter !== 'ALL' && selectedBranchFilter) ? selectedBranchFilter : 'MAIN';
     });
 
+    // Archive & Status Filter State ('ALL' | 'ACTIVE' | 'ARCHIVED')
+    const [consigneeStatusFilter, setConsigneeStatusFilter] = useState('ACTIVE');
+
     // Edit Consignee State
     const [editingConsignee, setEditingConsignee] = useState(null);
     const [editConsigneeName, setEditConsigneeName] = useState('');
     const [editConsigneeContact, setEditConsigneeContact] = useState('');
     const [editConsigneeBranchId, setEditConsigneeBranchId] = useState('MAIN');
+    const [editConsigneeArchived, setEditConsigneeArchived] = useState(false);
     const [savingEdit, setSavingEdit] = useState(false);
 
     const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -106,7 +110,7 @@ const ConsigneesPage = () => {
         setLoading(true);
         try {
             const [consRes, txRes] = await Promise.all([
-                axios.get(`${BASE}/api/consignees`),
+                axios.get(`${BASE}/api/consignees`, { params: { includeArchived: true } }),
                 axios.get(`${BASE}/api/transactions/consignment`),
             ]);
             setAllConsignees(Array.isArray(consRes.data) ? consRes.data : []);
@@ -138,19 +142,35 @@ const ConsigneesPage = () => {
         return counts;
     }, [allConsignees, branches]);
 
-    // ── Strictly Scoped Consignees per selected branch ──────────────────────────
+    // ── Status Counts (Active vs Archived) ─────────────────────────────────────
+    const statusCounts = useMemo(() => {
+        let active = 0;
+        let archived = 0;
+        allConsignees.forEach(c => {
+            if (c.archived) archived++;
+            else active++;
+        });
+        return { ACTIVE: active, ARCHIVED: archived, ALL: allConsignees.length };
+    }, [allConsignees]);
+
+    // ── Strictly Scoped Consignees per selected branch & status filter ─────────
     const visibleConsignees = useMemo(() => {
+        let list = allConsignees;
         if (isBranch) {
-            return allConsignees.filter(c => !user?.branchId || c.branch?.id === user.branchId);
+            list = list.filter(c => !user?.branchId || c.branch?.id === user.branchId);
+        } else if (selectedBranchFilter === 'MAIN' || selectedBranchFilter === 0 || selectedBranchFilter === '0') {
+            list = list.filter(c => !c.branch || !c.branch.id);
+        } else if (selectedBranchFilter !== 'ALL') {
+            list = list.filter(c => c.branch?.id === Number(selectedBranchFilter));
         }
-        if (selectedBranchFilter === 'ALL') {
-            return allConsignees;
+
+        if (consigneeStatusFilter === 'ACTIVE') {
+            list = list.filter(c => !c.archived);
+        } else if (consigneeStatusFilter === 'ARCHIVED') {
+            list = list.filter(c => c.archived);
         }
-        if (selectedBranchFilter === 'MAIN' || selectedBranchFilter === 0 || selectedBranchFilter === '0') {
-            return allConsignees.filter(c => !c.branch || !c.branch.id);
-        }
-        return allConsignees.filter(c => c.branch?.id === Number(selectedBranchFilter));
-    }, [allConsignees, selectedBranchFilter, isBranch, user?.branchId]);
+        return list;
+    }, [allConsignees, selectedBranchFilter, consigneeStatusFilter, isBranch, user?.branchId]);
 
     // ── Strictly Scoped Transactions per selected branch ───────────────────────
     const visibleTransactions = useMemo(() => {
@@ -210,6 +230,23 @@ const ConsigneesPage = () => {
         setEditConsigneeName(c.name || '');
         setEditConsigneeContact(c.contactInfo || '');
         setEditConsigneeBranchId(c.branch?.id ? c.branch.id : 'MAIN');
+        setEditConsigneeArchived(Boolean(c.archived));
+    };
+
+    const handleToggleArchive = async (c, e) => {
+        if (e) e.stopPropagation();
+        try {
+            const res = await axios.patch(`${BASE}/api/consignees/${c.id}/archive`);
+            setAllConsignees(prev => prev.map(item => item.id === c.id ? res.data : item));
+            showToast(
+                res.data.archived 
+                    ? `"${c.name}" hidden & archived from POS.` 
+                    : `"${c.name}" restored & visible in POS.`,
+                'success'
+            );
+        } catch (err) {
+            showToast('Failed to update consignee archive status.', 'error');
+        }
     };
 
     const handleSaveEditConsignee = async (e) => {
@@ -222,7 +259,8 @@ const ConsigneesPage = () => {
             const payload = {
                 name: editConsigneeName.trim(),
                 contactInfo: editConsigneeContact.trim() || '',
-                branch: targetBranchId ? { id: targetBranchId } : null
+                branch: targetBranchId ? { id: targetBranchId } : null,
+                archived: editConsigneeArchived
             };
             const params = {
                 branchId: targetBranchId ? targetBranchId : 0
@@ -701,6 +739,58 @@ const ConsigneesPage = () => {
                     ))}
                 </div>
 
+                {/* Status Filter (Active / Archived) */}
+                <div className="flex gap-1 px-3 py-1.5 border-b border-stone-100 bg-stone-50/60 shrink-0">
+                    <button
+                        type="button"
+                        onClick={() => setConsigneeStatusFilter('ACTIVE')}
+                        className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${
+                            consigneeStatusFilter === 'ACTIVE'
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                        }`}
+                    >
+                        <span>Active</span>
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                            consigneeStatusFilter === 'ACTIVE' ? 'bg-emerald-800 text-white' : 'bg-stone-100 text-stone-500'
+                        }`}>
+                            {statusCounts.ACTIVE}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setConsigneeStatusFilter('ARCHIVED')}
+                        className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${
+                            consigneeStatusFilter === 'ARCHIVED'
+                                ? 'bg-amber-600 text-white shadow-sm'
+                                : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                        }`}
+                    >
+                        <span>Archived</span>
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                            consigneeStatusFilter === 'ARCHIVED' ? 'bg-amber-800 text-white' : 'bg-stone-100 text-stone-500'
+                        }`}>
+                            {statusCounts.ARCHIVED}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setConsigneeStatusFilter('ALL')}
+                        className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center justify-center gap-1 ${
+                            consigneeStatusFilter === 'ALL'
+                                ? 'bg-zinc-800 text-white shadow-sm'
+                                : 'bg-white text-stone-600 border border-stone-200 hover:bg-stone-100'
+                        }`}
+                    >
+                        <span>All</span>
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                            consigneeStatusFilter === 'ALL' ? 'bg-zinc-700 text-white' : 'bg-stone-100 text-stone-500'
+                        }`}>
+                            {statusCounts.ALL}
+                        </span>
+                    </button>
+                </div>
+
                 {/* Consignee search input */}
                 <div className="px-3 py-2 border-b border-stone-100 bg-stone-50/50 shrink-0">
                     <div className="relative">
@@ -753,6 +843,21 @@ const ConsigneesPage = () => {
                                         <div className="flex items-center gap-1">
                                             {!isBranch && (
                                                 <div
+                                                    onClick={(e) => handleToggleArchive(c, e)}
+                                                    className={`p-1 rounded-lg transition-opacity ${
+                                                        isSelected 
+                                                            ? 'text-zinc-400 hover:text-white hover:bg-zinc-800 opacity-80 group-hover:opacity-100' 
+                                                            : c.archived
+                                                                ? 'text-amber-600 hover:bg-amber-50 opacity-90 group-hover:opacity-100'
+                                                                : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-amber-600 hover:bg-amber-50'
+                                                    }`}
+                                                    title={c.archived ? "Unhide / Restore to POS" : "Hide / Archive from POS"}
+                                                >
+                                                    {c.archived ? <Eye size={13} /> : <EyeOff size={13} />}
+                                                </div>
+                                            )}
+                                            {!isBranch && (
+                                                <div
                                                     onClick={(e) => handleOpenEditConsignee(c, e)}
                                                     className={`p-1 rounded-lg transition-opacity ${
                                                         isSelected 
@@ -787,6 +892,13 @@ const ConsigneesPage = () => {
                                         }`}>
                                             {isMainAdmin ? '👑 Main Admin' : <><Store size={10} /> {branchName}</>}
                                         </span>
+                                        {c.archived && (
+                                            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                                isSelected ? 'bg-amber-900/60 text-amber-200 border border-amber-700' : 'bg-stone-100 text-stone-500 border border-stone-200'
+                                            }`}>
+                                                <EyeOff size={10} /> Hidden
+                                            </span>
+                                        )}
                                         {c.contactInfo && (
                                             <span className={`text-[10px] truncate ${isSelected ? 'text-zinc-400' : 'text-zinc-400'}`}>
                                                 {c.contactInfo}
@@ -991,6 +1103,29 @@ const ConsigneesPage = () => {
                                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
                                                 <Store size={12} /> {selectedConsignee.branch.name}
                                             </span>
+                                        )}
+                                        {selectedConsignee?.archived ? (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-stone-100 text-stone-600 border border-stone-300">
+                                                <EyeOff size={12} /> Hidden from POS (Archived)
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                <CheckCircle2 size={12} /> Visible in POS
+                                            </span>
+                                        )}
+                                        {!isBranch && selectedConsignee && (
+                                            <button
+                                                type="button"
+                                                onClick={() => handleToggleArchive(selectedConsignee)}
+                                                className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 ${
+                                                    selectedConsignee.archived
+                                                        ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+                                                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                                                }`}
+                                                title={selectedConsignee.archived ? "Restore to POS" : "Hide / Archive from POS"}
+                                            >
+                                                {selectedConsignee.archived ? <><Eye size={13} /> Restore to POS</> : <><EyeOff size={13} /> Hide from POS</>}
+                                            </button>
                                         )}
                                         {!isBranch && selectedConsignee && (
                                             <button
@@ -1622,6 +1757,26 @@ const ConsigneesPage = () => {
                                 <p className="text-[11px] text-stone-400 mt-1">
                                     Select Main Admin (Central HQ) or a specific store branch.
                                 </p>
+                            </div>
+
+                            <div>
+                                <label className="flex items-center gap-2.5 text-xs font-bold text-stone-700 cursor-pointer p-3 bg-stone-50 rounded-xl border border-stone-200 hover:bg-stone-100 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={editConsigneeArchived}
+                                        onChange={e => setEditConsigneeArchived(e.target.checked)}
+                                        className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+                                    />
+                                    <div>
+                                        <span className="flex items-center gap-1.5">
+                                            <EyeOff size={13} className="text-stone-500" />
+                                            Hide / Archive from POS
+                                        </span>
+                                        <p className="text-[10px] text-stone-400 font-normal mt-0.5">
+                                            When checked, this consignee will not appear in the POS checkout consignee list.
+                                        </p>
+                                    </div>
+                                </label>
                             </div>
 
                             <div className="flex gap-2 pt-2">

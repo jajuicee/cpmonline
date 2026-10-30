@@ -45,6 +45,9 @@ public class SchemaFix implements CommandLineRunner {
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS consignee_id BIGINT",
                 "Column 'consignee_id' checked/added to 'transactions' table.");
 
+        safeExecute("ALTER TABLE consignees ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE",
+                "Column 'archived' checked/added to 'consignees' table.");
+
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS notes TEXT",
                 "Column 'notes' checked/added to 'transactions' table.");
 

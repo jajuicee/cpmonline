@@ -7,7 +7,7 @@ import {
     Printer, Receipt, Store, Layers, Plus, Minus, ArrowRight,
     RefreshCw, CheckCircle2, Check, Banknote, QrCode, Split,
     Pen, DollarSign, Calendar, Eye, EyeOff, Lock, Key, ShieldCheck,
-    Landmark, Smartphone, Building2, FileText
+    Landmark, Smartphone, Building2, FileText, ChevronDown
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import BranchPasswordModal from './BranchPasswordModal';
@@ -67,8 +67,30 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const [orderMode, setOrderMode]             = useState('REGULAR'); // REGULAR or CONSIGNMENT
     const [consignees, setConsignees]           = useState([]);
     const [selectedConsigneeId, setSelectedConsigneeId] = useState('');
+    const [consigneeSearchTerm, setConsigneeSearchTerm] = useState('');
+    const [isConsigneeDropdownOpen, setIsConsigneeDropdownOpen] = useState(false);
     const [showAddConsignee, setShowAddConsignee] = useState(false);
     const [newConsigneeName, setNewConsigneeName] = useState('');
+
+    // Filter active (non-archived) consignees
+    const activeConsignees = useMemo(() => {
+        return consignees.filter(c => !c.archived);
+    }, [consignees]);
+
+    const filteredConsignees = useMemo(() => {
+        if (!consigneeSearchTerm.trim()) return activeConsignees;
+        const q = consigneeSearchTerm.trim().toLowerCase();
+        return activeConsignees.filter(c =>
+            c.name.toLowerCase().includes(q) ||
+            (c.contactInfo && c.contactInfo.toLowerCase().includes(q)) ||
+            (c.branch?.name && c.branch.name.toLowerCase().includes(q))
+        );
+    }, [activeConsignees, consigneeSearchTerm]);
+
+    const selectedConsigneeObj = useMemo(() => {
+        if (!selectedConsigneeId) return null;
+        return consignees.find(c => c.id.toString() === selectedConsigneeId.toString()) || null;
+    }, [consignees, selectedConsigneeId]);
 
     // --- IN-TAB PRICE EDITING STATE ---
     const [priceModalOpen, setPriceModalOpen]   = useState(false);
@@ -221,7 +243,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         try {
             const payload = {
                 name: newConsigneeName.trim(),
-                branch: activeBranchId ? { id: activeBranchId } : null
+                branch: activeBranchId ? { id: activeBranchId } : null,
+                archived: false
             };
             const params = activeBranchId ? { branchId: activeBranchId } : { branchId: 0 };
             const res = await axios.post(`/api/consignees`, payload, { params });
@@ -229,6 +252,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             setSelectedConsigneeId(res.data.id.toString());
             setShowAddConsignee(false);
             setNewConsigneeName('');
+            setConsigneeSearchTerm('');
+            setIsConsigneeDropdownOpen(false);
         } catch {
             alert('Error adding consignee');
         }
@@ -400,6 +425,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         setTicketNumber(newTicketNumber());
         setOrderMode('REGULAR');
         setSelectedConsigneeId('');
+        setConsigneeSearchTerm('');
+        setIsConsigneeDropdownOpen(false);
         setShowAddConsignee(false);
         setNewConsigneeName('');
     };
@@ -1164,38 +1191,180 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 </div>
                             ) : (
                                 <div className="space-y-1.5">
-                                    <div className="flex gap-2">
-                                        <select
-                                            value={selectedConsigneeId}
-                                            onChange={(e) => setSelectedConsigneeId(e.target.value)}
-                                            className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-3.5 py-2 text-xs font-bold focus:outline-none"
-                                        >
-                                            <option value="" disabled>-- Select Consignee --</option>
-                                            {consignees.map(c => <option key={c.id} value={c.id}>{c.name} {c.branch?.name ? `(${c.branch.name})` : '(Main Admin)'}</option>)}
-                                        </select>
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowAddConsignee(v => !v)}
-                                            className="px-2.5 py-1 text-xs font-black bg-stone-100 hover:bg-stone-200 rounded-xl"
-                                        >
-                                            + New
-                                        </button>
-                                    </div>
+                                    {selectedConsigneeObj ? (
+                                        <div className="flex items-center justify-between p-2.5 bg-blue-50/70 border-2 border-blue-200 rounded-xl">
+                                            <div className="flex items-center gap-2 truncate">
+                                                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+                                                    <User size={15} />
+                                                </div>
+                                                <div className="truncate">
+                                                    <div className="text-xs font-black text-blue-950 truncate flex items-center gap-1.5">
+                                                        <span>{selectedConsigneeObj.name}</span>
+                                                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full border ${
+                                                            selectedConsigneeObj.branch?.name
+                                                                ? 'bg-blue-100 text-blue-700 border-blue-200'
+                                                                : 'bg-amber-100 text-amber-800 border-amber-200'
+                                                        }`}>
+                                                            {selectedConsigneeObj.branch?.name ? `🏬 ${selectedConsigneeObj.branch.name}` : '👑 Main Admin'}
+                                                        </span>
+                                                    </div>
+                                                    {selectedConsigneeObj.contactInfo && (
+                                                        <div className="text-[10px] text-stone-500 truncate">
+                                                            {selectedConsigneeObj.contactInfo}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedConsigneeId('');
+                                                    setConsigneeSearchTerm('');
+                                                    setIsConsigneeDropdownOpen(true);
+                                                }}
+                                                className="px-2.5 py-1 text-[11px] font-bold text-stone-600 hover:text-red-600 hover:bg-white rounded-lg transition-colors border border-stone-200 shrink-0"
+                                            >
+                                                ✕ Change
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="relative">
+                                            <div className="flex gap-1.5">
+                                                <div className="relative flex-1">
+                                                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                                                    <input
+                                                        type="text"
+                                                        value={consigneeSearchTerm}
+                                                        onChange={(e) => {
+                                                            setConsigneeSearchTerm(e.target.value);
+                                                            setIsConsigneeDropdownOpen(true);
+                                                        }}
+                                                        onFocus={() => setIsConsigneeDropdownOpen(true)}
+                                                        placeholder="🔍 Search consignee name or club..."
+                                                        className="w-full pl-8 pr-7 py-2 text-xs font-bold bg-stone-50 border-2 border-stone-200 rounded-xl focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-inner"
+                                                    />
+                                                    {consigneeSearchTerm && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setConsigneeSearchTerm('')}
+                                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                                                        >
+                                                            <X size={13} />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIsConsigneeDropdownOpen(v => !v)}
+                                                    className="px-2.5 py-2 text-xs font-bold border border-stone-200 bg-stone-50 hover:bg-stone-100 rounded-xl flex items-center gap-1 text-stone-600"
+                                                    title="Toggle consignee list"
+                                                >
+                                                    <ChevronDown size={14} className={`transition-transform duration-200 ${isConsigneeDropdownOpen ? 'rotate-180' : ''}`} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowAddConsignee(v => !v)}
+                                                    className="px-2.5 py-2 text-xs font-black bg-stone-900 text-white hover:bg-stone-800 rounded-xl shrink-0 shadow-sm"
+                                                >
+                                                    + New
+                                                </button>
+                                            </div>
+
+                                            {/* Search Dropdown Results */}
+                                            {isConsigneeDropdownOpen && (
+                                                <>
+                                                    <div
+                                                        className="fixed inset-0 z-40"
+                                                        onClick={() => setIsConsigneeDropdownOpen(false)}
+                                                    />
+                                                    <div className="absolute left-0 right-0 top-full mt-1.5 max-h-56 overflow-y-auto bg-white border border-stone-200 rounded-xl shadow-2xl z-50 divide-y divide-stone-100 animate-in fade-in zoom-in-95 duration-100">
+                                                        <div className="px-3 py-1.5 bg-stone-50 text-[10px] font-bold text-stone-500 flex items-center justify-between sticky top-0 z-10 border-b border-stone-100">
+                                                            <span>Active Consignees ({filteredConsignees.length})</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setIsConsigneeDropdownOpen(false)}
+                                                                className="text-stone-400 hover:text-stone-700 font-bold"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        </div>
+                                                        {filteredConsignees.length === 0 ? (
+                                                            <div className="p-4 text-center">
+                                                                <p className="text-xs text-stone-500 mb-2">
+                                                                    No active consignee found matching "{consigneeSearchTerm}".
+                                                                </p>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setNewConsigneeName(consigneeSearchTerm);
+                                                                        setShowAddConsignee(true);
+                                                                        setIsConsigneeDropdownOpen(false);
+                                                                    }}
+                                                                    className="text-xs font-bold text-blue-600 hover:underline"
+                                                                >
+                                                                    + Add "{consigneeSearchTerm}" as new consignee
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            filteredConsignees.map(c => (
+                                                                <button
+                                                                    key={c.id}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setSelectedConsigneeId(c.id.toString());
+                                                                        setIsConsigneeDropdownOpen(false);
+                                                                        setConsigneeSearchTerm('');
+                                                                    }}
+                                                                    className="w-full text-left px-3.5 py-2.5 hover:bg-blue-50/70 flex items-center justify-between transition-colors group"
+                                                                >
+                                                                    <div className="truncate pr-2">
+                                                                        <div className="font-bold text-xs text-stone-800 group-hover:text-blue-900 truncate">
+                                                                            {c.name}
+                                                                        </div>
+                                                                        {c.contactInfo && (
+                                                                            <div className="text-[10px] text-stone-400 truncate">
+                                                                                {c.contactInfo}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 border ${
+                                                                        c.branch?.name
+                                                                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                                                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                                                                    }`}>
+                                                                        {c.branch?.name ? `🏬 ${c.branch.name}` : '👑 Main Admin'}
+                                                                    </span>
+                                                                </button>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {showAddConsignee && (
-                                        <div className="flex gap-1.5">
+                                        <div className="flex gap-1.5 pt-1">
                                             <input
                                                 type="text"
                                                 value={newConsigneeName}
                                                 onChange={(e) => setNewConsigneeName(e.target.value)}
                                                 placeholder="New consignee name..."
-                                                className="flex-1 px-3 py-1 text-xs border border-stone-200 rounded-lg"
+                                                className="flex-1 px-3 py-1.5 text-xs border border-stone-200 rounded-xl focus:border-stone-900 outline-none"
                                             />
                                             <button
                                                 type="button"
                                                 onClick={handleAddConsignee}
-                                                className="px-3 py-1 bg-stone-900 text-white text-xs font-bold rounded-lg"
+                                                className="px-3 py-1.5 bg-stone-900 text-white text-xs font-bold rounded-xl hover:bg-stone-700 transition-colors"
                                             >
                                                 Add
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowAddConsignee(false)}
+                                                className="px-2 py-1.5 border border-stone-200 text-stone-500 text-xs font-bold rounded-xl hover:bg-stone-50"
+                                            >
+                                                Cancel
                                             </button>
                                         </div>
                                     )}

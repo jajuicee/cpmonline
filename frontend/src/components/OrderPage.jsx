@@ -49,6 +49,233 @@ const PAYMENT_METHODS = [
 const newTicketNumber = () =>
     'TRX-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
 
+// Dedicated thermal printer function using an isolated, freshly-created iframe.
+// This completely avoids browser print preview caching (where previous receipts print repeatedly)
+// and ensures synchronous, deterministic printing of the exact order snapshot.
+const printThermalReceipt = (data) => {
+    if (!data) return;
+
+    // Purge any existing printing iframe to guarantee a 100% fresh print spool context
+    const existingIframe = document.getElementById('pos-thermal-printer-iframe');
+    if (existingIframe) {
+        existingIframe.remove();
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'pos-thermal-printer-iframe';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0px';
+    iframe.style.height = '0px';
+    iframe.style.border = 'none';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    document.body.appendChild(iframe);
+
+    const {
+        ticketNumber = '---',
+        date = new Date(),
+        customerName = 'Walk-in Customer',
+        paymentMethod = 'Cash',
+        branchName = '',
+        items = [],
+        totalUnits = 0,
+        cartTotal = 0,
+        amountPaid = 0,
+        amountUnpaid = 0,
+        orderMode = 'REGULAR'
+    } = data;
+
+    const receiptDate = date instanceof Date ? date : new Date(date);
+    const dateStr = receiptDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+    const timeStr = receiptDate.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
+
+    const rawBranch = branchName || '';
+    const displayBranch = rawBranch
+        ? (rawBranch.toUpperCase().includes('BRANCH') ? rawBranch.toUpperCase() : `${rawBranch.toUpperCase()} BRANCH`)
+        : 'PUNTA BRANCH';
+
+    const fmtMoney = (val) => '₱' + (Number(val) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const itemsHtml = items.length === 0
+        ? `<div style="text-align: center; color: #777; padding: 10px 0; font-style: italic;">Cart is empty</div>`
+        : items.map(item => {
+            const qty = parseInt(item.qty, 10) || 0;
+            const price = parseFloat(item.finalPrice) || 0;
+            const lineTotal = item.lineTotal != null ? item.lineTotal : (qty * price);
+            const name = item.displayName || item.variant?.displayName || item.sku || 'Item';
+            const specs = item.specs || (item.variantSpecs && item.variantSpecs !== 'Standard'
+                ? item.variantSpecs
+                : (item.variant?.color && item.variant?.color !== 'N/A' ? item.variant.color : ''));
+            const isUnpaid = item.paymentStatus === 'UNPAID';
+
+            return `
+                <div style="margin-bottom: 5px; font-size: 10px; line-height: 1.25;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div style="flex: 1; padding-right: 6px;">
+                            <strong style="color: #000;">${qty} &times; ${name}</strong>
+                            ${specs ? `<div style="color: #555; font-size: 9px;">${specs}</div>` : ''}
+                            ${isUnpaid ? `<div style="color: #c00; font-weight: bold; font-size: 9px;">[UNPAID]</div>` : ''}
+                        </div>
+                        <div style="font-weight: bold; white-space: nowrap; text-align: right;">
+                            ${fmtMoney(lineTotal)}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    const hasUnpaid = (amountUnpaid || 0) > 0;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Receipt #${ticketNumber}</title>
+    <style>
+        @page {
+            size: 72mm auto;
+            margin: 0;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #fff;
+        }
+        body {
+            padding: 4mm 3mm;
+            width: 66mm;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, monospace;
+            font-size: 10px;
+            line-height: 1.3;
+            color: #000;
+        }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .divider {
+            border-top: 1px dashed #000;
+            margin: 5px 0;
+            height: 0;
+        }
+        .divider-double {
+            border-top: 3px double #000;
+            margin: 6px 0;
+            height: 0;
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="text-center" style="margin-bottom: 6px;">
+        <div style="font-size: 13px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase;">
+            CEBU PICKLEBALL MARKET
+        </div>
+        <div style="font-size: 9px; color: #555; margin-top: 2px;">
+            Authorized Paddle Retailer
+        </div>
+        <div style="font-size: 10px; font-weight: bold; text-transform: uppercase; margin-top: 2px;">
+            ${displayBranch}
+        </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div style="font-size: 10px; line-height: 1.4;">
+        <div class="flex-between">
+            <span style="color: #555;">Ticket #:</span>
+            <strong style="font-family: monospace; font-size: 11px;">${ticketNumber}</strong>
+        </div>
+        <div class="flex-between">
+            <span style="color: #555;">Date:</span>
+            <span>${dateStr} &middot; ${timeStr}</span>
+        </div>
+        <div class="flex-between">
+            <span style="color: #555;">Customer:</span>
+            <strong>${customerName || 'Walk-in Customer'}</strong>
+        </div>
+        <div class="flex-between">
+            <span style="color: #555;">Payment:</span>
+            <strong>${paymentMethod}</strong>
+        </div>
+        ${orderMode === 'CONSIGNMENT' ? `
+            <div class="flex-between" style="color: #92400e;">
+                <span>Mode:</span>
+                <strong>Consignment Out</strong>
+            </div>
+        ` : ''}
+    </div>
+
+    <div class="divider"></div>
+
+    <div style="margin: 4px 0;">
+        ${itemsHtml}
+    </div>
+
+    <div class="divider"></div>
+
+    <div style="font-size: 10px; line-height: 1.4;">
+        <div class="flex-between">
+            <span style="color: #555;">Total Items:</span>
+            <span>${totalUnits} units</span>
+        </div>
+        <div class="flex-between">
+            <span style="color: #555;">Subtotal:</span>
+            <span>${fmtMoney(cartTotal)}</span>
+        </div>
+    </div>
+
+    <div class="divider-double"></div>
+
+    <div class="flex-between" style="font-size: 13px; font-weight: 900;">
+        <span>TOTAL:</span>
+        <span style="font-size: 14px;">${fmtMoney(cartTotal)}</span>
+    </div>
+
+    ${hasUnpaid ? `
+        <div style="margin-top: 5px; padding: 4px 6px; background: #fdf6ec; border: 1px dashed #d97706; font-size: 10px; line-height: 1.3;">
+            <div class="flex-between" style="color: #047857; font-weight: bold;">
+                <span>PAID NOW:</span>
+                <span>${fmtMoney(amountPaid)}</span>
+            </div>
+            <div class="flex-between" style="color: #b45309; font-weight: bold; margin-top: 2px;">
+                <span>UNPAID BALANCE:</span>
+                <span>${fmtMoney(amountUnpaid)}</span>
+            </div>
+        </div>
+    ` : ''}
+
+    <div class="divider"></div>
+
+    <div class="text-center" style="font-size: 9px; color: #555; margin-top: 6px; line-height: 1.3;">
+        <strong style="color: #222;">Thank you for your purchase!</strong><br>
+        Keep this receipt for warranty &amp; returns.
+    </div>
+</body>
+</html>`;
+
+    const frameDoc = iframe.contentWindow || iframe.contentDocument;
+    const doc = frameDoc.document || frameDoc;
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    setTimeout(() => {
+        try {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+        } catch (err) {
+            console.error('Iframe print error, falling back to window.print():', err);
+            window.print();
+        }
+    }, 150);
+};
+
 const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const { user, isBranch, isCashier, isAdmin, currentBranchId } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -114,8 +341,50 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     const [completedReceipt, setCompletedReceipt] = useState(null);
     const [showReceiptModal, setShowReceiptModal] = useState(false);
 
+    // Prints the active in-progress cart slip (for Cart Slip button and Order Summary modal)
+    const handlePrintCurrentCart = () => {
+        const customerDisplay = orderMode === 'REGULAR'
+            ? (formData.customerName || 'Walk-in Customer')
+            : (consignees.find(c => c.id?.toString() === selectedConsigneeId?.toString())?.name || 'Consignment Account');
+
+        printThermalReceipt({
+            ticketNumber,
+            customerName: customerDisplay,
+            paymentMethod: formData.paymentMethod,
+            orderMode,
+            orderNote: formData.orderNote,
+            items: cart.map(item => ({
+                displayName: item.variant?.displayName || item.displayName,
+                sku: item.variant?.sku || item.sku,
+                specs: item.variant?.variantSpecs || item.specs,
+                qty: item.qty,
+                finalPrice: item.finalPrice,
+                paymentStatus: item.paymentStatus,
+                lineTotal: (parseFloat(item.finalPrice) || 0) * (parseInt(item.qty, 10) || 0)
+            })),
+            totalUnits,
+            cartTotal,
+            amountPaid,
+            amountUnpaid,
+            branchName: isHqDirectMode ? 'Central HQ Direct Store (Master Inventory)' : (user?.branchName || 'Cebu Pickleball Market'),
+            date: new Date()
+        });
+    };
+
+    // Prints the completed transaction receipt
+    const handlePrintCompletedReceipt = () => {
+        if (completedReceipt) {
+            printThermalReceipt(completedReceipt);
+        }
+    };
+
+    // Generic fallback handler
     const handlePrintTicket = () => {
-        window.print();
+        if (showReceiptModal && completedReceipt) {
+            handlePrintCompletedReceipt();
+        } else {
+            handlePrintCurrentCart();
+        }
     };
 
     const openPriceEdit = (variant, currentCartPrice = null) => {
@@ -217,19 +486,9 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
     useEffect(() => {
         try {
-            const savedSuccess = sessionStorage.getItem('pos_order_success');
-            if (savedSuccess) {
-                const parsed = JSON.parse(savedSuccess);
-                if (parsed.message) {
-                    setStatus({ type: 'success', message: parsed.message });
-                }
-                if (parsed.receipt) {
-                    setCompletedReceipt(parsed.receipt);
-                }
-                sessionStorage.removeItem('pos_order_success');
-            }
+            sessionStorage.removeItem('pos_order_success');
         } catch (e) {
-            console.error('Failed to parse saved order success:', e);
+            // Clean up any legacy session storage key
         }
     }, []);
 
@@ -350,6 +609,10 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     }, [inventoryList]);
 
     const handleAddToCart = (item) => {
+        // Clear previous completed receipt whenever a new item is added to cart
+        if (completedReceipt) {
+            setCompletedReceipt(null);
+        }
         const maxStock = item.stockQuantity ?? 0;
         if (maxStock <= 0) {
             setStatus({ type: 'error', message: `Cannot add "${item.displayName || item.sku}": Out of stock.` });
@@ -429,6 +692,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         setIsConsigneeDropdownOpen(false);
         setShowAddConsignee(false);
         setNewConsigneeName('');
+        setCompletedReceipt(null);
     };
 
     const handleConfirm = () => {
@@ -539,24 +803,22 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     branchName: isHqDirectMode ? 'Central HQ Direct Store (Master Inventory)' : (user?.branchName || 'Cebu Pickleball Market')
                 };
 
-                try {
-                    sessionStorage.setItem('pos_order_success', JSON.stringify({
-                        ticketNumber: generatedTransactionId,
-                        message: `Order #${generatedTransactionId} placed successfully! Ready for next order.`,
-                        receipt: receiptData
-                    }));
-                } catch (e) {
-                    console.error('Failed to store order success in sessionStorage:', e);
-                }
-
                 setCompletedReceipt(receiptData);
-                setStatus({ type: 'success', message: `Order #${generatedTransactionId} placed successfully! Refreshing...` });
-                resetForm();
+                setShowReceiptModal(true);
+                setStatus({ type: 'success', message: `Order #${generatedTransactionId} placed successfully!` });
 
-                // Refresh the page automatically instead of requiring cashier to press "New Order"
-                setTimeout(() => {
-                    window.location.reload();
-                }, 500);
+                // Reset the active cart and advance the ticket number for the next transaction
+                setCart([]);
+                setFormData(EMPTY_FORM);
+                setTicketNumber(newTicketNumber());
+                setOrderMode('REGULAR');
+                setSelectedConsigneeId('');
+                setConsigneeSearchTerm('');
+                setIsConsigneeDropdownOpen(false);
+                setShowAddConsignee(false);
+                setNewConsigneeName('');
+
+                if (refetchProducts) refetchProducts();
             } else if (failedItems.length < payloads.length) {
                 setStatus({ type: 'error', message: `Order partially placed — ${payloads.length - failedItems.length} of ${payloads.length} items saved. ${failedItems[0]}` });
                 if (refetchProducts) refetchProducts();
@@ -569,26 +831,66 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
         processOrder();
     };
 
-    const rawBranch = completedReceipt?.branchName || user?.branchName || '';
-    const branchDisplayName = rawBranch
-        ? (rawBranch.toUpperCase().includes('BRANCH')
-            ? rawBranch.toUpperCase()
-            : `${rawBranch.toUpperCase()} BRANCH`)
+    // Active receipt preview derivation:
+    // If the completed receipt modal is open, preview that completed order.
+    // If the cart currently has items, preview the active cart slip.
+    // Otherwise, show completed receipt if available, or fall back to empty cart.
+    const isModalReceipt = showReceiptModal && completedReceipt;
+    const isCartActive = cart.length > 0;
+
+    const currentCustomerDisplay = orderMode === 'REGULAR'
+        ? (formData.customerName || 'Walk-in Customer')
+        : (consignees.find(c => c.id?.toString() === selectedConsigneeId?.toString())?.name || 'Consignment Account');
+
+    const activeRawBranch = isModalReceipt
+        ? completedReceipt.branchName
+        : (isHqDirectMode ? 'Central HQ Direct Store (Master Inventory)' : (user?.branchName || ''));
+
+    const branchDisplayName = activeRawBranch
+        ? (activeRawBranch.toUpperCase().includes('BRANCH')
+            ? activeRawBranch.toUpperCase()
+            : `${activeRawBranch.toUpperCase()} BRANCH`)
         : 'PUNTA BRANCH';
 
-    const activeReceiptDate = completedReceipt?.date ? new Date(completedReceipt.date) : new Date();
+    const activeReceiptDate = isModalReceipt
+        ? (completedReceipt.date ? new Date(completedReceipt.date) : new Date())
+        : new Date();
     const dateStr = activeReceiptDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
     const timeStr = activeReceiptDate.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
 
-    const activeTicketNumber = completedReceipt?.ticketNumber || ticketNumber;
-    const activeCustomer = completedReceipt?.customerName || formData.customerName;
-    const activePaymentMethod = completedReceipt?.paymentMethod || formData.paymentMethod;
-    const activeReceiptItems = completedReceipt?.items || cart;
-    const activeTotalAmount = completedReceipt?.cartTotal ?? cartTotal;
-    const activePaidAmount = completedReceipt?.amountPaid ?? amountPaid;
-    const activeUnpaidAmount = completedReceipt?.amountUnpaid ?? amountUnpaid;
+    const activeTicketNumber = isModalReceipt
+        ? completedReceipt.ticketNumber
+        : (isCartActive ? ticketNumber : (completedReceipt?.ticketNumber || ticketNumber));
+
+    const activeCustomer = isModalReceipt
+        ? completedReceipt.customerName
+        : (isCartActive ? currentCustomerDisplay : (completedReceipt?.customerName || currentCustomerDisplay));
+
+    const activePaymentMethod = isModalReceipt
+        ? completedReceipt.paymentMethod
+        : (isCartActive ? formData.paymentMethod : (completedReceipt?.paymentMethod || formData.paymentMethod));
+
+    const activeReceiptItems = isModalReceipt
+        ? (completedReceipt.items || [])
+        : (isCartActive ? cart : (completedReceipt?.items || []));
+
+    const activeTotalAmount = isModalReceipt
+        ? completedReceipt.cartTotal
+        : (isCartActive ? cartTotal : (completedReceipt?.cartTotal ?? cartTotal));
+
+    const activePaidAmount = isModalReceipt
+        ? completedReceipt.amountPaid
+        : (isCartActive ? amountPaid : (completedReceipt?.amountPaid ?? amountPaid));
+
+    const activeUnpaidAmount = isModalReceipt
+        ? completedReceipt.amountUnpaid
+        : (isCartActive ? amountUnpaid : (completedReceipt?.amountUnpaid ?? amountUnpaid));
+
     const activeHasUnpaid = activeUnpaidAmount > 0;
-    const activeTotalUnits = completedReceipt?.totalUnits ?? totalUnits;
+
+    const activeTotalUnits = isModalReceipt
+        ? completedReceipt.totalUnits
+        : (isCartActive ? totalUnits : (completedReceipt?.totalUnits ?? totalUnits));
 
     return (
         <div className="max-w-7xl mx-auto w-full min-w-0 space-y-5">
@@ -1000,10 +1302,10 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         <div className="flex items-center gap-2">
                             <button
                                 type="button"
-                                onClick={handlePrintTicket}
+                                onClick={handlePrintCurrentCart}
                                 disabled={cart.length === 0}
                                 className="flex items-center gap-1.5 px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-full text-xs font-bold transition-all shadow-sm cursor-pointer"
-                                title="Print thermal receipt ticket"
+                                title="Print thermal receipt ticket for active cart"
                             >
                                 <Printer size={13} />
                                 <span>Print Slip</span>
@@ -1655,7 +1957,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         <div className="p-5 bg-stone-50 border-t border-stone-200 flex gap-3 shrink-0">
                             <button
                                 type="button"
-                                onClick={handlePrintTicket}
+                                onClick={handlePrintCurrentCart}
                                 className="px-4 py-3 bg-white hover:bg-stone-100 border border-stone-200 text-stone-700 font-black text-xs uppercase tracking-wider rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm"
                             >
                                 <Printer size={15} />
@@ -2002,7 +2304,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         <div className="p-5 bg-white border-t border-stone-200 flex items-center justify-between gap-3 shrink-0">
                             <button
                                 type="button"
-                                onClick={handlePrintTicket}
+                                onClick={handlePrintCompletedReceipt}
                                 className="px-5 py-3 bg-stone-900 hover:bg-black text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
                             >
                                 <Printer size={15} />
@@ -2012,12 +2314,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 type="button"
                                 onClick={() => {
                                     setShowReceiptModal(false);
-                                    window.location.reload();
+                                    setCompletedReceipt(null);
+                                    resetForm();
                                 }}
                                 className="px-5 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                             >
-                                <RefreshCw size={15} />
-                                <span>New Order (Refresh)</span>
+                                <Plus size={15} />
+                                <span>New Order</span>
                             </button>
                         </div>
                     </div>

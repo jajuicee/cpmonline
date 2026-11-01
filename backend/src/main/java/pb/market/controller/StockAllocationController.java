@@ -22,7 +22,7 @@ import java.util.*;
  * Only ADMIN role can create allocations; both ADMIN and BRANCH can read them.
  */
 @RestController
-@RequestMapping({"/api/admin/allocations", "/api/allocations"})
+@RequestMapping({ "/api/admin/allocations", "/api/allocations" })
 public class StockAllocationController {
 
     private final BranchStockAllocationRepository allocationRepo;
@@ -51,7 +51,8 @@ public class StockAllocationController {
     }
 
     // ─── POST /api/admin/allocations ──────────────────────────────────────────
-    // Admin creates a stock allocation: moves stock from Holding Pool → retail branch
+    // Admin creates a stock allocation: moves stock from Holding Pool → retail
+    // branch
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
@@ -78,10 +79,12 @@ public class StockAllocationController {
                 return ResponseEntity.badRequest().body(Map.of("error", "Variant not found: " + item.getVariantId()));
             }
             if (item.getQuantity() == null || item.getQuantity() <= 0) {
-                return ResponseEntity.badRequest().body(Map.of("error", "Quantity must be > 0 for variant: " + item.getVariantId()));
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "Quantity must be > 0 for variant: " + item.getVariantId()));
             }
             if (item.getCostPerUnit() == null || item.getCostPerUnit().compareTo(BigDecimal.ZERO) < 0) {
-                return ResponseEntity.badRequest().body(Map.of("error", "costPerUnit must be >= 0 for variant: " + item.getVariantId()));
+                return ResponseEntity.badRequest()
+                        .body(Map.of("error", "costPerUnit must be >= 0 for variant: " + item.getVariantId()));
             }
 
             // Check holding pool inventory has enough stock
@@ -92,8 +95,8 @@ public class StockAllocationController {
                         ? v.getProduct().getBrandName() + " " + v.getProduct().getModelName() + " (" + v.getSku() + ")"
                         : "Variant #" + item.getVariantId();
                 return ResponseEntity.badRequest().body(Map.of(
-                        "error", "Insufficient holding stock for " + name + ". Available in holding pool: " + available + ", requested: " + item.getQuantity()
-                ));
+                        "error", "Insufficient holding stock for " + name + ". Available in holding pool: " + available
+                                + ", requested: " + item.getQuantity()));
             }
         }
 
@@ -108,14 +111,16 @@ public class StockAllocationController {
             BigDecimal totalCost = costPerUnit.multiply(BigDecimal.valueOf(qty));
 
             // 1. Deduct from holding inventory (FIFO) & capture admin acquisition cost
-            List<StockBatch> holdingBatches = stockBatchRepository.findReceivableForHoldingForUpdate(item.getVariantId());
+            List<StockBatch> holdingBatches = stockBatchRepository
+                    .findReceivableForHoldingForUpdate(item.getVariantId());
 
             int remaining = qty;
             BigDecimal totalAdminAcqCost = BigDecimal.ZERO;
             int totalDeductedUnits = 0;
 
             for (StockBatch hBatch : holdingBatches) {
-                if (remaining <= 0) break;
+                if (remaining <= 0)
+                    break;
                 int avail = hBatch.getRemainingQuantity() != null ? hBatch.getRemainingQuantity() : 0;
                 int deduct = Math.min(avail, remaining);
                 BigDecimal batchCost = hBatch.getAcquisitionPrice() != null ? hBatch.getAcquisitionPrice()
@@ -135,9 +140,11 @@ public class StockAllocationController {
 
             BigDecimal adminCostPerUnit;
             if (totalDeductedUnits > 0) {
-                adminCostPerUnit = totalAdminAcqCost.divide(BigDecimal.valueOf(totalDeductedUnits), 2, java.math.RoundingMode.HALF_UP);
+                adminCostPerUnit = totalAdminAcqCost.divide(BigDecimal.valueOf(totalDeductedUnits), 2,
+                        java.math.RoundingMode.HALF_UP);
             } else {
-                adminCostPerUnit = variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice() : BigDecimal.ZERO;
+                adminCostPerUnit = variant.getAcquisitionPrice() != null ? variant.getAcquisitionPrice()
+                        : BigDecimal.ZERO;
             }
 
             // 2. Record stock adjustment (from holding)
@@ -209,8 +216,7 @@ public class StockAllocationController {
                 "message", "Stock allocated to " + targetBranch.getName() + " successfully.",
                 "adminBatchId", adminBatchId,
                 "itemCount", created.size(),
-                "items", created
-        ));
+                "items", created));
     }
 
     // ─── GET /api/admin/allocations ───────────────────────────────────────────
@@ -260,23 +266,25 @@ public class StockAllocationController {
         List<Map<String, Object>> result = branchRepository.findAll().stream()
                 .filter(b -> b.isActive() && (b.getName() == null || !b.getName().toLowerCase().contains("warehouse")))
                 .map(b -> {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("branchId", b.getId());
-            m.put("branchName", b.getName());
-            m.put("outstanding", outstandingByBranch.getOrDefault(b.getId(), BigDecimal.ZERO));
-            m.put("overdueCount", overdueByBranch.getOrDefault(b.getId(), 0L));
-            return m;
-        }).toList();
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("branchId", b.getId());
+                    m.put("branchName", b.getName());
+                    m.put("outstanding", outstandingByBranch.getOrDefault(b.getId(), BigDecimal.ZERO));
+                    m.put("overdueCount", overdueByBranch.getOrDefault(b.getId(), 0L));
+                    return m;
+                }).toList();
 
         return ResponseEntity.ok(result);
     }
 
     // ─── GET /api/admin/allocations/batch-profit ──────────────────────────────
-    // Wholesale Batch Profit & P&L Analysis: Spread per unit (₱37.50 cost vs ₱40.00 branch price)
-    @GetMapping({"/batch-profit", "/analytics/batch-profit"})
+    // Wholesale Batch Profit & P&L Analysis: Spread per unit (₱37.50 cost vs ₱40.00
+    // branch price)
+    @GetMapping({ "/batch-profit", "/analytics/batch-profit" })
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> getBatchProfitAnalytics(
             @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false) Long supplierId,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String status) {
@@ -287,16 +295,36 @@ public class StockAllocationController {
 
         // Optional date filtering on allocatedAt
         LocalDateTime fromDt = DateTimeUtil.parseStart(from);
-        LocalDateTime toDt   = DateTimeUtil.parseEnd(to);
+        LocalDateTime toDt = DateTimeUtil.parseEnd(to);
 
-        if (fromDt != null || toDt != null || (status != null && !status.equalsIgnoreCase("ALL"))) {
+        if (fromDt != null || toDt != null || (status != null && !status.equalsIgnoreCase("ALL"))
+                || supplierId != null) {
             list = list.stream().filter(a -> {
                 if (status != null && !status.equalsIgnoreCase("ALL") && !status.equalsIgnoreCase(a.getStatus())) {
                     return false;
                 }
-                if (a.getAllocatedAt() == null) return true;
-                if (fromDt != null && a.getAllocatedAt().isBefore(fromDt)) return false;
-                if (toDt != null && a.getAllocatedAt().isAfter(toDt)) return false;
+                if (supplierId != null) {
+                    Long allocSupplierId = null;
+                    if (a.getStockBatchId() != null) {
+                        StockBatch sb = stockBatchRepository.findById(a.getStockBatchId()).orElse(null);
+                        if (sb != null && sb.getSupplier() != null) {
+                            allocSupplierId = sb.getSupplier().getId();
+                        }
+                    }
+                    if (allocSupplierId == null && a.getVariant() != null
+                            && a.getVariant().getDefaultSupplier() != null) {
+                        allocSupplierId = a.getVariant().getDefaultSupplier().getId();
+                    }
+                    if (!Objects.equals(allocSupplierId, supplierId)) {
+                        return false;
+                    }
+                }
+                if (a.getAllocatedAt() == null)
+                    return true;
+                if (fromDt != null && a.getAllocatedAt().isBefore(fromDt))
+                    return false;
+                if (toDt != null && a.getAllocatedAt().isAfter(toDt))
+                    return false;
                 return true;
             }).toList();
         }
@@ -342,9 +370,12 @@ public class StockAllocationController {
             totalAmountPaid = totalAmountPaid.add(paid != null ? paid : BigDecimal.ZERO);
             totalOutstanding = totalOutstanding.add(bal != null ? bal : BigDecimal.ZERO);
 
-            if ("PAID".equalsIgnoreCase(st)) paidCount++;
-            else if ("PARTIAL".equalsIgnoreCase(st)) partialCount++;
-            else pendingCount++;
+            if ("PAID".equalsIgnoreCase(st))
+                paidCount++;
+            else if ("PARTIAL".equalsIgnoreCase(st))
+                partialCount++;
+            else
+                pendingCount++;
 
             // Branch Breakdown
             Long bId = (Long) row.get("branchId");
@@ -362,7 +393,8 @@ public class StockAllocationController {
                     return m;
                 });
                 bm.put("units", ((int) bm.get("units")) + q);
-                bm.put("billedRevenue", ((BigDecimal) bm.get("billedRevenue")).add(billed != null ? billed : BigDecimal.ZERO));
+                bm.put("billedRevenue",
+                        ((BigDecimal) bm.get("billedRevenue")).add(billed != null ? billed : BigDecimal.ZERO));
                 bm.put("adminCost", ((BigDecimal) bm.get("adminCost")).add(adminC != null ? adminC : BigDecimal.ZERO));
                 bm.put("amountPaid", ((BigDecimal) bm.get("amountPaid")).add(paid != null ? paid : BigDecimal.ZERO));
                 bm.put("outstanding", ((BigDecimal) bm.get("outstanding")).add(bal != null ? bal : BigDecimal.ZERO));
@@ -381,13 +413,15 @@ public class StockAllocationController {
                 return m;
             });
             tm.put("units", ((int) tm.get("units")) + q);
-            tm.put("billedRevenue", ((BigDecimal) tm.get("billedRevenue")).add(billed != null ? billed : BigDecimal.ZERO));
+            tm.put("billedRevenue",
+                    ((BigDecimal) tm.get("billedRevenue")).add(billed != null ? billed : BigDecimal.ZERO));
             tm.put("adminCost", ((BigDecimal) tm.get("adminCost")).add(adminC != null ? adminC : BigDecimal.ZERO));
         }
 
         BigDecimal totalGrossProfit = totalBilledRevenue.subtract(totalAdminCost);
         BigDecimal averageMarginPct = totalBilledRevenue.compareTo(BigDecimal.ZERO) > 0
-                ? totalGrossProfit.divide(totalBilledRevenue, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                ? totalGrossProfit.divide(totalBilledRevenue, 4, java.math.RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100))
                 : BigDecimal.ZERO;
 
         // Finalize branch summaries
@@ -430,18 +464,19 @@ public class StockAllocationController {
         return ResponseEntity.ok(response);
     }
 
-
     // ─── GET /api/admin/allocations/branch-dues ───────────────────────────────
-    // Branch user: see their own allocations / dues (fast eager-fetch, 0 N+1 queries)
+    // Branch user: see their own allocations / dues (fast eager-fetch, 0 N+1
+    // queries)
 
-    @GetMapping({"/branch-dues", "/my-dues"})
+    @GetMapping({ "/branch-dues", "/my-dues" })
     public ResponseEntity<?> branchDues(
             @RequestParam(required = false) Long branchId,
             @AuthenticationPrincipal UserPrincipal user) {
 
         Long effectiveBranchId = (user != null && "BRANCH".equals(user.getRole()))
                 ? user.getBranchId()
-                : (branchId != null ? branchId : (user != null && user.getBranchId() != null ? user.getBranchId() : null));
+                : (branchId != null ? branchId
+                        : (user != null && user.getBranchId() != null ? user.getBranchId() : null));
 
         if (effectiveBranchId == null) {
             effectiveBranchId = branchRepository.findAll().stream().findFirst().map(Branch::getId).orElse(null);
@@ -548,12 +583,12 @@ public class StockAllocationController {
                 "allocationId", id,
                 "amountPaid", newPaid,
                 "status", allocation.getStatus(),
-                "remainingBalance", allocation.getTotalCost().subtract(newPaid)
-        ));
+                "remainingBalance", allocation.getTotalCost().subtract(newPaid)));
     }
 
     // ─── PUT /api/admin/allocations/batch/{batchId}/payment ───────────────────
-    // Admin records a payment toward an entire batch, auto-applying across unpaid items
+    // Admin records a payment toward an entire batch, auto-applying across unpaid
+    // items
 
     @PutMapping("/batch/{batchId}/payment")
     @PreAuthorize("hasRole('ADMIN')")
@@ -567,8 +602,10 @@ public class StockAllocationController {
             try {
                 Long singleId = Long.parseLong(batchId.replace("batch_", ""));
                 BranchStockAllocation single = allocationRepo.findById(singleId).orElse(null);
-                if (single != null) list = List.of(single);
-            } catch (Exception ignored) {}
+                if (single != null)
+                    list = List.of(single);
+            } catch (Exception ignored) {
+            }
         }
 
         if (list.isEmpty()) {
@@ -603,12 +640,14 @@ public class StockAllocationController {
 
         BigDecimal remainingToApply = amount;
         for (BranchStockAllocation a : list) {
-            if (remainingToApply.compareTo(BigDecimal.ZERO) <= 0) break;
+            if (remainingToApply.compareTo(BigDecimal.ZERO) <= 0)
+                break;
 
             BigDecimal cost = a.getTotalCost() != null ? a.getTotalCost() : BigDecimal.ZERO;
             BigDecimal paid = a.getAmountPaid() != null ? a.getAmountPaid() : BigDecimal.ZERO;
             BigDecimal itemRemaining = cost.subtract(paid);
-            if (itemRemaining.compareTo(BigDecimal.ZERO) <= 0) continue;
+            if (itemRemaining.compareTo(BigDecimal.ZERO) <= 0)
+                continue;
 
             BigDecimal toApply = remainingToApply.min(itemRemaining);
             BigDecimal newPaid = paid.add(toApply);
@@ -628,12 +667,12 @@ public class StockAllocationController {
                 "message", "Payment of ₱" + amount + " recorded for batch " + batchId,
                 "batchId", batchId,
                 "amountPaid", amount,
-                "remainingBatchBalance", totalRemaining.subtract(amount)
-        ));
+                "remainingBatchBalance", totalRemaining.subtract(amount)));
     }
 
     // ─── POST /api/allocations/pull-out or /api/admin/allocations/pull-out ────
-    // Pull out stock from a branch and return it to the Master Admin (Holding Pool).
+    // Pull out stock from a branch and return it to the Master Admin (Holding
+    // Pool).
     @PostMapping("/pull-out")
     @Transactional
     public ResponseEntity<?> pullOutStock(
@@ -648,7 +687,8 @@ public class StockAllocationController {
         if (body.get("branchId") != null) {
             try {
                 branchId = Long.parseLong(body.get("branchId").toString());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
 
         if (user != null && "BRANCH".equals(user.getRole())) {
@@ -669,7 +709,8 @@ public class StockAllocationController {
         if (body.get("variantId") != null) {
             try {
                 variantId = Long.parseLong(body.get("variantId").toString());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
         if (variantId == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "variantId is required."));
@@ -684,32 +725,34 @@ public class StockAllocationController {
         if (body.get("quantity") != null) {
             try {
                 quantity = Integer.parseInt(body.get("quantity").toString());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
         }
         if (quantity <= 0) {
             return ResponseEntity.badRequest().body(Map.of("error", "Quantity must be greater than zero."));
         }
 
-        String reason = body.get("reason") != null ? body.get("reason").toString().trim() : "Pulled out to Master Admin";
+        String reason = body.get("reason") != null ? body.get("reason").toString().trim()
+                : "Pulled out to Master Admin";
         String notes = body.get("notes") != null ? body.get("notes").toString().trim() : "";
 
-        // 1. Fetch branch receivable batches for this variant with pessimistic write lock
-        List<StockBatch> branchBatches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId, branchId);
+        // 1. Fetch branch receivable batches for this variant with pessimistic write
+        // lock
+        List<StockBatch> branchBatches = stockBatchRepository.findReceivableByVariantIdAndBranchIdForUpdate(variantId,
+                branchId);
         int availableAtBranch = branchBatches.stream()
                 .mapToInt(b -> b.getRemainingQuantity() != null ? b.getRemainingQuantity() : 0)
                 .sum();
 
         if (quantity > availableAtBranch) {
             return ResponseEntity.badRequest().body(Map.of("error",
-                    "Cannot pull out " + quantity + " units. Only " + availableAtBranch + " units available at " + branch.getName() + "."));
+                    "Cannot pull out " + quantity + " units. Only " + availableAtBranch + " units available at "
+                            + branch.getName() + "."));
         }
 
         int remainingToPull = quantity;
         BigDecimal totalPulledAcqCost = BigDecimal.ZERO;
         int unitsCounted = 0;
-        boolean isPartner = false;
-        String partnerName = null;
-        BigDecimal partnerSplitPct = null;
         Supplier defaultOrBatchSupplier = variant.getDefaultSupplier();
 
         // 2. FIFO deduction across branch batches & credit associated allocations
@@ -717,9 +760,11 @@ public class StockAllocationController {
         int creditedUnits = 0;
 
         for (StockBatch bBatch : branchBatches) {
-            if (remainingToPull <= 0) break;
+            if (remainingToPull <= 0)
+                break;
             int avail = bBatch.getRemainingQuantity() != null ? bBatch.getRemainingQuantity() : 0;
-            if (avail <= 0) continue;
+            if (avail <= 0)
+                continue;
 
             int deduct = Math.min(avail, remainingToPull);
             bBatch.setRemainingQuantity(avail - deduct);
@@ -730,11 +775,6 @@ public class StockAllocationController {
             totalPulledAcqCost = totalPulledAcqCost.add(acq.multiply(BigDecimal.valueOf(deduct)));
             unitsCounted += deduct;
 
-            if (bBatch.isPartner()) {
-                isPartner = true;
-                if (partnerName == null && bBatch.getPartnerName() != null) partnerName = bBatch.getPartnerName();
-                if (partnerSplitPct == null && bBatch.getPartnerSplitPct() != null) partnerSplitPct = bBatch.getPartnerSplitPct();
-            }
             if (bBatch.getSupplier() != null) {
                 defaultOrBatchSupplier = bBatch.getSupplier();
             }
@@ -752,14 +792,18 @@ public class StockAllocationController {
             remainingToPull -= deduct;
         }
 
-        // If any pulled units were not credited via direct stockBatchId link (e.g. legacy allocations),
-        // apply remaining pull credits across other unpaid allocations for this variant.
+        // If any pulled units were not credited via direct stockBatchId link (e.g.
+        // legacy allocations),
+        // apply remaining pull credits across other unpaid allocations for this
+        // variant.
         int uncreditedPull = quantity - creditedUnits;
         if (uncreditedPull > 0) {
             List<BranchStockAllocation> variantAllocs = allocationRepo.findByBranchIdAndVariantId(branchId, variantId);
             for (BranchStockAllocation alloc : variantAllocs) {
-                if (uncreditedPull <= 0) break;
-                if (adjustedAllocIds.contains(alloc.getId())) continue;
+                if (uncreditedPull <= 0)
+                    break;
+                if (adjustedAllocIds.contains(alloc.getId()))
+                    continue;
                 if (!"PAID".equals(alloc.getStatus()) && alloc.getQuantity() != null && alloc.getQuantity() > 0) {
                     int deductFromAlloc = Math.min(uncreditedPull, alloc.getQuantity());
                     adjustAllocationForPullOut(alloc, deductFromAlloc);
@@ -783,10 +827,8 @@ public class StockAllocationController {
         holdingBatch.setBranch(null); // Return to Master Admin holding pool
         holdingBatch.setStatus("RECEIVED");
         holdingBatch.setConsigned(false);
-        holdingBatch.setPartner(isPartner);
-        holdingBatch.setPartnerName(partnerName);
-        holdingBatch.setPartnerSplitPct(partnerSplitPct);
-        holdingBatch.setBatchId("PULLOUT-" + branch.getName().toUpperCase().replaceAll("[^A-Z0-9]+", "-") + "-" + System.currentTimeMillis());
+        holdingBatch.setBatchId("PULLOUT-" + branch.getName().toUpperCase().replaceAll("[^A-Z0-9]+", "-") + "-"
+                + System.currentTimeMillis());
         stockBatchRepository.save(holdingBatch);
 
         // 4. Record stock adjustments for audit trail
@@ -816,19 +858,22 @@ public class StockAllocationController {
 
         return ResponseEntity.ok(Map.of(
                 "success", true,
-                "message", "Successfully pulled out " + quantity + " unit(s) of " + (variant.getProduct() != null ? variant.getProduct().getModelName() : variant.getSku()) + " from " + branch.getName() + " back to Master Admin.",
+                "message",
+                "Successfully pulled out " + quantity + " unit(s) of "
+                        + (variant.getProduct() != null ? variant.getProduct().getModelName() : variant.getSku())
+                        + " from " + branch.getName() + " back to Master Admin.",
                 "branchId", branch.getId(),
                 "branchName", branch.getName(),
                 "variantId", variant.getId(),
                 "sku", variant.getSku(),
                 "pulledQuantity", quantity,
                 "branchRemaining", newBranchRemaining,
-                "masterHoldingRemaining", masterHoldingRemaining != null ? masterHoldingRemaining : quantity
-        ));
+                "masterHoldingRemaining", masterHoldingRemaining != null ? masterHoldingRemaining : quantity));
     }
 
     private void adjustAllocationForPullOut(BranchStockAllocation alloc, int unitsDeducted) {
-        if (alloc == null || unitsDeducted <= 0) return;
+        if (alloc == null || unitsDeducted <= 0)
+            return;
         int currentQty = alloc.getQuantity() != null ? alloc.getQuantity() : 0;
         int newQty = Math.max(0, currentQty - unitsDeducted);
         alloc.setQuantity(newQty);
@@ -887,12 +932,33 @@ public class StockAllocationController {
         m.put("deadline", a.getDeadline() != null ? a.getDeadline().toString() : null);
         m.put("amountPaid", a.getAmountPaid());
         m.put("remainingBalance", a.getTotalCost() != null && a.getAmountPaid() != null
-                ? a.getTotalCost().subtract(a.getAmountPaid()) : null);
+                ? a.getTotalCost().subtract(a.getAmountPaid())
+                : null);
         m.put("status", a.getStatus());
         m.put("notes", a.getNotes());
         m.put("adminBatchId", a.getAdminBatchId());
         m.put("stockBatchId", a.getStockBatchId());
         m.put("allocatedAt", a.getAllocatedAt() != null ? a.getAllocatedAt().toString() : null);
+
+        // Supplier resolution
+        Long supplierId = null;
+        String supplierName = null;
+        try {
+            if (a.getStockBatchId() != null) {
+                StockBatch sb = stockBatchRepository.findById(a.getStockBatchId()).orElse(null);
+                if (sb != null && sb.getSupplier() != null) {
+                    supplierId = sb.getSupplier().getId();
+                    supplierName = sb.getSupplier().getName();
+                }
+            }
+            if (supplierId == null && a.getVariant() != null && a.getVariant().getDefaultSupplier() != null) {
+                supplierId = a.getVariant().getDefaultSupplier().getId();
+                supplierName = a.getVariant().getDefaultSupplier().getName();
+            }
+        } catch (Exception ignored) {
+        }
+        m.put("supplierId", supplierId);
+        m.put("supplierName", supplierName);
 
         // Live item tracking at the destination branch - fast memory lookup
         int remainingUnits = 0;
@@ -922,15 +988,18 @@ public class StockAllocationController {
         if (adminCost == null && a.getVariant() != null && a.getVariant().getAcquisitionPrice() != null) {
             adminCost = a.getVariant().getAcquisitionPrice();
         }
-        if (adminCost == null) adminCost = BigDecimal.ZERO;
+        if (adminCost == null)
+            adminCost = BigDecimal.ZERO;
 
         BigDecimal costPerUnit = a.getCostPerUnit() != null ? a.getCostPerUnit() : BigDecimal.ZERO;
         BigDecimal unitSpread = costPerUnit.subtract(adminCost);
-        BigDecimal totalCostVal = a.getTotalCost() != null ? a.getTotalCost() : costPerUnit.multiply(BigDecimal.valueOf(totalUnits));
+        BigDecimal totalCostVal = a.getTotalCost() != null ? a.getTotalCost()
+                : costPerUnit.multiply(BigDecimal.valueOf(totalUnits));
         BigDecimal totalAdminCost = adminCost.multiply(BigDecimal.valueOf(totalUnits));
         BigDecimal totalBatchProfit = totalCostVal.subtract(totalAdminCost);
         BigDecimal profitMarginPct = totalCostVal.compareTo(BigDecimal.ZERO) > 0
-                ? totalBatchProfit.divide(totalCostVal, 4, java.math.RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100))
+                ? totalBatchProfit.divide(totalCostVal, 4, java.math.RoundingMode.HALF_UP)
+                        .multiply(BigDecimal.valueOf(100))
                 : BigDecimal.ZERO;
 
         m.put("adminCostPerUnit", adminCost);

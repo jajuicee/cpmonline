@@ -129,22 +129,25 @@ public interface StockBatchRepository extends JpaRepository<StockBatch, Long> {
            "WHERE b.supplier.id IS NOT NULL GROUP BY b.supplier.id")
     List<Object[]> findLastPurchaseDateBySupplier();
 
-    // ── Partner Queries ────────────────────────────────────────────────────────
-    @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' AND s.partner = true GROUP BY s.variant.id")
-    List<Object[]> sumPartnerRemainingQuantityByVariantId();
+    // ── Branch Direct & Source Type Queries ────────────────────────────────────
+    @Query("SELECT DISTINCT b FROM StockBatch b " +
+           "LEFT JOIN FETCH b.variant v " +
+           "LEFT JOIN FETCH v.product p " +
+           "LEFT JOIN FETCH b.branch br " +
+           "LEFT JOIN FETCH b.supplier s " +
+           "WHERE (:branchId IS NULL OR br.id = :branchId) " +
+           "AND (:sourceType IS NULL OR b.sourceType = :sourceType) " +
+           "AND (:search IS NULL OR LOWER(b.batchId) LIKE :search OR LOWER(v.sku) LIKE :search OR LOWER(p.brandName) LIKE :search OR LOWER(p.modelName) LIKE :search OR LOWER(s.name) LIKE :search) " +
+           "ORDER BY b.restockedAt DESC")
+    List<StockBatch> findBatchesForTagging(
+            @Param("branchId") Long branchId,
+            @Param("sourceType") String sourceType,
+            @Param("search") String search,
+            org.springframework.data.domain.Pageable pageable);
 
-    @Query("SELECT s.variant.id, COALESCE(SUM(s.remainingQuantity), 0) FROM StockBatch s WHERE s.status = 'RECEIVED' AND s.partner = true " +
-           "AND (:branchId IS NULL OR s.branch.id = :branchId) GROUP BY s.variant.id")
-    List<Object[]> sumPartnerRemainingQuantityByVariantIdAndBranch(@Param("branchId") Long branchId);
+    List<StockBatch> findByBranchIdOrderByRestockedAtDesc(Long branchId);
 
-    @Query("SELECT b FROM StockBatch b JOIN FETCH b.variant v JOIN FETCH v.product LEFT JOIN FETCH b.supplier " +
-           "WHERE b.partner = true AND b.status = 'RECEIVED'")
-    List<StockBatch> findAllPartnerBatchesWithDetails();
+    List<StockBatch> findByBranchIdAndSourceTypeOrderByRestockedAtDesc(Long branchId, String sourceType);
 
-    @Query("SELECT s.variant.id, s.partnerName, COALESCE(SUM(s.remainingQuantity), 0) " +
-           "FROM StockBatch s " +
-           "WHERE s.status = 'RECEIVED' AND s.partner = true AND s.remainingQuantity > 0 " +
-           "AND (:branchId IS NULL OR s.branch.id = :branchId) " +
-           "GROUP BY s.variant.id, s.partnerName")
-    List<Object[]> findRemainingPartnerStockByVariantAndPartnerName(@Param("branchId") Long branchId);
+    List<StockBatch> findBySourceTypeOrderByRestockedAtDesc(String sourceType);
 }

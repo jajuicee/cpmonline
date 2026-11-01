@@ -13,7 +13,8 @@ public interface BranchSellingPriceRepository extends JpaRepository<BranchSellin
     Optional<BranchSellingPrice> findByBranchIdAndVariantId(Long branchId, Long variantId);
 
     /** Get all price overrides for a branch */
-    List<BranchSellingPrice> findAllByBranchId(Long branchId);
+    @Query("SELECT bsp FROM BranchSellingPrice bsp JOIN FETCH bsp.variant WHERE bsp.branch.id = :branchId")
+    List<BranchSellingPrice> findAllByBranchId(@Param("branchId") Long branchId);
 
     /** Check if a branch has any price override for a variant */
     boolean existsByBranchIdAndVariantId(Long branchId, Long variantId);

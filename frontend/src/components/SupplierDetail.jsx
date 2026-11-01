@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
     X, Phone, Mail, MapPin, FileText, Building2, Package, Coins,
-    TrendingUp, CalendarClock, Pencil, Loader2, ShoppingBag
+    TrendingUp, CalendarClock, Pencil, Loader2, ShoppingBag, BarChart3
 } from 'lucide-react';
 
 const API = `/api/suppliers`;
@@ -56,6 +57,7 @@ const StatCard = (props) => {
 };
 
 const SupplierDetail = ({ supplier, startDate, endDate, onClose, onEdit }) => {
+    const navigate = useNavigate();
     const [purchases, setPurchases] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -104,14 +106,24 @@ const SupplierDetail = ({ supplier, startDate, endDate, onClose, onEdit }) => {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                             <button
+                                onClick={() => {
+                                    onClose();
+                                    navigate(`/analytics?tab=supplier&supplierId=${supplier.id}`);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-all cursor-pointer shadow-2xs"
+                                title="Open full supplier performance analytics dossier"
+                            >
+                                <BarChart3 size={14} /> Analytics
+                            </button>
+                            <button
                                 onClick={() => onEdit(supplier)}
-                                className="flex items-center gap-2 px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-zinc-700 hover:bg-stone-50 transition-all"
+                                className="flex items-center gap-2 px-3 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-zinc-700 hover:bg-stone-50 transition-all cursor-pointer"
                             >
                                 <Pencil size={14} /> Edit
                             </button>
                             <button
                                 onClick={onClose}
-                                className="p-2 rounded-xl text-zinc-400 hover:text-zinc-900 hover:bg-stone-100 transition-colors"
+                                className="p-2 rounded-xl text-zinc-400 hover:text-zinc-900 hover:bg-stone-100 transition-colors cursor-pointer"
                             >
                                 <X size={20} />
                             </button>

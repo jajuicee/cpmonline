@@ -33,7 +33,6 @@ import {
 } from 'lucide-react';
 
 // Main Page Components
-const PartnerProducts = lazy(() => import('./PartnerProducts'));
 const Inventory = lazy(() => import('./Inventory'));
 const AddProduct = lazy(() => import('./AddProduct'));
 const AddBranchStock = lazy(() => import('./AddBranchStock'));
@@ -134,7 +133,6 @@ const Dashboard = () => {
                 title: 'Inventory & Pricing',
                 items: [
                     { name: 'Current Inventory', path: '/inventory',        icon: Boxes },
-                    { name: 'Partner Products',  path: '/partner-products', icon: Handshake },
                     { name: 'Stock Requests',    path: '/stock-requests',   icon: Send },
                     { name: 'Set Prices',        path: '/branch-prices',    icon: DollarSign },
                 ]
@@ -164,8 +162,6 @@ const Dashboard = () => {
                     { name: 'Branch Stores',        path: '/branches',                icon: Store },
                     { name: 'Stock Allocations',    path: '/branches?tab=allocations',icon: Boxes },
                     { name: 'Batch Profit & P&L',   path: '/analytics?tab=batch-profit', icon: DollarSign },
-                    { name: 'Partner Products & Intake', path: '/partner-products',   icon: Handshake },
-                    { name: 'Partner Items (50/50)',path: '/analytics?tab=partner',       icon: Handshake },
                     { name: 'Branch Sales',         path: '/branch-sales',            icon: BarChart2 },
                 ]
             },
@@ -418,7 +414,6 @@ const Dashboard = () => {
                                         <Route path="/add-stock" element={<AddBranchStock products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/add-product" element={<AddProduct onProductAdded={fetchProducts} />} />
                                         <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                                        <Route path="/partner-products" element={<PartnerProducts products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/manage-inventory" element={<ManageInventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
                                         <Route path="/stock-requests" element={<StockRequests />} />
                                         <Route path="/supplies" element={<Supplies />} />
@@ -446,7 +441,6 @@ const Dashboard = () => {
                                 ) : (
                                     <>
                                         <Route path="/inventory" element={<Inventory products={products} loading={loadingProducts} refetchProducts={fetchProducts} />} />
-                                        <Route path="/partner-products" element={<PartnerProducts products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/stock-requests" element={<StockRequests />} />
                                         <Route path="/branch-prices" element={<BranchPrices products={products} refetchProducts={fetchProducts} />} />
                                         <Route path="/branch-dues" element={<BranchDues />} />

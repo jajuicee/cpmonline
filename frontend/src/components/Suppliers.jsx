@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import {
     Building2, Plus, Pencil, Trash2, X, Save, CheckCircle, AlertCircle, Phone, Mail, MapPin,
     FileText, Calendar as CalendarIcon, ChevronLeft, ChevronRight, ChevronDown,
-    Users, Coins, HandCoins, Crown, Package
+    Users, Coins, HandCoins, Crown, Package, BarChart3
 } from 'lucide-react';
 import SupplierDetail from './SupplierDetail';
 
@@ -27,6 +28,7 @@ const formatRelativeDate = (s) => {
 };
 
 const Suppliers = () => {
+    const navigate = useNavigate();
     const [suppliers, setSuppliers] = useState([]);
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -368,6 +370,13 @@ const Suppliers = () => {
                                     </td>
                                     <td className="px-4 py-5 text-right">
                                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all -translate-x-2 group-hover:translate-x-0">
+                                            <button onClick={(e) => {
+                                                e.stopPropagation();
+                                                navigate(`/analytics?tab=supplier&supplierId=${s.id}`);
+                                            }}
+                                                className="p-2 rounded-xl hover:bg-indigo-50 text-zinc-400 hover:text-indigo-600 transition-colors" title="View Supplier Performance Analytics">
+                                                <BarChart3 size={16} />
+                                            </button>
                                             <button onClick={(e) => { e.stopPropagation(); openEdit(s); }}
                                                 className="p-2 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-colors" title="Edit">
                                                 <Pencil size={16} />

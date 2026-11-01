@@ -123,22 +123,6 @@ public class ProductService {
                     row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
                 ));
 
-        Map<Long, Long> partnerStockMap = stockBatchRepository.sumPartnerRemainingQuantityByVariantIdAndBranch(branchId).stream()
-                .collect(Collectors.toMap(
-                    row -> ((Number) row[0]).longValue(),
-                    row -> row[1] != null ? ((Number) row[1]).longValue() : 0L
-                ));
-
-        Map<Long, String> activePartnerNameMap = new HashMap<>();
-        List<Object[]> partnerNameRows = stockBatchRepository.findRemainingPartnerStockByVariantAndPartnerName(branchId);
-        for (Object[] row : partnerNameRows) {
-            Long vId = ((Number) row[0]).longValue();
-            String pName = row[1] != null ? row[1].toString().trim() : null;
-            if (pName != null && !pName.isBlank()) {
-                activePartnerNameMap.merge(vId, pName, (existing, incoming) -> existing.contains(incoming) ? existing : existing + ", " + incoming);
-            }
-        }
-
         // Group remaining quantities by variant and branch
         List<Object[]> branchLocationRows = stockBatchRepository.findRemainingStockByVariantAndBranch();
         Map<String, Integer> branchVariantQtyMap = new HashMap<>();
@@ -234,21 +218,6 @@ public class ProductService {
                         v.setStockQuantity(stockMap.getOrDefault(v.getId(), 0L).intValue());
                     }
 
-                    int pStock = partnerStockMap.getOrDefault(v.getId(), 0L).intValue();
-                    int totalStock = (branchId == null) ? (holdingStock + branchStock) : stockMap.getOrDefault(v.getId(), 0L).intValue();
-                    v.setPartnerStock(pStock);
-                    v.setOwnedStock(Math.max(0, totalStock - pStock));
-
-                    String resolvedPartner = activePartnerNameMap.get(v.getId());
-                    if (resolvedPartner != null && !resolvedPartner.isBlank()) {
-                        v.setActivePartnerName(resolvedPartner);
-                        if (v.getPartnerName() == null || v.getPartnerName().isBlank()) {
-                            v.setPartnerName(resolvedPartner);
-                        }
-                    } else if (v.getPartnerName() != null && !v.getPartnerName().isBlank()) {
-                        v.setActivePartnerName(v.getPartnerName());
-                    }
-
                     if (branchId != null && branchPriceMap.containsKey(v.getId())) {
                         BigDecimal bp = branchPriceMap.get(v.getId());
                         v.setBranchSellingPrice(bp);
@@ -324,19 +293,12 @@ public class ProductService {
     @Transactional
     public ProductVariant addStock(Long variantId, int quantity, BigDecimal acquisitionPrice,
                                    Long supplierId, boolean consigned) {
-        return addStock(variantId, quantity, acquisitionPrice, supplierId, consigned, null, false, null, null);
+        return addStock(variantId, quantity, acquisitionPrice, supplierId, consigned, null);
     }
 
     @Transactional
     public ProductVariant addStock(Long variantId, int quantity, BigDecimal acquisitionPrice,
                                    Long supplierId, boolean consigned, Long branchId) {
-        return addStock(variantId, quantity, acquisitionPrice, supplierId, consigned, branchId, false, null, null);
-    }
-
-    @Transactional
-    public ProductVariant addStock(Long variantId, int quantity, BigDecimal acquisitionPrice,
-                                   Long supplierId, boolean consigned, Long branchId,
-                                   boolean partner, String partnerName, BigDecimal partnerSplitPct) {
         if (quantity <= 0) {
             throw new IllegalArgumentException("Quantity must be greater than zero.");
         }
@@ -403,10 +365,8 @@ public class ProductService {
         batch.setAcquisitionPrice(acquisitionPrice);
         batch.setSupplier(supplier);
         batch.setConsigned(consigned);
-        batch.setPartner(partner);
-        batch.setPartnerName(partner ? (partnerName != null && !partnerName.isBlank() ? partnerName.trim() : "Pickle Gear") : null);
-        batch.setPartnerSplitPct(partnerSplitPct != null ? partnerSplitPct : new BigDecimal("50.00"));
         batch.setBranch(branch);
+        batch.setSourceType("ALLOCATED");
         batch.setBatchId(UUID.randomUUID().toString());
         stockBatchRepository.save(batch);
 

@@ -8,10 +8,7 @@ import {
 const EMPTY_FORM = {
     supplierId: '',
     ownershipType: 'owned',
-    partnerName: 'Pickle Gear',
-    partnerSplitPct: '50',
     consigned: false,
-    partner: false,
     status: 'RECEIVED',
     eta: '',
     totalExpense: ''
@@ -41,7 +38,7 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                 displayName: `${p.brandName} ${p.modelName}${v.color && v.color !== 'N/A' ? ` (${v.color})` : ''}${isShoe && v.shape ? ` Size ${v.shape}` : ''}`
             };
         })).sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true })),
-    [products]);
+        [products]);
 
     const filteredResults = useMemo(() => {
         if (!searchQuery.trim()) return [];
@@ -98,13 +95,9 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
         setStatus({ type: '', message: '' });
 
         const isConsigned = formData.ownershipType === 'consigned';
-        const isPartner = formData.ownershipType === 'partner';
         const payload = {
             supplierId: formData.supplierId ? parseInt(formData.supplierId) : null,
             consigned: isConsigned,
-            partner: isPartner,
-            partnerName: isPartner ? (formData.partnerName || 'Pickle Gear') : null,
-            partnerSplitPct: isPartner ? (parseFloat(formData.partnerSplitPct) || 50) : null,
             status: formData.status,
             eta: formData.status === 'INCOMING' ? formData.eta : null,
             totalExpense: parsedTotalExpense,
@@ -112,10 +105,7 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                 variantId: item.variant.id,
                 quantity: parseInt(item.qty) || 1,
                 baseCost: parseFloat(item.baseCost) || 0,
-                consigned: isConsigned,
-                partner: isPartner,
-                partnerName: isPartner ? (formData.partnerName || 'Pickle Gear') : null,
-                partnerSplitPct: isPartner ? (parseFloat(formData.partnerSplitPct) || 50) : null
+                consigned: isConsigned
             }))
         };
 
@@ -131,7 +121,7 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
     return (
         <div className="fixed inset-0 bg-zinc-950/70 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col lg:flex-row overflow-hidden">
-                
+
                 {/* LEFT COLUMN: BUILD BATCH */}
                 <div className="flex-[3] flex flex-col border-b lg:border-b-0 lg:border-r border-stone-200 overflow-y-auto bg-white p-6 lg:p-8">
                     <div className="flex items-center justify-between mb-6">
@@ -192,7 +182,7 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                             <label className="block text-sm font-bold text-zinc-700">Batch Items ({cart.length})</label>
                             {totalItems > 0 && <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">{totalItems} Total Units</span>}
                         </div>
-                        
+
                         {cart.length === 0 ? (
                             <div className="p-10 border-2 border-dashed border-stone-200 rounded-2xl flex flex-col items-center justify-center text-zinc-400 h-48 bg-stone-50/50">
                                 <PackagePlus size={40} className="mb-3 opacity-20" />
@@ -206,7 +196,7 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                                         <p className="font-bold text-zinc-900 truncate">{item.variant.displayName}</p>
                                         <p className="text-xs font-mono text-zinc-500 mt-0.5">SKU: {item.variant.sku}</p>
                                     </div>
-                                    
+
                                     <div className="flex items-center gap-3 w-full sm:w-auto">
                                         <div className="w-20">
                                             <label className="block text-[10px] uppercase tracking-wider font-bold text-zinc-500 mb-1">Qty</label>
@@ -243,13 +233,13 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                                 <Building2 size={16} className="text-zinc-400" /> Supplier
                             </label>
 
-                            <div 
+                            <div
                                 className="w-full border border-stone-300 rounded-xl bg-white flex items-center justify-between cursor-text shadow-sm relative z-20"
                                 onClick={() => setShowSupplierDropdown(true)}
                             >
                                 <Search size={16} className="absolute left-4 text-zinc-400" />
-                                <input 
-                                    value={supplierSearch} 
+                                <input
+                                    value={supplierSearch}
                                     onChange={e => {
                                         setSupplierSearch(e.target.value);
                                         setFormData(f => ({ ...f, supplierId: '' }));
@@ -260,22 +250,22 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                                     placeholder={formData.supplierId ? suppliers.find(s => s.id === formData.supplierId)?.name : "Search & Select Supplier..."}
                                 />
                                 {formData.supplierId && !supplierSearch && (
-                                   <span className="absolute right-4 text-indigo-600 font-bold text-xs bg-indigo-50 px-2 py-1 rounded">Selected</span>
+                                    <span className="absolute right-4 text-indigo-600 font-bold text-xs bg-indigo-50 px-2 py-1 rounded">Selected</span>
                                 )}
                             </div>
-                            
+
                             {showSupplierDropdown && (
                                 <div className="absolute w-full mt-2 bg-white border border-stone-200 rounded-xl shadow-2xl z-[100] max-h-60 overflow-y-auto">
                                     <div className="p-2 border-b border-stone-100 flex justify-between items-center bg-stone-50 sticky top-0">
                                         <span className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{filteredSuppliers.length} found</span>
-                                        <button onClick={() => setShowSupplierDropdown(false)} className="p-1 hover:bg-stone-200 rounded-lg text-zinc-400"><X size={14}/></button>
+                                        <button onClick={() => setShowSupplierDropdown(false)} className="p-1 hover:bg-stone-200 rounded-lg text-zinc-400"><X size={14} /></button>
                                     </div>
                                     {filteredSuppliers.length === 0 ? (
                                         <div className="p-4 text-center text-zinc-500 text-sm">No suppliers matching "{supplierSearch}"</div>
                                     ) : (
                                         filteredSuppliers.map(s => (
-                                            <div 
-                                                key={s.id} 
+                                            <div
+                                                key={s.id}
                                                 className={`px-4 py-3 cursor-pointer text-sm font-bold border-l-4 transition-colors ${formData.supplierId === s.id ? 'border-indigo-600 bg-indigo-50 text-indigo-900' : 'border-transparent hover:bg-stone-50 text-zinc-700'}`}
                                                 onClick={() => {
                                                     setFormData({ ...formData, supplierId: s.id });
@@ -294,54 +284,22 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                         <div>
                             <label className="block text-sm font-bold text-zinc-700 mb-2">Ownership & Status</label>
                             <div className="space-y-2">
-                                <div className="grid grid-cols-3 gap-1.5 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
+                                <div className="grid grid-cols-2 gap-1.5 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
                                     <button
                                         type="button"
-                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'owned', consigned: false, partner: false }))}
+                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'owned', consigned: false }))}
                                         className={`py-2 rounded-lg text-xs font-bold transition-all ${formData.ownershipType === 'owned' ? 'bg-white text-green-700 shadow border border-stone-200' : 'text-zinc-500 hover:text-zinc-700'}`}
                                     >
                                         ✅ Owned
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'partner', consigned: false, partner: true }))}
-                                        className={`py-2 rounded-lg text-xs font-bold transition-all ${formData.ownershipType === 'partner' ? 'bg-purple-100 text-purple-800 shadow border border-purple-200' : 'text-zinc-500 hover:text-zinc-700'}`}
-                                    >
-                                        🤝 Partner (50/50)
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'consigned', consigned: true, partner: false }))}
+                                        onClick={() => setFormData(f => ({ ...f, ownershipType: 'consigned', consigned: true }))}
                                         className={`py-2 rounded-lg text-xs font-bold transition-all ${formData.ownershipType === 'consigned' ? 'bg-amber-100 text-amber-800 shadow border border-amber-200' : 'text-zinc-500 hover:text-zinc-700'}`}
                                     >
                                         📦 Consigned
                                     </button>
                                 </div>
-
-                                {formData.ownershipType === 'partner' && (
-                                    <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-2">
-                                        <div className="flex justify-between items-center text-xs font-bold text-purple-900">
-                                            <span>Partner Attribution</span>
-                                            <span className="text-[10px] bg-purple-200 text-purple-800 px-1.5 py-0.5 rounded font-black">50% Net Profit Share</span>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            <div>
-                                                <label className="block text-[11px] font-bold text-purple-800 mb-1">Partner Name</label>
-                                                <input type="text" value={formData.partnerName || ''}
-                                                    onChange={e => setFormData({ ...formData, partnerName: e.target.value })}
-                                                    className="w-full px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-purple-600"
-                                                    placeholder="e.g. Pickle Gear" />
-                                            </div>
-                                            <div>
-                                                <label className="block text-[11px] font-bold text-purple-800 mb-1">Partner Share %</label>
-                                                <input type="number" min="1" max="99" value={formData.partnerSplitPct || '50'}
-                                                    onChange={e => setFormData({ ...formData, partnerSplitPct: e.target.value })}
-                                                    className="w-full px-2.5 py-1.5 border border-purple-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-purple-600"
-                                                    placeholder="50" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
 
                                 <div className="flex gap-2 bg-stone-200/50 p-1.5 rounded-xl border border-stone-200 shadow-inner">
                                     <button
@@ -386,7 +344,7 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                                 Enter the EXACT total amount to reflect in the Expenses tab.
                             </p>
                         </div>
-                        
+
                         <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mt-4">
                             <div className="flex items-start gap-3">
                                 <ClipboardList className="text-indigo-600 shrink-0 mt-0.5" size={18} />
@@ -408,9 +366,9 @@ const BatchAddModal = ({ products = [], suppliers = [], onClose, onSuccess }) =>
                                 <span className="text-3xl font-black text-green-700">{fmt(parsedTotalExpense)}</span>
                             </div>
                         </div>
-                        
-                        <button 
-                            onClick={handleConfirm} 
+
+                        <button
+                            onClick={handleConfirm}
                             disabled={cart.length === 0 || submitting}
                             className="w-full bg-zinc-950 text-white px-8 py-4 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-zinc-800 disabled:bg-stone-300 disabled:cursor-not-allowed transition-all shadow-md text-lg"
                         >

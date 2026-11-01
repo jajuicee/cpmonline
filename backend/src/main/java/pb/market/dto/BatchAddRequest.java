@@ -8,9 +8,6 @@ import java.util.List;
 public class BatchAddRequest {
     private Long supplierId;
     private boolean consigned;
-    private boolean partner;
-    private String partnerName;
-    private BigDecimal partnerSplitPct;
     private String status;
     private java.time.LocalDate eta;
     private BigDecimal totalExpense;
@@ -23,8 +20,5 @@ public class BatchAddRequest {
         private Integer quantity;
         private BigDecimal baseCost; // Cost before shipping
         private Boolean consigned;
-        private Boolean partner;
-        private String partnerName;
-        private BigDecimal partnerSplitPct;
     }
 }

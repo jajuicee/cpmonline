@@ -252,7 +252,7 @@ const PullOutModal = ({ isOpen, onClose, item, onSuccess }) => {
                                 <option value="Recall to Master Admin / Reallocation">Recall to Master Admin / Reallocation</option>
                                 <option value="Branch Request Return">Branch Request Return</option>
                                 <option value="Damaged / Defective Stock Return">Damaged / Defective Stock Return</option>
-                                <option value="Consignment / Partner End of Term">Consignment / Partner End of Term</option>
+                                <option value="Consignment End of Term">Consignment End of Term</option>
                                 <option value="Other">Other</option>
                             </select>
                         </div>

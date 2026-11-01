@@ -18,7 +18,7 @@ public class Transaction {
 
     // Include variant data (sku, color, sellingPrice) + its parent product (brandName, modelName)
     // when this Transaction is serialized. 'variants' is ignored to prevent circular reference.
-    @JsonIgnoreProperties({"variants", "stockQuantity"})
+    @JsonIgnoreProperties({"variants", "stockQuantity", "hibernateLazyInitializer", "handler"})
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "variant_id", nullable = false)
     private ProductVariant variant;
@@ -41,24 +41,9 @@ public class Transaction {
 
     private boolean consigned = false;
 
-    // Partner items (e.g. Pickle Gear 50/50 profit split)
-    @Column(columnDefinition = "boolean default false")
-    private boolean partner = false;
-
-    @Column(name = "partner_name")
-    private String partnerName;
-
-    @Column(name = "partner_split_pct")
-    private BigDecimal partnerSplitPct = new BigDecimal("50.00");
-
-    @Column(name = "partner_share")
-    private BigDecimal partnerShare = BigDecimal.ZERO;
-
-    @Column(name = "cpm_share")
-    private BigDecimal cpmShare = BigDecimal.ZERO;
-
-    @Column(name = "partner_settlement_status", length = 50)
-    private String partnerSettlementStatus = "UNPAID"; // UNPAID or PAID
+    // Source type: "ALLOCATED" or "BRANCH_DIRECT"
+    @Column(name = "source_type", length = 20)
+    private String sourceType = "ALLOCATED";
 
     private LocalDateTime transactionDate;
     
@@ -88,8 +73,6 @@ public class Transaction {
     protected void onCreate() {
         this.transactionDate = LocalDateTime.now();
         if (this.downpayment == null) this.downpayment = BigDecimal.ZERO;
-        if (this.partnerShare == null) this.partnerShare = BigDecimal.ZERO;
-        if (this.cpmShare == null) this.cpmShare = BigDecimal.ZERO;
-        if (this.partnerSettlementStatus == null) this.partnerSettlementStatus = "UNPAID";
+        if (this.sourceType == null || this.sourceType.isBlank()) this.sourceType = "ALLOCATED";
     }
 }

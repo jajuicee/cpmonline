@@ -51,33 +51,36 @@ public class SchemaFix implements CommandLineRunner {
         safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS notes TEXT",
                 "Column 'notes' checked/added to 'transactions' table.");
 
-        // ── Partner Gear (Co-ownership & 50/50 Split) Migrations ───────────────
-        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS partner BOOLEAN DEFAULT FALSE",
-                "Column 'partner' checked/added to 'stock_batches' table.");
-        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS partner_name VARCHAR(255)",
-                "Column 'partner_name' checked/added to 'stock_batches' table.");
-        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS partner_split_pct DECIMAL(5,2) DEFAULT 50.00",
-                "Column 'partner_split_pct' checked/added to 'stock_batches' table.");
+        // ── Branch Direct Stock & Source Type Migrations ──────────────────────────
+        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS branch_direct BOOLEAN DEFAULT FALSE",
+                "Column 'branch_direct' checked/added to 'stock_batches' table.");
+        safeExecute("ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) DEFAULT 'ALLOCATED'",
+                "Column 'source_type' checked/added to 'stock_batches' table.");
+        safeExecute("UPDATE stock_batches SET source_type = 'ALLOCATED' WHERE source_type IS NULL",
+                "Backfilled existing stock_batches with source_type = 'ALLOCATED'.");
 
-        safeExecute("ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS partner BOOLEAN DEFAULT FALSE",
-                "Column 'partner' checked/added to 'product_variants' table.");
-        safeExecute("ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS partner_name VARCHAR(255)",
-                "Column 'partner_name' checked/added to 'product_variants' table.");
-        safeExecute("ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS partner_split_pct DECIMAL(5,2) DEFAULT 50.00",
-                "Column 'partner_split_pct' checked/added to 'product_variants' table.");
+        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS source_type VARCHAR(20) DEFAULT 'ALLOCATED'",
+                "Column 'source_type' checked/added to 'transactions' table.");
+        safeExecute("UPDATE transactions SET source_type = 'ALLOCATED' WHERE source_type IS NULL",
+                "Backfilled existing transactions with source_type = 'ALLOCATED'.");
 
-        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner BOOLEAN DEFAULT FALSE",
-                "Column 'partner' checked/added to 'transactions' table.");
-        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_name VARCHAR(255)",
-                "Column 'partner_name' checked/added to 'transactions' table.");
-        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_split_pct DECIMAL(5,2) DEFAULT 50.00",
-                "Column 'partner_split_pct' checked/added to 'transactions' table.");
-        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_share DECIMAL(19,2) DEFAULT 0",
-                "Column 'partner_share' checked/added to 'transactions' table.");
-        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS cpm_share DECIMAL(19,2) DEFAULT 0",
-                "Column 'cpm_share' checked/added to 'transactions' table.");
-        safeExecute("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS partner_settlement_status VARCHAR(50) DEFAULT 'UNPAID'",
-                "Column 'partner_settlement_status' checked/added to 'transactions' table.");
+        // ── Remove Partner System (Clean Drop) ───────────────────────────────────
+        safeExecute("ALTER TABLE stock_batches DROP COLUMN IF EXISTS partner", "Dropped partner from stock_batches.");
+        safeExecute("ALTER TABLE stock_batches DROP COLUMN IF EXISTS partner_name", "Dropped partner_name from stock_batches.");
+        safeExecute("ALTER TABLE stock_batches DROP COLUMN IF EXISTS partner_split_pct", "Dropped partner_split_pct from stock_batches.");
+
+        safeExecute("ALTER TABLE product_variants DROP COLUMN IF EXISTS partner", "Dropped partner from product_variants.");
+        safeExecute("ALTER TABLE product_variants DROP COLUMN IF EXISTS partner_name", "Dropped partner_name from product_variants.");
+        safeExecute("ALTER TABLE product_variants DROP COLUMN IF EXISTS partner_split_pct", "Dropped partner_split_pct from product_variants.");
+
+        safeExecute("ALTER TABLE transactions DROP COLUMN IF EXISTS partner", "Dropped partner from transactions.");
+        safeExecute("ALTER TABLE transactions DROP COLUMN IF EXISTS partner_name", "Dropped partner_name from transactions.");
+        safeExecute("ALTER TABLE transactions DROP COLUMN IF EXISTS partner_split_pct", "Dropped partner_split_pct from transactions.");
+        safeExecute("ALTER TABLE transactions DROP COLUMN IF EXISTS partner_share", "Dropped partner_share from transactions.");
+        safeExecute("ALTER TABLE transactions DROP COLUMN IF EXISTS cpm_share", "Dropped cpm_share from transactions.");
+        safeExecute("ALTER TABLE transactions DROP COLUMN IF EXISTS partner_settlement_status", "Dropped partner_settlement_status from transactions.");
+
+        safeExecute("DROP TABLE IF EXISTS partners CASCADE", "Dropped partners table.");
 
         // Backfill old transactions
         safeExecute("UPDATE transactions SET transaction_type = 'REGULAR' WHERE transaction_type IS NULL",

@@ -92,27 +92,7 @@ public class TransactionController {
         transaction.setSupplier(oldestBatch.getSupplier());
         transaction.setConsigned(oldestBatch.isConsigned());
         transaction.setStockBatch(oldestBatch);
-
-        // Partner item tracking (e.g. 50/50 profit split with Pickle Gear)
-        transaction.setPartner(oldestBatch.isPartner());
-        transaction.setPartnerName(oldestBatch.getPartnerName());
-        BigDecimal splitPct = oldestBatch.getPartnerSplitPct() != null ? oldestBatch.getPartnerSplitPct() : new BigDecimal("50.00");
-        transaction.setPartnerSplitPct(splitPct);
-        if (oldestBatch.isPartner()) {
-            BigDecimal fp = transaction.getFinalPrice() != null ? transaction.getFinalPrice() : BigDecimal.ZERO;
-            BigDecimal cp = oldestBatch.getAcquisitionPrice() != null ? oldestBatch.getAcquisitionPrice() : BigDecimal.ZERO;
-            BigDecimal profit = fp.subtract(cp);
-            if (profit.compareTo(BigDecimal.ZERO) > 0) {
-                BigDecimal pShare = profit.multiply(splitPct).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
-                BigDecimal cShare = profit.subtract(pShare);
-                transaction.setPartnerShare(pShare);
-                transaction.setCpmShare(cShare);
-            } else {
-                transaction.setPartnerShare(BigDecimal.ZERO);
-                transaction.setCpmShare(profit);
-            }
-            transaction.setPartnerSettlementStatus("UNPAID");
-        }
+        transaction.setSourceType(oldestBatch.getSourceType() != null ? oldestBatch.getSourceType() : "ALLOCATED");
 
         if ("CONSIGNMENT".equals(transaction.getTransactionType()) && transaction.getConsignee() != null && transaction.getConsignee().getId() != null) {
             Consignee consignee = consigneeRepository.findById(transaction.getConsignee().getId()).orElse(null);
@@ -250,7 +230,7 @@ public class TransactionController {
         for (Object[] r : rows) {
             long units = ((Number) r[1]).longValue();
             BigDecimal rev = (BigDecimal) r[2];
-            BigDecimal cost = (BigDecimal) r[3];
+            BigDecimal cost = (r.length > 3 && r[3] != null) ? (BigDecimal) r[3] : BigDecimal.ZERO;
             totalUnits += units;
             totalRevenue = totalRevenue.add(rev != null ? rev : BigDecimal.ZERO);
             totalCost = totalCost.add(cost != null ? cost : BigDecimal.ZERO);
@@ -266,7 +246,7 @@ public class TransactionController {
             String cat = r[0] != null ? (String) r[0] : "Uncategorized";
             long units = ((Number) r[1]).longValue();
             BigDecimal rev = r[2] != null ? (BigDecimal) r[2] : BigDecimal.ZERO;
-            BigDecimal cost = r[3] != null ? (BigDecimal) r[3] : BigDecimal.ZERO;
+            BigDecimal cost = (r.length > 3 && r[3] != null) ? (BigDecimal) r[3] : BigDecimal.ZERO;
             BigDecimal profit = rev.subtract(cost);
 
             double revPct = totalRevenue.compareTo(BigDecimal.ZERO) > 0

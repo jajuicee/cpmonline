@@ -228,15 +228,12 @@ public class ProductController {
             @RequestParam(required = false) Long supplierId,
             @RequestParam(required = false, defaultValue = "false") boolean consigned,
             @RequestParam(required = false) Long branchId,
-            @RequestParam(required = false, defaultValue = "false") boolean partner,
-            @RequestParam(required = false) String partnerName,
-            @RequestParam(required = false) BigDecimal partnerSplitPct,
             @org.springframework.security.core.annotation.AuthenticationPrincipal pb.market.config.UserPrincipal user) {
         try {
             if (user != null && "BRANCH".equals(user.getRole())) {
                 branchId = user.getBranchId();
             }
-            ProductVariant updated = productService.addStock(id, quantity, acquisitionPrice, supplierId, consigned, branchId, partner, partnerName, partnerSplitPct);
+            ProductVariant updated = productService.addStock(id, quantity, acquisitionPrice, supplierId, consigned, branchId);
             stockWebSocketHandler.broadcastStockUpdate();
             return ResponseEntity.ok(Map.of(
                 "id", updated.getId(),

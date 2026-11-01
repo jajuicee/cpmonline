@@ -4,7 +4,6 @@ import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import AdminBatchProfitAnalytics from './AdminBatchProfitAnalytics';
 import AdminHqDirectAnalytics from './AdminHqDirectAnalytics';
-import PartnerAnalytics from './PartnerAnalytics';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
     Legend, LabelList, PieChart, Pie, Cell
@@ -12,7 +11,7 @@ import {
 import {
     BarChart3, TrendingUp, DollarSign, Package, AlertCircle, RefreshCw, Trophy, Calendar,
     X, ChevronLeft, ChevronRight, CreditCard, ChevronDown, Store, PieChart as PieIcon, Layers,
-    Receipt, Sparkles, ShoppingCart, Users, Handshake, ArrowRight
+    Receipt, Sparkles, ShoppingCart, Users, ArrowRight, Building2, Boxes, Check, Truck
 } from 'lucide-react';
 
 const formatCurrency = (val) =>
@@ -232,8 +231,10 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
     const isHqProp = propBranchId === 'HQ' || propBranchId === 0 || propBranchId === -1;
     const isHqQuery = isAdmin && !isExplicitBranchScope && searchParams.get('mode') === 'hq';
 
-    const mode = (isAdmin && !isExplicitBranchScope && searchParams.get('tab') === 'partner')
-        ? 'partner'
+    const isSupplierTab = isAdmin && !isExplicitBranchScope && (searchParams.get('tab') === 'supplier' || searchParams.get('tab') === 'suppliers');
+
+    const mode = isSupplierTab
+        ? 'supplier'
         : (isAdmin && !isExplicitBranchScope && searchParams.get('tab') === 'batch-profit')
         ? 'batch-profit'
         : (isHqQuery || isHqProp ? 'hq' : 'retail');
@@ -248,6 +249,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
     const isBranchScope = isBranch || isCashier || (!isAdmin) || (effectiveBranch != null && !isHqScope);
 
     const [branches, setBranches] = useState([]);
+    const [suppliers, setSuppliers] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -257,10 +259,20 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
     const [mainTab, setMainTab] = useState('trends');
     const [paymentFilter, setPaymentFilter] = useState('All');
     const [typeFilter, setTypeFilter] = useState('All'); // 'All', 'REGULAR', 'CONSIGNMENT'
+    const [sourceTypeFilter, setSourceTypeFilter] = useState('All'); // 'All', 'ALLOCATED', 'BRANCH_DIRECT'
+    const [supplierFilter, setSupplierFilter] = useState(() => searchParams.get('supplierId') || 'All');
     const [categoryFilter, setCategoryFilter] = useState('All');
     const [showCalendar, setShowCalendar] = useState(false);
     const [customRange, setCustomRange] = useState(null);
     const calendarRef = useRef(null);
+
+    // Sync supplier filter with URL if provided
+    useEffect(() => {
+        const sId = searchParams.get('supplierId');
+        if (sId) {
+            setSupplierFilter(sId);
+        }
+    }, [searchParams]);
 
     // Fetch branches for admin filter dropdown / name resolution
     useEffect(() => {
@@ -270,6 +282,13 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 .catch(err => console.error('Failed to load branches for analytics:', err));
         }
     }, [isAdmin]);
+
+    // Fetch suppliers for analytics filter
+    useEffect(() => {
+        axios.get('/api/suppliers')
+            .then(res => setSuppliers(Array.isArray(res.data) ? res.data : []))
+            .catch(err => console.error('Failed to load suppliers for analytics:', err));
+    }, []);
 
     // Resolved display branch name
     const currentBranchName = useMemo(() => {
@@ -409,16 +428,50 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             groupBy = diffDays > 60 ? 'month' : 'day';
         }
 
-        // Build a lookup: orderId → transactionType so we can filter payment logs by type.
+        // Build lookups and helpers for filtering by type, sourceType, and supplier
         const txTypeMap = {};
+        const txsByOrderId = {};
         transactions.forEach(t => {
             const type = (t.transactionType || 'REGULAR').toUpperCase();
+            const orderId = t.transactionId || `LEGACY-${t.id}`;
             if (t.transactionId) txTypeMap[t.transactionId] = type;
             if (t.id) {
                 txTypeMap[`LEGACY-${t.id}`] = type;
                 txTypeMap[String(t.id)] = type;
             }
+            if (!txsByOrderId[orderId]) txsByOrderId[orderId] = [];
+            txsByOrderId[orderId].push(t);
+            if (t.transactionId && !txsByOrderId[t.transactionId]) {
+                txsByOrderId[t.transactionId] = txsByOrderId[orderId];
+            }
+            if (t.id && !txsByOrderId[String(t.id)]) {
+                txsByOrderId[String(t.id)] = txsByOrderId[orderId];
+            }
         });
+
+        const getTxSourceType = (t) => {
+            const st = (t.sourceType || t.stockBatch?.sourceType || (t.branchDirect ? 'BRANCH_DIRECT' : 'ALLOCATED')).toUpperCase();
+            return st === 'BRANCH_DIRECT' ? 'BRANCH_DIRECT' : 'ALLOCATED';
+        };
+
+        const getTxSupplierId = (t) => {
+            return t.supplier?.id || t.stockBatch?.supplier?.id || null;
+        };
+
+        const getTxSupplierName = (t) => {
+            return t.supplier?.name || t.stockBatch?.supplier?.name || 'Direct / Unassigned';
+        };
+
+        const matchesTxFilters = (t) => {
+            if (sourceTypeFilter !== 'All') {
+                if (getTxSourceType(t) !== sourceTypeFilter.toUpperCase()) return false;
+            }
+            if (supplierFilter !== 'All') {
+                const sId = getTxSupplierId(t);
+                if (String(sId) !== String(supplierFilter)) return false;
+            }
+            return true;
+        };
 
         // ── Revenue & Profit: from PAYMENT LOGS (by actual payment date) ──────
         const validLogs = paymentLogs.filter(pl => {
@@ -435,10 +488,32 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 : typeFilter === 'REGULAR'
                     ? txType !== 'CONSIGNMENT'
                     : txType === 'CONSIGNMENT';
-            return inDate && inPayment && inType;
+            if (!inDate || !inPayment || !inType) return false;
+
+            // Source type & supplier filters
+            if (sourceTypeFilter !== 'All' || supplierFilter !== 'All') {
+                const orderItems = txsByOrderId[pl.orderId] || (pl.transaction?.id ? txsByOrderId[String(pl.transaction.id)] : null);
+                if (!orderItems || orderItems.length === 0) return false;
+                const hasMatchingItem = orderItems.some(matchesTxFilters);
+                if (!hasMatchingItem) return false;
+            }
+            return true;
         }).map(pl => {
-            const revenue = Number(pl.amount || 0);
-            const cost = Number(pl.costPortion || 0);
+            let revenue = Number(pl.amount || 0);
+            let cost = Number(pl.costPortion || 0);
+
+            // If an order had multiple items and only some matched the filters, scale proportionally
+            if (sourceTypeFilter !== 'All' || supplierFilter !== 'All') {
+                const orderItems = txsByOrderId[pl.orderId] || (pl.transaction?.id ? txsByOrderId[String(pl.transaction.id)] : null);
+                if (orderItems && orderItems.length > 0) {
+                    const totalOrderVal = orderItems.reduce((s, it) => s + Number(it.finalPrice || 0), 0) || 1;
+                    const matchingOrderVal = orderItems.filter(matchesTxFilters).reduce((s, it) => s + Number(it.finalPrice || 0), 0);
+                    const ratio = matchingOrderVal / totalOrderVal;
+                    revenue = Math.round(revenue * ratio * 100) / 100;
+                    cost = Math.round(cost * ratio * 100) / 100;
+                }
+            }
+
             return { ...pl, date: new Date(pl.paymentDate), revenue, cost, profit: revenue - cost };
         });
 
@@ -491,7 +566,11 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 : typeFilter === 'REGULAR'
                     ? tType !== 'CONSIGNMENT'
                     : tType === 'CONSIGNMENT';
-            return inDate && inPayment && isPaid && inType;
+
+            if (!inDate || !inPayment || !isPaid || !inType) return false;
+
+            // Apply source type & supplier filters
+            return matchesTxFilters(t);
         });
 
         // ── Dynamic Category Breakdown & Product Rankings from validTxs ──
@@ -726,6 +805,145 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             count: consigneesList.length
         };
 
+        // ── Supplier Performance Breakdown ──
+        const supplierMap = {};
+        const txsForSupplierAnalysis = transactions.filter(t => {
+            if (isHqScope) {
+                if (t.branch?.id) return false;
+            } else if (effectiveBranch) {
+                if (!t.branch || String(t.branch.id) !== String(effectiveBranch)) return false;
+            }
+            if (isBranchScope && ((t.transactionType || '').toUpperCase() === 'CONSIGNMENT' || t.consignee != null)) {
+                return false;
+            }
+            const tDate = new Date(t.transactionDate);
+            const inDateByTx = tDate >= cutoffDate && tDate <= toDate;
+            const orderId = t.transactionId || `LEGACY-${t.id}`;
+            const hasPaidLogInRange = paidOrderIds.has(orderId) || paidOrderIds.has(t.transactionId) || (t.id && paidOrderIds.has(String(t.id)));
+            const inDate = inDateByTx || hasPaidLogInRange;
+            const inPayment = paymentFilter === 'All'
+                || (t.paymentMethod && t.paymentMethod.toLowerCase() === paymentFilter.toLowerCase())
+                || hasPaidLogInRange;
+            const isPaid = t.status !== 'UNPAID';
+            const tType = (t.transactionType || 'REGULAR').toUpperCase();
+            const inType = typeFilter === 'All'
+                ? true
+                : typeFilter === 'REGULAR'
+                    ? tType !== 'CONSIGNMENT'
+                    : tType === 'CONSIGNMENT';
+
+            if (!inDate || !inPayment || !isPaid || !inType) return false;
+            if (sourceTypeFilter !== 'All') {
+                if (getTxSourceType(t) !== sourceTypeFilter.toUpperCase()) return false;
+            }
+            return true;
+        });
+
+        txsForSupplierAnalysis.forEach(t => {
+            const sId = getTxSupplierId(t) || 'unassigned';
+            const sName = getTxSupplierName(t);
+            const { selling, cost, profit } = getTxRevenueAndCost(t);
+            const st = getTxSourceType(t);
+
+            if (!supplierMap[sId]) {
+                supplierMap[sId] = {
+                    id: sId,
+                    name: sName,
+                    unitsSold: 0,
+                    allocatedUnits: 0,
+                    directUnits: 0,
+                    revenue: 0,
+                    cost: 0,
+                    profit: 0
+                };
+            }
+            supplierMap[sId].unitsSold += 1;
+            if (st === 'BRANCH_DIRECT') {
+                supplierMap[sId].directUnits += 1;
+            } else {
+                supplierMap[sId].allocatedUnits += 1;
+            }
+            supplierMap[sId].revenue += selling;
+            supplierMap[sId].cost += cost;
+            supplierMap[sId].profit += profit;
+        });
+
+        const suppliersList = Object.values(supplierMap).map(s => ({
+            ...s,
+            marginPct: s.revenue > 0 ? (s.profit / s.revenue) * 100 : 0
+        })).sort((a, b) => b.revenue - a.revenue);
+
+        const supplierSummary = {
+            totalSuppliers: suppliersList.length,
+            totalRevenue: suppliersList.reduce((acc, s) => acc + s.revenue, 0),
+            totalCost: suppliersList.reduce((acc, s) => acc + s.cost, 0),
+            totalProfit: suppliersList.reduce((acc, s) => acc + s.profit, 0),
+            totalUnits: suppliersList.reduce((acc, s) => acc + s.unitsSold, 0),
+        };
+
+        // Detailed dossier if a specific supplier is selected
+        let selectedSupplierDossier = null;
+        if (supplierFilter !== 'All') {
+            const foundSupplier = suppliers.find(s => String(s.id) === String(supplierFilter));
+            const supplierName = foundSupplier?.name || `Supplier #${supplierFilter}`;
+
+            let allocUnits = 0;
+            let allocRev = 0;
+            let allocCost = 0;
+            let directUnits = 0;
+            let directRev = 0;
+            let directCost = 0;
+
+            const branchDistribution = {};
+
+            validTxs.forEach(t => {
+                const st = getTxSourceType(t);
+                const { selling, cost, profit } = getTxRevenueAndCost(t);
+                if (st === 'BRANCH_DIRECT') {
+                    directUnits += 1;
+                    directRev += selling;
+                    directCost += cost;
+                } else {
+                    allocUnits += 1;
+                    allocRev += selling;
+                    allocCost += cost;
+                }
+
+                const bName = t.branch?.name || 'Central HQ';
+                if (!branchDistribution[bName]) {
+                    branchDistribution[bName] = { branchName: bName, units: 0, revenue: 0, profit: 0 };
+                }
+                branchDistribution[bName].units += 1;
+                branchDistribution[bName].revenue += selling;
+                branchDistribution[bName].profit += profit;
+            });
+
+            selectedSupplierDossier = {
+                id: supplierFilter,
+                name: supplierName,
+                contactInfo: foundSupplier?.contactInfo || foundSupplier?.phone || foundSupplier?.email || null,
+                totalUnits: validTxs.length,
+                totalRevenue: validLogs.reduce((s, pl) => s + pl.revenue, 0),
+                totalCost: validLogs.reduce((s, pl) => s + pl.cost, 0),
+                totalProfit: validLogs.reduce((s, pl) => s + pl.profit, 0),
+                allocated: {
+                    units: allocUnits,
+                    revenue: allocRev,
+                    cost: allocCost,
+                    profit: allocRev - allocCost,
+                    marginPct: allocRev > 0 ? ((allocRev - allocCost) / allocRev) * 100 : 0
+                },
+                branchDirect: {
+                    units: directUnits,
+                    revenue: directRev,
+                    cost: directCost,
+                    profit: directRev - directCost,
+                    marginPct: directRev > 0 ? ((directRev - directCost) / directRev) * 100 : 0
+                },
+                branchList: Object.values(branchDistribution).sort((a, b) => b.revenue - a.revenue)
+            };
+        }
+
         return {
             chartData,
             topProducts,
@@ -737,6 +955,9 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             periodExpensesList,
             consigneesList,
             consigneeSummary,
+            suppliersList,
+            supplierSummary,
+            selectedSupplierDossier,
             summary: {
                 revenue: totalRevenue,
                 grossProfit,
@@ -748,7 +969,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 units: totalUnits
             }
         };
-    }, [transactions, paymentLogs, expenses, timeRange, topFilter, customRange, paymentFilter, typeFilter, categoryFilter, effectiveBranch]);
+    }, [transactions, paymentLogs, expenses, timeRange, topFilter, customRange, paymentFilter, typeFilter, categoryFilter, effectiveBranch, sourceTypeFilter, supplierFilter, suppliers]);
 
     const {
         chartData,
@@ -761,27 +982,30 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
         expensesByCategory = {},
         periodExpensesList = [],
         consigneesList = [],
-        consigneeSummary = { totalValue: 0, amountPaid: 0, balanceDue: 0, realizedProfit: 0, count: 0 }
+        consigneeSummary = { totalValue: 0, amountPaid: 0, balanceDue: 0, realizedProfit: 0, count: 0 },
+        suppliersList = [],
+        supplierSummary = { totalSuppliers: 0, totalRevenue: 0, totalCost: 0, totalProfit: 0, totalUnits: 0 },
+        selectedSupplierDossier = null
     } = processedData;
     const paddleChartHeight = Math.max(400, topProducts.length * 40 + 50);
 
     return (
         <div className="flex flex-col h-full space-y-6 w-full">
 
-            {/* ─── Admin Master Operational Mode Switcher (Wholesale B2B vs Store Retail vs Direct Sales) ─── */}
+            {/* ─── Admin Master Operational Mode Switcher (Wholesale B2B vs Store Retail vs Central HQ) ─── */}
             {isAdmin && !isExplicitBranchScope && (
                 <div className="flex flex-wrap items-center gap-1.5 p-1 bg-stone-100/90 rounded-2xl border border-stone-200/90 w-fit shrink-0 shadow-2xs">
                     <button
-                        onClick={() => setSearchParams({ tab: 'partner' })}
+                        onClick={() => setSearchParams({ tab: 'supplier' })}
                         className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
-                            mode === 'partner'
+                            mode === 'supplier'
                                 ? 'bg-stone-900 text-white shadow-sm'
                                 : 'text-stone-500 hover:text-stone-900'
                         }`}
                     >
-                        <Handshake size={14} className={mode === 'partner' ? "text-purple-400" : ""} />
-                        <span>Partner Items</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-purple-500/20 text-purple-300 font-bold uppercase tracking-wider">50/50 Profit</span>
+                        <Building2 size={14} className={mode === 'supplier' ? "text-indigo-400" : ""} />
+                        <span>Supplier Performance Analytics</span>
+                        <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 font-bold uppercase tracking-wider">Suppliers & Sourcing</span>
                     </button>
 
                     <button
@@ -824,8 +1048,483 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                 </div>
             )}
 
-            {mode === 'partner' && (
-                <PartnerAnalytics />
+            {mode === 'supplier' && (
+                <div className="flex flex-col space-y-6 w-full animate-fadeIn">
+                    {/* Header & Controls */}
+                    <div className="flex flex-wrap justify-between items-center gap-4 bg-white p-6 rounded-2xl border border-stone-200/90 shadow-sm shrink-0">
+                        <div>
+                            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 mb-2">
+                                <Building2 size={12} />
+                                Multi-Channel Sourcing & Supplier Intelligence
+                            </div>
+                            <h2 className="text-2xl font-black text-stone-900 tracking-tight flex items-center gap-2.5">
+                                <Building2 className="text-indigo-600" size={26} />
+                                Supplier Performance Analytics
+                            </h2>
+                            <p className="text-xs text-stone-500 font-medium mt-1 max-w-3xl leading-relaxed">
+                                Filter and inspect revenue, margins, and sales volume by supplier. Compare Master Admin Allocated stock vs Branch Direct Procurements.
+                            </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            {/* Supplier Selector Dropdown */}
+                            <div className="relative">
+                                <select
+                                    value={supplierFilter}
+                                    onChange={(e) => setSupplierFilter(e.target.value)}
+                                    className="appearance-none pl-8 pr-7 py-2 bg-indigo-50/70 border border-indigo-300 rounded-xl text-xs font-black text-indigo-950 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                                >
+                                    <option value="All">🏢 All Suppliers (Consolidated)</option>
+                                    {suppliers.map(s => (
+                                        <option key={s.id} value={s.id}>🏢 {s.name}</option>
+                                    ))}
+                                </select>
+                                <Building2 size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-indigo-600 pointer-events-none" />
+                                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
+                            </div>
+
+                            {/* Stock Source Filter (All / Master Allocated / Branch Direct) */}
+                            <div className="flex bg-stone-100 p-1 rounded-xl border border-stone-200">
+                                {[
+                                    { id: 'All', label: 'All Sources' },
+                                    { id: 'ALLOCATED', label: '👑 Master Allocated' },
+                                    { id: 'BRANCH_DIRECT', label: '📦 Branch Direct' },
+                                ].map(st => (
+                                    <button
+                                        key={st.id}
+                                        onClick={() => setSourceTypeFilter(st.id)}
+                                        className="px-3 py-1.5 text-xs font-bold rounded-lg transition-all"
+                                        style={{
+                                            backgroundColor: sourceTypeFilter === st.id ? '#09090b' : 'transparent',
+                                            color: sourceTypeFilter === st.id ? '#ffffff' : '#71717a',
+                                        }}
+                                    >
+                                        {st.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Branch Filter Selector */}
+                            <div className="relative">
+                                <select
+                                    value={isHqScope ? 'HQ' : (effectiveBranch ? String(effectiveBranch) : 'ALL')}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        const nextId = (val === 'ALL' || !val) ? null : val === 'HQ' ? 'HQ' : Number(val);
+                                        if (setSelectedBranchId) setSelectedBranchId(nextId);
+                                    }}
+                                    className="appearance-none pl-8 pr-7 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-zinc-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
+                                >
+                                    <option value="ALL">All Store Locations</option>
+                                    <option value="HQ">👑 Main Admin HQ</option>
+                                    {branches.map(b => (
+                                        <option key={b.id} value={b.id}>📍 {b.name}</option>
+                                    ))}
+                                </select>
+                                <Store size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                                <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                            </div>
+
+                            {/* Time Range Presets */}
+                            <div className="flex bg-stone-100 p-1 rounded-xl border border-stone-200">
+                                {TIME_RANGES.map(range => (
+                                    <button
+                                        key={range.id}
+                                        onClick={() => handlePresetSelect(range)}
+                                        className="px-3 py-1.5 text-xs font-bold rounded-lg"
+                                        style={{
+                                            backgroundColor: timeRange?.id === range.id ? '#09090b' : 'transparent',
+                                            color: timeRange?.id === range.id ? '#ffffff' : '#71717a',
+                                        }}
+                                    >
+                                        {range.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Refresh */}
+                            <button
+                                onClick={fetchData}
+                                disabled={loading}
+                                className="p-2 rounded-xl border border-stone-200 bg-white text-zinc-500 hover:bg-stone-50 shadow-2xs cursor-pointer"
+                                title="Refresh data"
+                            >
+                                <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Content View: Single Supplier Dossier vs All Suppliers Matrix */}
+                    {selectedSupplierDossier ? (
+                        /* Single Supplier Dossier View */
+                        <div className="space-y-6">
+                            {/* Supplier Dossier Header & Clear Filter */}
+                            <div className="flex flex-wrap items-center justify-between gap-4 p-5 bg-indigo-50/70 border border-indigo-200 rounded-2xl shadow-xs">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-12 h-12 rounded-xl bg-indigo-600 text-white font-black text-lg flex items-center justify-center shadow-md">
+                                        {selectedSupplierDossier.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-black text-indigo-950 flex items-center gap-2">
+                                            {selectedSupplierDossier.name}
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-indigo-700 border border-indigo-200">
+                                                ID: {selectedSupplierDossier.id}
+                                            </span>
+                                        </h3>
+                                        <p className="text-xs text-indigo-700 font-medium">
+                                            {selectedSupplierDossier.contactInfo || 'Registered Supplier'} • Showing isolated sales & procurement metrics
+                                        </p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => setSupplierFilter('All')}
+                                    className="px-3.5 py-1.5 bg-white hover:bg-indigo-100 text-indigo-900 border border-indigo-300 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                                >
+                                    <X size={13} />
+                                    <span>View All Suppliers Matrix</span>
+                                </button>
+                            </div>
+
+                            {/* 4 KPI Cards for this Supplier */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between text-stone-400 mb-2">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Gross Sales</span>
+                                        <DollarSign size={16} className="text-emerald-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-emerald-600 font-mono">
+                                        {formatCurrency(summary.revenue)}
+                                    </div>
+                                    <div className="text-[11px] text-stone-400 mt-1">{summary.units.toLocaleString()} total units sold</div>
+                                </div>
+
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between text-stone-400 mb-2">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Cost of Goods (COGS)</span>
+                                        <Boxes size={16} className="text-amber-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-stone-800 font-mono">
+                                        {formatCurrency(summary.cost)}
+                                    </div>
+                                    <div className="text-[11px] text-stone-400 mt-1">Acquisition cost paid for sold units</div>
+                                </div>
+
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between text-stone-400 mb-2">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Gross Profit</span>
+                                        <TrendingUp size={16} className="text-purple-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-purple-700 font-mono">
+                                        {formatCurrency(summary.grossProfit)}
+                                    </div>
+                                    <div className="text-[11px] font-bold text-emerald-600 mt-1">
+                                        {summary.grossMargin ? summary.grossMargin.toFixed(1) : 0}% profit margin
+                                    </div>
+                                </div>
+
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between text-stone-400 mb-2">
+                                        <span className="text-xs font-bold uppercase tracking-wider">Units Sold</span>
+                                        <Package size={16} className="text-indigo-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-stone-900">
+                                        {summary.units.toLocaleString()}
+                                    </div>
+                                    <div className="text-[11px] text-stone-400 mt-1">From {topProducts.length} product variants</div>
+                                </div>
+                            </div>
+
+                            {/* Sourcing Channel Split: Master Allocated vs Branch Direct for this Supplier */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-white border border-amber-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <span className="px-2.5 py-1 rounded-full text-xs font-black bg-amber-50 text-amber-800 border border-amber-200">
+                                            👑 Master Admin Allocated Stock
+                                        </span>
+                                        <span className="text-xs font-bold text-stone-400">HQ Procurement</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 text-center pt-2">
+                                        <div className="p-3 bg-stone-50 rounded-xl">
+                                            <span className="text-[10px] text-stone-400 uppercase font-black block">Units</span>
+                                            <span className="text-lg font-black text-stone-900">{selectedSupplierDossier.allocated.units}</span>
+                                        </div>
+                                        <div className="p-3 bg-stone-50 rounded-xl">
+                                            <span className="text-[10px] text-stone-400 uppercase font-black block">Revenue</span>
+                                            <span className="text-sm font-black text-emerald-600 font-mono">{formatCurrency(selectedSupplierDossier.allocated.revenue)}</span>
+                                        </div>
+                                        <div className="p-3 bg-stone-50 rounded-xl">
+                                            <span className="text-[10px] text-stone-400 uppercase font-black block">Profit</span>
+                                            <span className="text-sm font-black text-purple-600 font-mono">{formatCurrency(selectedSupplierDossier.allocated.profit)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white border border-emerald-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between mb-3">
+                                        <span className="px-2.5 py-1 rounded-full text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                            📦 Branch Direct Procurements
+                                        </span>
+                                        <span className="text-xs font-bold text-stone-400">Direct Store Inflow</span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 text-center pt-2">
+                                        <div className="p-3 bg-stone-50 rounded-xl">
+                                            <span className="text-[10px] text-stone-400 uppercase font-black block">Units</span>
+                                            <span className="text-lg font-black text-stone-900">{selectedSupplierDossier.branchDirect.units}</span>
+                                        </div>
+                                        <div className="p-3 bg-stone-50 rounded-xl">
+                                            <span className="text-[10px] text-stone-400 uppercase font-black block">Revenue</span>
+                                            <span className="text-sm font-black text-emerald-600 font-mono">{formatCurrency(selectedSupplierDossier.branchDirect.revenue)}</span>
+                                        </div>
+                                        <div className="p-3 bg-stone-50 rounded-xl">
+                                            <span className="text-[10px] text-stone-400 uppercase font-black block">Profit</span>
+                                            <span className="text-sm font-black text-purple-600 font-mono">{formatCurrency(selectedSupplierDossier.branchDirect.profit)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Revenue & Profit Trends for this Supplier */}
+                            <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+                                <h3 className="text-sm font-black text-stone-900 tracking-tight flex items-center gap-2 mb-4">
+                                    <TrendingUp size={16} className="text-blue-500" />
+                                    <span>Revenue & Profit Timeline for {selectedSupplierDossier.name}</span>
+                                </h3>
+                                {chartData.length === 0 ? (
+                                    <div className="h-64 flex flex-col items-center justify-center text-stone-400">
+                                        <BarChart3 size={32} className="opacity-20 mb-2" />
+                                        <p className="text-xs">No sales recorded for this supplier during this time period.</p>
+                                    </div>
+                                ) : (
+                                    <div className="h-72 w-full">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                                                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#71717a' }} tickLine={false} axisLine={false} />
+                                                <YAxis tickFormatter={(val) => `₱${(val / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: '#71717a' }} tickLine={false} axisLine={false} />
+                                                <RechartsTooltip cursor={{ fill: '#f4f4f5' }} contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} formatter={(value) => [formatCurrency(value)]} />
+                                                <Legend wrapperStyle={{ paddingTop: '16px', fontSize: '12px' }} iconType="circle" />
+                                                <Bar dataKey="revenue" name="Sales Revenue" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={45} />
+                                                <Bar dataKey="profit" name="Gross Profit" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={45} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Top Selling Products from this Supplier & Store Breakdown */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                {/* Top Products Table */}
+                                <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+                                    <h4 className="text-sm font-black text-stone-900 tracking-tight flex items-center gap-2 mb-4">
+                                        <Trophy size={16} className="text-amber-500" />
+                                        <span>Top Selling Products ({selectedSupplierDossier.name})</span>
+                                    </h4>
+                                    {topProducts.length === 0 ? (
+                                        <p className="text-xs text-stone-400 py-6 text-center">No products found sold in this period.</p>
+                                    ) : (
+                                        <div className="space-y-2.5 overflow-y-auto max-h-80 pr-1 custom-scrollbar">
+                                            {topProducts.slice(0, 15).map(p => (
+                                                <div key={p.sku} className="flex items-center justify-between p-2.5 rounded-xl border border-stone-100 bg-stone-50/70 hover:bg-stone-50 transition-colors">
+                                                    <div className="min-w-0 pr-2">
+                                                        <div className="text-xs font-bold text-stone-900 truncate">{p.name}</div>
+                                                        <div className="text-[10px] text-stone-400 font-mono">{p.sku} • {p.category}</div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <div className="text-xs font-black text-emerald-600 font-mono">{formatCurrency(p.revenue)}</div>
+                                                        <div className="text-[10px] text-stone-400 font-bold">{p.units} units sold</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Store Distribution */}
+                                <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
+                                    <h4 className="text-sm font-black text-stone-900 tracking-tight flex items-center gap-2 mb-4">
+                                        <Store size={16} className="text-emerald-600" />
+                                        <span>Branch Sales Distribution</span>
+                                    </h4>
+                                    {selectedSupplierDossier.branchList.length === 0 ? (
+                                        <p className="text-xs text-stone-400 py-6 text-center">No branch distribution data available.</p>
+                                    ) : (
+                                        <div className="space-y-3 overflow-y-auto max-h-80 pr-1 custom-scrollbar">
+                                            {selectedSupplierDossier.branchList.map(b => (
+                                                <div key={b.branchName} className="p-3 rounded-xl border border-stone-100 bg-stone-50/70">
+                                                    <div className="flex items-center justify-between text-xs mb-1">
+                                                        <span className="font-bold text-stone-900">{b.branchName}</span>
+                                                        <span className="font-black text-emerald-600 font-mono">{formatCurrency(b.revenue)}</span>
+                                                    </div>
+                                                    <div className="flex items-center justify-between text-[11px] text-stone-400">
+                                                        <span>{b.units} units sold</span>
+                                                        <span className="font-bold text-purple-600 font-mono">+{formatCurrency(b.profit)} profit</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        /* All Suppliers Consolidated View */
+                        <div className="space-y-6">
+                            {/* KPI Row */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Active Suppliers</span>
+                                        <Building2 size={16} className="text-indigo-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-stone-900">{supplierSummary.totalSuppliers}</div>
+                                    <div className="text-[11px] text-stone-400 mt-1">Suppliers with active sales</div>
+                                </div>
+
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Total Supplier Sales</span>
+                                        <DollarSign size={16} className="text-emerald-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-emerald-600 font-mono">{formatCurrency(supplierSummary.totalRevenue)}</div>
+                                    <div className="text-[11px] text-stone-400 mt-1">{supplierSummary.totalUnits.toLocaleString()} total units sold</div>
+                                </div>
+
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Inventory Cost (COGS)</span>
+                                        <Boxes size={16} className="text-amber-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-stone-700 font-mono">{formatCurrency(supplierSummary.totalCost)}</div>
+                                    <div className="text-[11px] text-stone-400 mt-1">Total wholesale procurement expense</div>
+                                </div>
+
+                                <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Gross Profit Realized</span>
+                                        <TrendingUp size={16} className="text-purple-500" />
+                                    </div>
+                                    <div className="text-2xl font-black text-purple-700 font-mono">{formatCurrency(supplierSummary.totalProfit)}</div>
+                                    <div className="text-[11px] font-bold text-emerald-600 mt-1">
+                                        {supplierSummary.totalRevenue > 0 ? ((supplierSummary.totalProfit / supplierSummary.totalRevenue) * 100).toFixed(1) : 0}% average margin
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Full Supplier Performance Table */}
+                            <div className="bg-white border border-stone-200 rounded-2xl shadow-sm p-6 flex flex-col">
+                                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                    <h4 className="text-sm font-black text-zinc-900 tracking-tight flex items-center gap-2">
+                                        <span>Complete Supplier Performance & Channel Matrix</span>
+                                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-stone-100 text-stone-600">
+                                            {suppliersList.length} suppliers
+                                        </span>
+                                    </h4>
+                                    {sourceTypeFilter !== 'All' && (
+                                        <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                            Filtered by {sourceTypeFilter === 'BRANCH_DIRECT' ? '📦 Branch Direct' : '👑 Master Allocated'}
+                                        </span>
+                                    )}
+                                </div>
+
+                                {loading ? (
+                                    <div className="h-48 flex items-center justify-center text-zinc-400"><RefreshCw size={24} className="animate-spin" /></div>
+                                ) : suppliersList.length === 0 ? (
+                                    <div className="p-12 text-center text-stone-400 bg-stone-50 rounded-2xl border border-dashed border-stone-200 flex flex-col items-center">
+                                        <Building2 size={36} className="opacity-20 mb-2 text-stone-600" />
+                                        <p className="text-sm font-bold text-stone-600">No supplier sales recorded for this period & filters.</p>
+                                        <p className="text-xs text-stone-400 mt-1">Try selecting a wider date range or resetting active filters.</p>
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left border-collapse text-sm">
+                                            <thead>
+                                                <tr className="border-b border-stone-200 text-xs uppercase tracking-wider text-zinc-400 font-bold">
+                                                    <th className="pb-3">Supplier</th>
+                                                    <th className="pb-3 text-center">Procurement Channels</th>
+                                                    <th className="pb-3 text-right">Units Sold</th>
+                                                    <th className="pb-3 text-right">Sales Revenue</th>
+                                                    <th className="pb-3 text-right">Cost (COGS)</th>
+                                                    <th className="pb-3 text-right">Gross Profit</th>
+                                                    <th className="pb-3 text-right">Margin %</th>
+                                                    <th className="pb-3 text-right">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-stone-100">
+                                                {suppliersList.map(s => (
+                                                    <tr key={s.id} className="hover:bg-stone-50/80 transition-colors">
+                                                        <td className="py-3 font-bold text-zinc-900">
+                                                            <div className="flex items-center gap-2">
+                                                                <Building2 size={16} className="text-indigo-600" />
+                                                                <div>
+                                                                    <div className="font-bold text-zinc-900">{s.name}</div>
+                                                                    <div className="text-[10px] text-zinc-400 font-mono">ID: {s.id}</div>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-3 text-center">
+                                                            <div className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                                                                {s.allocatedUnits > 0 && (
+                                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/80">
+                                                                        👑 {s.allocatedUnits} Alloc
+                                                                    </span>
+                                                                )}
+                                                                {s.directUnits > 0 && (
+                                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80">
+                                                                        📦 {s.directUnits} Direct
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-3 text-right font-bold text-zinc-800">
+                                                            {s.unitsSold.toLocaleString()}
+                                                        </td>
+                                                        <td className="py-3 text-right font-mono font-bold text-emerald-600">
+                                                            {formatCurrency(s.revenue)}
+                                                        </td>
+                                                        <td className="py-3 text-right font-mono text-zinc-600">
+                                                            {formatCurrency(s.cost)}
+                                                        </td>
+                                                        <td className="py-3 text-right font-mono font-bold text-purple-600">
+                                                            {formatCurrency(s.profit)}
+                                                        </td>
+                                                        <td className="py-3 text-right">
+                                                            <span className={`px-2 py-0.5 rounded-md text-xs font-black ${
+                                                                s.marginPct >= 30 ? 'bg-emerald-50 text-emerald-700' : s.marginPct >= 15 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
+                                                            }`}>
+                                                                {s.marginPct.toFixed(1)}%
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 text-right">
+                                                            <button
+                                                                onClick={() => setSupplierFilter(s.id)}
+                                                                className="px-2.5 py-1 text-xs font-bold bg-stone-100 hover:bg-indigo-50 text-stone-700 hover:text-indigo-700 border border-stone-200 rounded-lg transition-colors cursor-pointer"
+                                                            >
+                                                                Inspect Supplier
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr className="border-t-2 border-stone-200 font-black text-sm bg-stone-50/50">
+                                                    <td className="py-3 font-black text-zinc-900" colSpan={2}>Total Across All Suppliers</td>
+                                                    <td className="py-3 text-right text-zinc-900">{supplierSummary.totalUnits.toLocaleString()}</td>
+                                                    <td className="py-3 text-right text-emerald-600 font-mono">{formatCurrency(supplierSummary.totalRevenue)}</td>
+                                                    <td className="py-3 text-right text-zinc-700 font-mono">{formatCurrency(supplierSummary.totalCost)}</td>
+                                                    <td className="py-3 text-right text-purple-600 font-mono">{formatCurrency(supplierSummary.totalProfit)}</td>
+                                                    <td className="py-3 text-right text-zinc-900">
+                                                        {supplierSummary.totalRevenue > 0 ? ((supplierSummary.totalProfit / supplierSummary.totalRevenue) * 100).toFixed(1) : 0}%
+                                                    </td>
+                                                    <td className="py-3 text-right text-zinc-400 text-xs font-normal">—</td>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
             )}
 
             {mode === 'batch-profit' && (
@@ -919,6 +1618,51 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
 
                     <div className="w-px h-5 bg-stone-200 mx-1" />
 
+                    {/* Stock Source Filter (Master Allocated vs Branch Direct) */}
+                    <div className="flex bg-white border border-stone-200 rounded-lg p-1 shadow-sm">
+                        {[
+                            { id: 'All', label: 'All Sources' },
+                            { id: 'ALLOCATED', label: '👑 Master Allocated' },
+                            { id: 'BRANCH_DIRECT', label: '📦 Branch Direct' },
+                        ].map(st => (
+                            <button
+                                key={st.id}
+                                onClick={() => setSourceTypeFilter(st.id)}
+                                className="px-2.5 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap"
+                                style={{
+                                    backgroundColor: sourceTypeFilter === st.id ? '#09090b' : 'transparent',
+                                    color: sourceTypeFilter === st.id ? '#ffffff' : '#71717a',
+                                }}
+                            >
+                                {st.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Supplier Filter Dropdown */}
+                    <div className="relative">
+                        <select
+                            value={supplierFilter}
+                            onChange={(e) => setSupplierFilter(e.target.value)}
+                            className="appearance-none pl-8 pr-7 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-bold text-zinc-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs"
+                            style={{
+                                borderColor: supplierFilter !== 'All' ? '#6366f1' : '#e7e5e4',
+                                backgroundColor: supplierFilter !== 'All' ? '#eef2ff' : '#ffffff'
+                            }}
+                        >
+                            <option value="All">🏢 All Suppliers</option>
+                            {suppliers.map(s => (
+                                <option key={s.id} value={s.id}>
+                                    🏢 {s.name}
+                                </option>
+                            ))}
+                        </select>
+                        <Building2 size={13} className={`absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none ${supplierFilter !== 'All' ? 'text-indigo-600' : 'text-zinc-400'}`} />
+                        <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    </div>
+
+                    <div className="w-px h-5 bg-stone-200 mx-1" />
+
                     {/* Payment Method Filter */}
                     <PaymentFilter transactions={transactions} paymentLogs={paymentLogs} value={paymentFilter} onChange={setPaymentFilter} />
 
@@ -980,7 +1724,7 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             </div>
 
             {/* Active filters indicators bar */}
-            {(effectiveBranch || typeFilter !== 'All' || paymentFilter !== 'All' || customRange || categoryFilter !== 'All') && (
+            {(effectiveBranch || typeFilter !== 'All' || paymentFilter !== 'All' || customRange || categoryFilter !== 'All' || sourceTypeFilter !== 'All' || supplierFilter !== 'All') && (
                 <div className="flex flex-wrap items-center gap-2 shrink-0 p-2.5 bg-stone-50 border border-stone-200/80 rounded-xl" style={{ animation: 'fadeSlideIn 200ms ease' }}>
                     <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider text-[10px]">Active Filters:</span>
                     
@@ -1001,6 +1745,26 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                             <Layers size={11} className="text-purple-600" />
                             {typeFilter === 'REGULAR' ? 'Regular Sales' : 'Consignment'}
                             <button onClick={() => setTypeFilter('All')} title="Show all types" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                <X size={11} />
+                            </button>
+                        </span>
+                    )}
+
+                    {sourceTypeFilter !== 'All' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-zinc-800 text-xs font-bold rounded-lg shadow-xs">
+                            <Boxes size={11} className="text-emerald-600" />
+                            {sourceTypeFilter === 'BRANCH_DIRECT' ? '📦 Branch Direct' : '👑 Master Allocated'}
+                            <button onClick={() => setSourceTypeFilter('All')} title="Show all stock sources" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
+                                <X size={11} />
+                            </button>
+                        </span>
+                    )}
+
+                    {supplierFilter !== 'All' && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-stone-200 text-indigo-700 text-xs font-bold rounded-lg shadow-xs">
+                            <Building2 size={11} className="text-indigo-600" />
+                            {suppliers.find(s => String(s.id) === String(supplierFilter))?.name || `Supplier #${supplierFilter}`}
+                            <button onClick={() => setSupplierFilter('All')} title="Show all suppliers" className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors">
                                 <X size={11} />
                             </button>
                         </span>
@@ -1043,6 +1807,8 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                                 if (mode === 'hq') setSearchParams({});
                             }
                             setTypeFilter('All');
+                            setSourceTypeFilter('All');
+                            setSupplierFilter('All');
                             setPaymentFilter('All');
                             setCategoryFilter('All');
                             setCustomRange(null);
@@ -1098,10 +1864,11 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
             </div>
 
             {/* View Mode Toggle */}
-            <div className="flex bg-stone-100 p-1 rounded-xl w-fit shrink-0 border border-stone-200/80">
+            <div className="flex flex-wrap bg-stone-100 p-1 rounded-xl w-fit shrink-0 border border-stone-200/80 gap-1">
                 <button onClick={() => setMainTab('trends')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'trends' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Revenue Trends</button>
                 <button onClick={() => setMainTab('paddles')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'paddles' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Product Rankings</button>
                 <button onClick={() => setMainTab('categories')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'categories' ? 'bg-white shadow-xs text-zinc-900' : 'text-zinc-500 hover:text-zinc-700'}`}>Category Breakdown</button>
+                <button onClick={() => setMainTab('suppliers')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'suppliers' ? 'bg-white shadow-xs text-indigo-700 font-black' : 'text-zinc-500 hover:text-zinc-700'}`}>🏢 Supplier Performance</button>
                 <button onClick={() => setMainTab('pnl')} className={`px-4 py-2 text-xs font-bold rounded-lg transition-all ${mainTab === 'pnl' ? 'bg-white shadow-xs text-emerald-800 font-black' : 'text-zinc-500 hover:text-zinc-700'}`}>
                     📊 {isHqScope ? 'Main Admin P&L Statement' : (effectiveBranch ? 'Branch P&L Statement' : 'Consolidated P&L Statement')}
                 </button>
@@ -1434,6 +2201,213 @@ const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) 
                                     )}
                                 </table>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {mainTab === 'suppliers' && (
+                    <div className="flex flex-col gap-6 flex-1 min-h-[400px]">
+                        {/* Top Supplier Overview Summary Card */}
+                        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                            <div>
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 border border-indigo-200 mb-2">
+                                    <Building2 size={12} />
+                                    Supplier & Channel Intelligence
+                                </div>
+                                <h3 className="text-xl font-black text-stone-900 tracking-tight flex items-center gap-2">
+                                    Supplier Performance & Procurement Matrix
+                                </h3>
+                                <p className="text-xs text-stone-500 mt-0.5">
+                                    Track revenue, profit, and stock volume by supplier, with clear distinction between Master Admin Allocated stock vs Branch Direct Procurements.
+                                </p>
+                            </div>
+
+                            {supplierFilter !== 'All' && (
+                                <button
+                                    onClick={() => setSupplierFilter('All')}
+                                    className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                                >
+                                    <X size={13} className="text-stone-500" />
+                                    Show All Suppliers
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Supplier KPI Row */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Active Suppliers</span>
+                                    <Building2 size={16} className="text-indigo-500" />
+                                </div>
+                                <div className="text-2xl font-black text-stone-900">{supplierSummary.totalSuppliers}</div>
+                                <div className="text-[11px] text-stone-400 mt-1">Suppliers with sales in this period</div>
+                            </div>
+
+                            <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Supplier Gross Sales</span>
+                                    <DollarSign size={16} className="text-emerald-500" />
+                                </div>
+                                <div className="text-2xl font-black text-emerald-600 font-mono">{formatCurrency(supplierSummary.totalRevenue)}</div>
+                                <div className="text-[11px] text-stone-400 mt-1">{supplierSummary.totalUnits.toLocaleString()} total units sold</div>
+                            </div>
+
+                            <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Inventory Cost (COGS)</span>
+                                    <Boxes size={16} className="text-amber-500" />
+                                </div>
+                                <div className="text-2xl font-black text-stone-700 font-mono">{formatCurrency(supplierSummary.totalCost)}</div>
+                                <div className="text-[11px] text-stone-400 mt-1">Acquisition cost paid for sold units</div>
+                            </div>
+
+                            <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-sm">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-xs font-bold text-stone-400 uppercase tracking-wider">Supplier Gross Profit</span>
+                                    <TrendingUp size={16} className="text-purple-500" />
+                                </div>
+                                <div className="text-2xl font-black text-purple-700 font-mono">{formatCurrency(supplierSummary.totalProfit)}</div>
+                                <div className="text-[11px] font-bold text-emerald-600 mt-1">
+                                    {supplierSummary.totalRevenue > 0 ? ((supplierSummary.totalProfit / supplierSummary.totalRevenue) * 100).toFixed(1) : 0}% average margin
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Detailed Supplier Performance Table */}
+                        <div className="bg-white border border-stone-200 rounded-2xl shadow-sm p-6 flex flex-col">
+                            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                                <h4 className="text-sm font-black text-zinc-900 tracking-tight flex items-center gap-2">
+                                    <span>Complete Supplier Performance & Channel Matrix</span>
+                                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-stone-100 text-stone-600">
+                                        {suppliersList.length} suppliers
+                                    </span>
+                                </h4>
+                                {sourceTypeFilter !== 'All' && (
+                                    <span className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                        Filtered by {sourceTypeFilter === 'BRANCH_DIRECT' ? '📦 Branch Direct' : '👑 Master Allocated'}
+                                    </span>
+                                )}
+                            </div>
+
+                            {loading ? (
+                                <div className="h-48 flex items-center justify-center text-zinc-400"><RefreshCw size={24} className="animate-spin" /></div>
+                            ) : suppliersList.length === 0 ? (
+                                <div className="p-12 text-center text-stone-400 bg-stone-50 rounded-2xl border border-dashed border-stone-200 flex flex-col items-center">
+                                    <Building2 size={36} className="opacity-20 mb-2 text-stone-600" />
+                                    <p className="text-sm font-bold text-stone-600">No supplier sales recorded for this period & filters.</p>
+                                    <p className="text-xs text-stone-400 mt-1">Try selecting a wider date range or resetting active filters.</p>
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse text-sm">
+                                        <thead>
+                                            <tr className="border-b border-stone-200 text-xs uppercase tracking-wider text-zinc-400 font-bold">
+                                                <th className="pb-3">Supplier</th>
+                                                <th className="pb-3 text-center">Procurement Channels</th>
+                                                <th className="pb-3 text-right">Units Sold</th>
+                                                <th className="pb-3 text-right">Sales Revenue</th>
+                                                <th className="pb-3 text-right">Cost (COGS)</th>
+                                                <th className="pb-3 text-right">Gross Profit</th>
+                                                <th className="pb-3 text-right">Margin %</th>
+                                                <th className="pb-3 text-right">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-stone-100">
+                                            {suppliersList.map(s => {
+                                                const isFiltered = String(supplierFilter) === String(s.id);
+                                                return (
+                                                    <tr key={s.id} className={`hover:bg-stone-50/80 transition-colors ${isFiltered ? 'bg-indigo-50/50' : ''}`}>
+                                                        <td className="py-3 font-bold text-zinc-900">
+                                                            <div className="flex items-center gap-2">
+                                                                <Building2 size={16} className={isFiltered ? 'text-indigo-600' : 'text-stone-400'} />
+                                                                <div>
+                                                                    <div className="font-bold text-zinc-900">{s.name}</div>
+                                                                    <div className="text-[10px] text-zinc-400 font-mono">ID: {s.id}</div>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-3 text-center">
+                                                            <div className="inline-flex items-center gap-1.5 flex-wrap justify-center">
+                                                                {s.allocatedUnits > 0 && (
+                                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/80" title={`${s.allocatedUnits} units allocated from HQ`}>
+                                                                        👑 {s.allocatedUnits} Alloc
+                                                                    </span>
+                                                                )}
+                                                                {s.directUnits > 0 && (
+                                                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200/80" title={`${s.directUnits} units direct to branch`}>
+                                                                        📦 {s.directUnits} Direct
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                        <td className="py-3 text-right font-bold text-zinc-800">
+                                                            {s.unitsSold.toLocaleString()}
+                                                        </td>
+                                                        <td className="py-3 text-right font-mono font-bold text-emerald-600">
+                                                            {formatCurrency(s.revenue)}
+                                                        </td>
+                                                        <td className="py-3 text-right font-mono text-zinc-600">
+                                                            {formatCurrency(s.cost)}
+                                                        </td>
+                                                        <td className="py-3 text-right font-mono font-bold text-purple-600">
+                                                            {formatCurrency(s.profit)}
+                                                        </td>
+                                                        <td className="py-3 text-right">
+                                                            <span className={`px-2 py-0.5 rounded-md text-xs font-black ${
+                                                                s.marginPct >= 30 ? 'bg-emerald-50 text-emerald-700' : s.marginPct >= 15 ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700'
+                                                            }`}>
+                                                                {s.marginPct.toFixed(1)}%
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-3 text-right">
+                                                            {isFiltered ? (
+                                                                <button
+                                                                    onClick={() => setSupplierFilter('All')}
+                                                                    className="px-2.5 py-1 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg inline-flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                                                    title="Clear filter for this supplier"
+                                                                >
+                                                                    <Check size={12} />
+                                                                    Active
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setSupplierFilter(s.id);
+                                                                    }}
+                                                                    className="px-2.5 py-1 text-xs font-bold bg-stone-100 hover:bg-indigo-50 text-stone-700 hover:text-indigo-700 border border-stone-200 rounded-lg transition-colors cursor-pointer"
+                                                                    title="Filter all charts and stats by this supplier"
+                                                                >
+                                                                    Filter by Supplier
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="border-t-2 border-stone-200 font-black text-sm bg-stone-50/50">
+                                                <td className="py-3 font-black text-zinc-900" colSpan={2}>Total Across All Suppliers</td>
+                                                <td className="py-3 text-right text-zinc-900">{supplierSummary.totalUnits.toLocaleString()}</td>
+                                                <td className="py-3 text-right text-emerald-600 font-mono">{formatCurrency(supplierSummary.totalRevenue)}</td>
+                                                <td className="py-3 text-right text-zinc-700 font-mono">{formatCurrency(supplierSummary.totalCost)}</td>
+                                                <td className="py-3 text-right text-purple-600 font-mono">{formatCurrency(supplierSummary.totalProfit)}</td>
+                                                <td className="py-3 text-right text-zinc-900">
+                                                    {supplierSummary.totalRevenue > 0 ? ((supplierSummary.totalProfit / supplierSummary.totalRevenue) * 100).toFixed(1) : 0}%
+                                                </td>
+                                                <td className="py-3 text-right text-zinc-400 text-xs font-normal">
+                                                    {supplierFilter !== 'All' ? (
+                                                        <button onClick={() => setSupplierFilter('All')} className="text-indigo-600 font-bold hover:underline cursor-pointer">
+                                                            Reset Filter
+                                                        </button>
+                                                    ) : '—'}
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

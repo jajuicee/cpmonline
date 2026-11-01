@@ -25,9 +25,17 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [selectedBranch, setSelectedBranch] = useState('');
+    const [selectedSupplier, setSelectedSupplier] = useState('');
+    const [suppliers, setSuppliers] = useState([]);
     const [statusFilter, setStatusFilter] = useState('ALL');
     const [timePreset, setTimePreset] = useState('ALL');
     const [searchQuery, setSearchQuery] = useState('');
+
+    useEffect(() => {
+        axios.get('/api/suppliers')
+            .then(res => setSuppliers(Array.isArray(res.data) ? res.data : []))
+            .catch(err => console.error('Failed to load suppliers in batch profit analytics:', err));
+    }, []);
 
     const fetchData = async () => {
         setLoading(true);
@@ -35,6 +43,7 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
         try {
             const params = {};
             if (selectedBranch) params.branchId = selectedBranch;
+            if (selectedSupplier) params.supplierId = selectedSupplier;
             if (statusFilter !== 'ALL') params.status = statusFilter;
 
             if (timePreset !== 'ALL') {
@@ -62,7 +71,7 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
 
     useEffect(() => {
         fetchData();
-    }, [selectedBranch, statusFilter, timePreset]);
+    }, [selectedBranch, selectedSupplier, statusFilter, timePreset]);
 
     const summary = data?.summary || {
         totalAllocatedUnits: 0,
@@ -84,16 +93,21 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
 
     // Filtered batches table
     const filteredBatches = useMemo(() => {
-        if (!searchQuery.trim()) return batches;
+        let result = batches;
+        if (selectedSupplier) {
+            result = result.filter(b => String(b.supplierId) === String(selectedSupplier) || (b.supplierName && b.supplierName.toLowerCase() === selectedSupplier.toLowerCase()));
+        }
+        if (!searchQuery.trim()) return result;
         const q = searchQuery.toLowerCase();
-        return batches.filter(b =>
+        return result.filter(b =>
             (b.adminBatchId || '').toLowerCase().includes(q) ||
             (b.sku || '').toLowerCase().includes(q) ||
             (b.brandName || '').toLowerCase().includes(q) ||
             (b.modelName || '').toLowerCase().includes(q) ||
-            (b.branchName || '').toLowerCase().includes(q)
+            (b.branchName || '').toLowerCase().includes(q) ||
+            (b.supplierName || '').toLowerCase().includes(q)
         );
-    }, [batches, searchQuery]);
+    }, [batches, searchQuery, selectedSupplier]);
 
     return (
         <div className="flex flex-col space-y-6 w-full animate-fadeIn">
@@ -133,7 +147,7 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
                 <div className="flex flex-wrap items-center gap-2">
                     {/* Branch Filter */}
                     <div className="flex items-center gap-1.5 bg-white border border-stone-200 px-3 py-1.5 rounded-lg shadow-2xs">
-                        <Building2 size={13} className="text-stone-400" />
+                        <Store size={13} className="text-stone-400" />
                         <span className="text-[10px] font-black uppercase tracking-wider text-stone-400">Branch:</span>
                         <select
                             value={selectedBranch}
@@ -143,6 +157,22 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
                             <option value="">Consolidated (All Branches)</option>
                             {branches.map(b => (
                                 <option key={b.id} value={b.id}>🏬 {b.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Supplier Filter */}
+                    <div className="flex items-center gap-1.5 bg-white border border-stone-200 px-3 py-1.5 rounded-lg shadow-2xs">
+                        <Building2 size={13} className="text-indigo-500" />
+                        <span className="text-[10px] font-black uppercase tracking-wider text-stone-400">Supplier:</span>
+                        <select
+                            value={selectedSupplier}
+                            onChange={(e) => setSelectedSupplier(e.target.value)}
+                            className="bg-transparent text-xs font-black text-stone-800 focus:outline-none cursor-pointer"
+                        >
+                            <option value="">All Suppliers</option>
+                            {suppliers.map(s => (
+                                <option key={s.id} value={s.id}>🏢 {s.name}</option>
                             ))}
                         </select>
                     </div>
@@ -522,8 +552,13 @@ const AdminBatchProfitAnalytics = ({ branches = [], onSwitchMode }) => {
                                                 <div className="font-black text-stone-900 truncate max-w-[180px]">
                                                     {b.brandName} {b.modelName}
                                                 </div>
-                                                <div className="font-mono text-[10px] text-stone-400 truncate max-w-[180px]">
-                                                    {b.sku}
+                                                <div className="flex items-center gap-1.5 mt-0.5">
+                                                    <span className="font-mono text-[10px] text-stone-400 truncate max-w-[120px]">{b.sku}</span>
+                                                    {b.supplierName && (
+                                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-0.5 shrink-0" title={`Supplier: ${b.supplierName}`}>
+                                                            <Building2 size={9} /> {b.supplierName}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </td>
 

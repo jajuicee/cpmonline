@@ -17,6 +17,7 @@ public class StockBatch {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "variant_id", nullable = false)
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
     private ProductVariant variant;
 
     private BigDecimal acquisitionPrice; // price paid for THIS batch
@@ -34,15 +35,13 @@ public class StockBatch {
     @Column(nullable = false)
     private boolean consigned = false;
 
-    // Whether this batch is a partner-owned / profit-sharing item (e.g. Pickle Gear 50/50)
-    @Column(columnDefinition = "boolean default false")
-    private boolean partner = false;
+    // Whether this batch was directly procured by the branch (not allocated from master)
+    @Column(name = "branch_direct", columnDefinition = "boolean default false")
+    private boolean branchDirect = false;
 
-    @Column(name = "partner_name")
-    private String partnerName;
-
-    @Column(name = "partner_split_pct")
-    private BigDecimal partnerSplitPct = new BigDecimal("50.00");
+    // Source type for analytics and tracking: "ALLOCATED" or "BRANCH_DIRECT"
+    @Column(name = "source_type", length = 20)
+    private String sourceType = "ALLOCATED";
 
     // Status of the batch: PENDING, INCOMING, or RECEIVED
     @Column(nullable = false, length = 20)
@@ -67,8 +66,8 @@ public class StockBatch {
         if (this.restockedAt == null) {
             this.restockedAt = LocalDateTime.now();
         }
-        if (this.partnerSplitPct == null) {
-            this.partnerSplitPct = new BigDecimal("50.00");
+        if (this.sourceType == null || this.sourceType.isBlank()) {
+            this.sourceType = "ALLOCATED";
         }
         // remainingQuantity is always set explicitly by callers (addStock, batchReceive, etc.)
         // Do NOT auto-fill from quantity here — INCOMING batches intentionally set it to 0.

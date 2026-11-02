@@ -1473,7 +1473,7 @@ const BranchDetail = () => {
                                                                                     type="button"
                                                                                     onClick={() => {
                                                                                         const targetVariantId = item.variant?.id || item.variantId;
-                                                                                        const matchingInv = inventory.find(inv => inv.variantId === targetVariantId);
+                                                                                        const matchingInv = (branchProducts || []).find(inv => inv.variantId === targetVariantId);
                                                                                         setPullOutModalItem({
                                                                                             variantId: targetVariantId,
                                                                                             sku: item.sku,

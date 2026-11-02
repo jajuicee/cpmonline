@@ -222,7 +222,7 @@ const PaymentFilter = ({ transactions, paymentLogs, value, onChange }) => {
 };
 
 const Analytics = ({ branchId: propBranchId, branchName: propBranchName } = {}) => {
-    const { currentBranchId, selectedBranchId, setSelectedBranchId, user, isAdmin, isBranch } = useAuth();
+    const { currentBranchId, selectedBranchId, setSelectedBranchId, user, isAdmin, isBranch, isCashier } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
 
     // Strict branch scope: when propBranchId is explicitly passed or logged in as a branch account

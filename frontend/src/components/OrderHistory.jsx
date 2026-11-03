@@ -879,8 +879,15 @@ const OrderHistory = () => {
     const { timelineItems, counts } = useMemo(() => {
         const q = searchQuery.trim().toLowerCase();
         
+        // Filter transactions by supplier if active, so that ONLY items/products sold from that supplier are included
+        const effectiveTransactions = supplierFilter === 'All'
+            ? transactions
+            : supplierFilter === 'UNASSIGNED'
+                ? transactions.filter(t => !t.supplier || !t.supplier.id)
+                : transactions.filter(t => String(t.supplier?.id) === String(supplierFilter));
+
         // We use transactions directly since the backend now returns all active orders (created OR paid in range)
-        const groups = transactions.reduce((acc, t) => {
+        const groups = effectiveTransactions.reduce((acc, t) => {
             const key = t.transactionId || `LEGACY-${t.id}`;
             if (!acc[key]) {
                 acc[key] = {
@@ -989,8 +996,8 @@ const OrderHistory = () => {
 
         if (supplierFilter !== 'All') {
             items = items.filter(item => {
-                if (item.type !== 'ORDER') return true;
-                return item.data.items.some(t => String(t.supplier?.id) === String(supplierFilter));
+                if (item.type !== 'ORDER') return false;
+                return item.data.items && item.data.items.length > 0;
             });
         }
 
@@ -1073,8 +1080,12 @@ const OrderHistory = () => {
         }
 
         if (supplierFilter !== 'All') {
-            const sup = suppliers.find(s => String(s.id) === String(supplierFilter));
-            parts.push(`Supplier: ${sup ? sup.name : 'ID ' + supplierFilter}`);
+            if (supplierFilter === 'UNASSIGNED') {
+                parts.push('Supplier: No Supplier (Unassigned)');
+            } else {
+                const sup = suppliers.find(s => String(s.id) === String(supplierFilter));
+                parts.push(`Supplier: ${sup ? sup.name : 'ID ' + supplierFilter}`);
+            }
         } else {
             parts.push('Supplier: All Suppliers');
         }
@@ -1357,6 +1368,7 @@ const OrderHistory = () => {
                             className="bg-transparent font-black text-xs text-zinc-800 focus:outline-none cursor-pointer max-w-[140px]"
                         >
                             <option value="All">All Suppliers</option>
+                            <option value="UNASSIGNED">— No Supplier —</option>
                             {suppliers.map(s => (
                                 <option key={s.id} value={s.id}>{s.name}</option>
                             ))}

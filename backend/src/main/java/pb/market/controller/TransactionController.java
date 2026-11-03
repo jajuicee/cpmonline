@@ -926,6 +926,52 @@ public class TransactionController {
         ));
     }
 
+    // ── Update the supplier for an entire order group ─────────────────────────
+    @Transactional
+    @PatchMapping("/group/{transactionId}/supplier")
+    public ResponseEntity<?> updateGroupSupplier(
+            @PathVariable("transactionId") String transactionId,
+            @RequestBody Map<String, Object> body) {
+        List<Transaction> group;
+        if (transactionId.startsWith("LEGACY-")) {
+            try {
+                Long id = Long.parseLong(transactionId.replace("LEGACY-", ""));
+                group = transactionRepository.findById(id).map(List::of).orElse(Collections.emptyList());
+            } catch (NumberFormatException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid transaction ID format: " + transactionId));
+            }
+        } else {
+            group = transactionRepository.findByTransactionId(transactionId);
+        }
+
+        if (group.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Supplier supplier = null;
+        Object supId = body.get("supplierId");
+        if (supId != null && !supId.toString().isBlank() && !"null".equalsIgnoreCase(supId.toString())) {
+            try {
+                Long sid = Long.parseLong(supId.toString());
+                supplier = supplierRepository.findById(sid).orElse(null);
+            } catch (NumberFormatException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid supplierId format."));
+            }
+        }
+
+        for (Transaction tx : group) {
+            tx.setSupplier(supplier);
+            transactionRepository.save(tx);
+        }
+
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "transactionId", transactionId,
+            "supplierId", supplier != null ? supplier.getId() : null,
+            "supplierName", supplier != null ? supplier.getName() : null
+        ));
+    }
+
     // ── Helper: create a payment log entry ────────────────────────────────────
     private void createPaymentLog(Transaction tx, BigDecimal amount, BigDecimal costPortion, String paymentMethod) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) return;

@@ -355,6 +355,117 @@ const EditPaymentModal = ({ group, methods, onSave, onClose }) => {
     );
 };
 
+// ── Edit Supplier Modal ──────────────────────────────────────────────────────
+const EditSupplierModal = ({ target, suppliers, onSelect, onClose }) => {
+    const currentSupplierId = target?.type === 'ITEM'
+        ? target.item?.supplier?.id
+        : target?.group?.items?.[0]?.supplier?.id;
+
+    const [query, setQuery] = useState('');
+
+    const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        if (!q) return suppliers;
+        return suppliers.filter(s => (s.name || '').toLowerCase().includes(q));
+    }, [suppliers, query]);
+
+    return (
+        <div
+            className="fixed inset-0 bg-zinc-950/50 z-[200] flex items-center justify-center p-4 backdrop-blur-sm"
+            onClick={onClose}
+            style={{ animation: 'fadeSlideIn 150ms ease' }}
+        >
+            <div
+                className="bg-white rounded-2xl shadow-2xl p-5 w-80 max-h-[85vh] flex flex-col border border-stone-200"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-100">
+                    <div className="flex items-center gap-2">
+                        <Truck size={17} className="text-zinc-600" />
+                        <div>
+                            <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-800">
+                                Select Supplier
+                            </h3>
+                            <p className="text-[11px] text-zinc-400 font-medium">
+                                {target?.type === 'ITEM'
+                                    ? `Item SKU: ${target.item?.variant?.sku || target.item?.id}`
+                                    : `Order #${target?.group?.displayId}${target?.group?.items?.length > 1 ? ` (${target.group.items.length} items)` : ''}`}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-stone-100 transition-colors"
+                    >
+                        <X size={15} />
+                    </button>
+                </div>
+
+                {/* Search supplier */}
+                <div className="relative mb-2.5">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    <input
+                        autoFocus
+                        type="text"
+                        value={query}
+                        onChange={e => setQuery(e.target.value)}
+                        placeholder="Search supplier..."
+                        className="w-full pl-7 pr-3 py-1.5 text-xs border border-stone-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-400 text-zinc-800"
+                    />
+                </div>
+
+                {/* Supplier list */}
+                <div className="flex-1 overflow-y-auto min-h-0 flex flex-col gap-1 pr-1">
+                    {/* Option to clear / unassign */}
+                    <button
+                        onClick={() => onSelect(null)}
+                        className={`text-left px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between transition-colors ${
+                            !currentSupplierId ? 'bg-zinc-950 text-white' : 'bg-stone-50 text-zinc-500 hover:bg-stone-100'
+                        }`}
+                    >
+                        <span>— No Supplier (Clear) —</span>
+                        {!currentSupplierId && <CheckCircle2 size={13} />}
+                    </button>
+
+                    {filtered.map(s => {
+                        const isSelected = String(currentSupplierId) === String(s.id);
+                        return (
+                            <button
+                                key={s.id}
+                                onClick={() => onSelect(s)}
+                                className={`text-left px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between transition-colors ${
+                                    isSelected ? 'bg-zinc-950 text-white' : 'bg-stone-50 text-zinc-700 hover:bg-stone-100'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2 truncate">
+                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isSelected ? 'bg-emerald-400' : 'bg-stone-300'}`} />
+                                    <span className="truncate">{s.name}</span>
+                                </div>
+                                {isSelected && <CheckCircle2 size={13} className="shrink-0 text-white ml-2" />}
+                            </button>
+                        );
+                    })}
+
+                    {filtered.length === 0 && (
+                        <div className="text-center py-6 text-xs text-zinc-400 font-medium">
+                            No suppliers match "{query}".
+                        </div>
+                    )}
+                </div>
+
+                <div className="pt-3 mt-2 border-t border-stone-100 flex justify-end">
+                    <button
+                        onClick={onClose}
+                        className="px-3 py-1.5 text-xs font-bold rounded-lg border border-stone-200 text-zinc-500 hover:bg-stone-50 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const OrderHistory = () => {
@@ -375,6 +486,7 @@ const OrderHistory = () => {
     const [noteModal, setNoteModal] = useState(null);
     const [paymentFilter, setPaymentFilter] = useState('All');
     const [editingPayment, setEditingPayment] = useState(null); // orderId being edited
+    const [editingSupplier, setEditingSupplier] = useState(null); // { type: 'GROUP'|'ITEM', group, item }
     // Fix #10: Styled confirmation modal state
     const [confirmModal, setConfirmModal] = useState(null); // { group }
     // Fix #11: Toast notification state
@@ -608,21 +720,44 @@ const OrderHistory = () => {
         setTimeout(() => setToast(null), 3500);
     };
 
-    const handleUpdateSupplier = async (txId, supplierId) => {
-        try {
-            await axios.patch(`/api/transactions/${txId}/supplier`, {
-                supplierId: supplierId || null,
-            });
+    const handleSelectSupplier = async (target, selectedSupplier) => {
+        setEditingSupplier(null);
+        const supplierId = selectedSupplier ? selectedSupplier.id : null;
+        const supplierObj = selectedSupplier || null;
+
+        if (target.type === 'GROUP') {
+            const group = target.group;
+            // Optimistic update for all transactions in this group
             setTransactions(prev =>
-                prev.map(t =>
-                    t.id === txId
-                        ? { ...t, supplier: supplierId ? suppliers.find(s => String(s.id) === String(supplierId)) || null : null }
-                        : t
-                )
+                prev.map(t => {
+                    const txGroupId = t.transactionId || `LEGACY-${t.id}`;
+                    return txGroupId === group.orderId ? { ...t, supplier: supplierObj } : t;
+                })
             );
-        } catch (err) {
-            console.error('Failed to update supplier:', err);
-            showToast('Could not update supplier.', 'error');
+            try {
+                await axios.patch(`/api/transactions/group/${group.orderId}/supplier`, { supplierId });
+                showToast(`Supplier set to ${selectedSupplier ? selectedSupplier.name : 'None'} for Order #${group.displayId}.`, 'success');
+                fetchTransactions();
+            } catch (err) {
+                console.error('Failed to update group supplier:', err);
+                showToast('Failed to update supplier for order.', 'error');
+                fetchTransactions();
+            }
+        } else if (target.type === 'ITEM') {
+            const item = target.item;
+            // Optimistic update for single item
+            setTransactions(prev =>
+                prev.map(t => (t.id === item.id ? { ...t, supplier: supplierObj } : t))
+            );
+            try {
+                await axios.patch(`/api/transactions/${item.id}/supplier`, { supplierId });
+                showToast(`Supplier set to ${selectedSupplier ? selectedSupplier.name : 'None'}.`, 'success');
+                fetchTransactions();
+            } catch (err) {
+                console.error('Failed to update item supplier:', err);
+                showToast('Failed to update supplier for item.', 'error');
+                fetchTransactions();
+            }
         }
     };
 
@@ -1622,42 +1757,35 @@ const OrderHistory = () => {
                                             </td>
                                             {/* Supplier column */}
                                             <td className="px-3 py-2 text-zinc-700">
-                                                {group.items.length === 1 ? (
-                                                    isAdmin ? (
-                                                        <select
-                                                            value={group.items[0]?.supplier?.id || ''}
-                                                            onClick={e => e.stopPropagation()}
-                                                            onChange={e => handleUpdateSupplier(group.items[0].id, e.target.value)}
-                                                            className="text-xs font-semibold text-zinc-800 bg-stone-50 border border-stone-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-zinc-400 max-w-[130px] truncate cursor-pointer hover:border-stone-300"
-                                                        >
-                                                            <option value="">— No Supplier —</option>
-                                                            {suppliers.map(s => (
-                                                                <option key={s.id} value={s.id}>{s.name}</option>
-                                                            ))}
-                                                        </select>
-                                                    ) : (
-                                                        <span className="text-xs font-semibold text-zinc-700">
-                                                            {group.items[0]?.supplier?.name || '—'}
+                                                {isAdmin ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setEditingSupplier({ type: 'GROUP', group });
+                                                        }}
+                                                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 hover:border-stone-300 text-xs font-semibold text-zinc-800 transition-colors group cursor-pointer max-w-[155px]"
+                                                        title="Click to select/change supplier"
+                                                    >
+                                                        <Truck size={12} className="text-zinc-500 shrink-0" />
+                                                        <span className="truncate">
+                                                            {(() => {
+                                                                const names = Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean)));
+                                                                if (names.length === 0) return <span className="text-zinc-400 font-normal">Choose Supplier</span>;
+                                                                if (names.length === 1) return names[0];
+                                                                return `${names.length} Suppliers`;
+                                                            })()}
                                                         </span>
-                                                    )
-                                                ) : (() => {
-                                                    const distinctSuppliers = Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean)));
-                                                    if (distinctSuppliers.length === 0) {
-                                                        return <span className="text-zinc-400 text-xs">—</span>;
-                                                    }
-                                                    if (distinctSuppliers.length === 1) {
-                                                        return <span className="text-xs font-semibold text-zinc-700">{distinctSuppliers[0]}</span>;
-                                                    }
-                                                    return (
-                                                        <span
-                                                            onClick={() => toggleExpand(group.orderId)}
-                                                            className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded cursor-pointer hover:bg-blue-100"
-                                                            title="Multiple suppliers — click to view & edit per item"
-                                                        >
-                                                            <Truck size={10} /> {distinctSuppliers.length} Suppliers
+                                                        <Pen size={10} className="text-zinc-400 group-hover:text-zinc-600 ml-auto shrink-0" />
+                                                    </button>
+                                                ) : (
+                                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700">
+                                                        <Truck size={12} className="text-zinc-400 shrink-0" />
+                                                        <span className="truncate">
+                                                            {Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean))).join(', ') || '—'}
                                                         </span>
-                                                    );
-                                                })()}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="px-3 py-2">
                                                 <div className="flex flex-col gap-0.5">
@@ -1867,17 +1995,21 @@ const OrderHistory = () => {
                                                                                 </td>
                                                                                 <td className="py-2 w-36">
                                                                                     {isAdmin ? (
-                                                                                        <select
-                                                                                            value={item.supplier?.id || ''}
-                                                                                            onClick={e => e.stopPropagation()}
-                                                                                            onChange={e => handleUpdateSupplier(item.id, e.target.value)}
-                                                                                            className="text-[11px] font-semibold text-zinc-700 bg-white border border-stone-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-zinc-400 max-w-[130px] truncate cursor-pointer hover:border-stone-300"
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setEditingSupplier({ type: 'ITEM', item, group });
+                                                                                            }}
+                                                                                            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-stone-200 bg-white hover:bg-stone-50 hover:border-stone-300 text-[11px] font-semibold text-zinc-800 transition-colors group cursor-pointer max-w-[140px]"
+                                                                                            title="Click to select/change supplier for this item"
                                                                                         >
-                                                                                            <option value="">— None —</option>
-                                                                                            {suppliers.map(s => (
-                                                                                                <option key={s.id} value={s.id}>{s.name}</option>
-                                                                                            ))}
-                                                                                        </select>
+                                                                                            <Truck size={11} className="text-zinc-500 shrink-0" />
+                                                                                            <span className="truncate">
+                                                                                                {item.supplier?.name || <span className="text-zinc-400 font-normal">Choose</span>}
+                                                                                            </span>
+                                                                                            <Pen size={9} className="text-zinc-400 group-hover:text-zinc-600 ml-auto shrink-0" />
+                                                                                        </button>
                                                                                     ) : (
                                                                                         <span className="text-[11px] font-medium text-zinc-600">{item.supplier?.name || '—'}</span>
                                                                                     )}
@@ -2048,6 +2180,16 @@ const OrderHistory = () => {
                     />
                 ) : null;
             })()}
+
+            {/* Edit Supplier Modal */}
+            {editingSupplier && (
+                <EditSupplierModal
+                    target={editingSupplier}
+                    suppliers={suppliers}
+                    onSelect={(selectedSupplier) => handleSelectSupplier(editingSupplier, selectedSupplier)}
+                    onClose={() => setEditingSupplier(null)}
+                />
+            )}
 
             {/* ===== PARTIAL PAYMENT MODAL ===== */}
             {payingBalanceGroup && (

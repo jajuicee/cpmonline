@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
@@ -1251,7 +1252,7 @@ const OrderHistory = () => {
                     animation: fadeSlideIn 200ms ease both;
                 }
                 @media screen {
-                    .print-only {
+                    .print-only, #print-root {
                         display: none !important;
                     }
                 }
@@ -1260,9 +1261,12 @@ const OrderHistory = () => {
                         size: A4 portrait;
                         margin: 8mm 6mm;
                     }
+                    *, *::before, *::after {
+                        box-sizing: border-box !important;
+                    }
                     html, body {
-                        background: #fff !important;
-                        color: #000 !important;
+                        background: #ffffff !important;
+                        color: #000000 !important;
                         margin: 0 !important;
                         padding: 0 !important;
                         width: 100% !important;
@@ -1270,28 +1274,36 @@ const OrderHistory = () => {
                         min-height: auto !important;
                         max-height: none !important;
                         overflow: visible !important;
+                        float: none !important;
+                        position: static !important;
                         -webkit-print-color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
-                    /* Ensure all ancestor containers allow multi-page printing */
-                    #root, #root > div, .App, main, .min-w-0, .lg\:h-full {
-                        overflow: visible !important;
+                    /* Completely hide the screen application tree from print */
+                    #root {
+                        display: none !important;
+                        visibility: hidden !important;
+                        height: 0 !important;
+                        max-height: 0 !important;
+                        overflow: hidden !important;
+                    }
+                    /* Show only the portalled print root on document.body */
+                    #print-root, .print-only {
+                        display: block !important;
+                        visibility: visible !important;
+                        position: static !important;
+                        width: 100% !important;
                         height: auto !important;
                         min-height: auto !important;
                         max-height: none !important;
-                        position: static !important;
-                    }
-                    nav, aside, header, .no-print, button, input, select, .screen-only, [role="navigation"] {
-                        display: none !important;
-                    }
-                    .print-only {
-                        display: block !important;
-                        width: 100% !important;
-                        height: auto !important;
-                        position: static !important;
+                        overflow: visible !important;
                         margin: 0 !important;
                         padding: 0 !important;
-                        overflow: visible !important;
+                        background: #ffffff !important;
+                        color: #000000 !important;
+                    }
+                    #print-root * {
+                        visibility: visible !important;
                     }
                     table.print-report-table {
                         width: 100% !important;
@@ -2469,144 +2481,237 @@ const OrderHistory = () => {
             )}
             </div>
 
-            {/* ===== PRINT-ONLY VIEW: Clean list of necessary info reflecting all active filters ===== */}
-            <div className="print-only">
-                <div style={{ borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '10px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                            <h1 style={{ fontSize: '18px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
-                                PB Market — Order History Report
-                            </h1>
-                            <div style={{ fontSize: '10px', color: '#3f3f46', fontWeight: 600, marginTop: '3px' }}>
-                                {activeFiltersText}
+            {/* ===== PRINT-ONLY VIEW: Portalled directly to document.body for unlimited multi-page printing covering all transactions ===== */}
+            {typeof document !== 'undefined' && createPortal(
+                <div id="print-root" className="print-only">
+                    {/* Embedded print stylesheet attached directly to document.body */}
+                    <style>{`
+                        @media screen {
+                            #print-root, .print-only {
+                                display: none !important;
+                            }
+                        }
+                        @media print {
+                            @page {
+                                size: A4 portrait;
+                                margin: 8mm 6mm;
+                            }
+                            *, *::before, *::after {
+                                box-sizing: border-box !important;
+                            }
+                            html, body {
+                                background: #ffffff !important;
+                                color: #000000 !important;
+                                margin: 0 !important;
+                                padding: 0 !important;
+                                width: 100% !important;
+                                height: auto !important;
+                                min-height: auto !important;
+                                max-height: none !important;
+                                overflow: visible !important;
+                                float: none !important;
+                                position: static !important;
+                                -webkit-print-color-adjust: exact !important;
+                                print-color-adjust: exact !important;
+                            }
+                            /* Completely hide the screen application tree from print */
+                            #root {
+                                display: none !important;
+                                visibility: hidden !important;
+                                height: 0 !important;
+                                max-height: 0 !important;
+                                overflow: hidden !important;
+                            }
+                            /* Show only the portalled print root on document.body */
+                            #print-root, .print-only {
+                                display: block !important;
+                                visibility: visible !important;
+                                position: static !important;
+                                width: 100% !important;
+                                height: auto !important;
+                                min-height: auto !important;
+                                max-height: none !important;
+                                overflow: visible !important;
+                                margin: 0 !important;
+                                padding: 0 !important;
+                                background: #ffffff !important;
+                                color: #000000 !important;
+                            }
+                            #print-root * {
+                                visibility: visible !important;
+                            }
+                            table.print-report-table {
+                                width: 100% !important;
+                                border-collapse: collapse !important;
+                                page-break-inside: auto !important;
+                                break-inside: auto !important;
+                            }
+                            table.print-report-table thead {
+                                display: table-header-group !important;
+                            }
+                            table.print-report-table tfoot {
+                                display: table-footer-group !important;
+                            }
+                            table.print-report-table tr {
+                                page-break-inside: avoid !important;
+                                break-inside: avoid !important;
+                            }
+                            table.print-report-table th, table.print-report-table td {
+                                border: 1px solid #d4d4d8 !important;
+                                padding: 3px 5px !important;
+                                font-size: 8.5px !important;
+                                line-height: 1.25 !important;
+                                vertical-align: top !important;
+                            }
+                            table.print-report-table th {
+                                background-color: #f4f4f5 !important;
+                                color: #09090b !important;
+                                font-weight: 800 !important;
+                                font-size: 8px !important;
+                                text-transform: uppercase !important;
+                                letter-spacing: 0.04em !important;
+                            }
+                        }
+                    `}</style>
+
+                    <div style={{ borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                                <h1 style={{ fontSize: '18px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                                    PB Market — Order History Report
+                                </h1>
+                                <div style={{ fontSize: '10px', color: '#3f3f46', fontWeight: 600, marginTop: '3px' }}>
+                                    {activeFiltersText}
+                                </div>
                             </div>
-                        </div>
-                        <div style={{ textAlign: 'right', fontSize: '10px', color: '#71717a' }}>
-                            <div>Generated: {new Date().toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                            <div style={{ fontWeight: 800, color: '#09090b', marginTop: '2px' }}>
-                                Total: {printTotals.orders} Orders ({printTotals.items} Items)
+                            <div style={{ textAlign: 'right', fontSize: '10px', color: '#71717a' }}>
+                                <div>Generated: {new Date().toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                <div style={{ fontWeight: 800, color: '#09090b', marginTop: '2px' }}>
+                                    Total: {printTotals.orders} Orders ({printTotals.items} Items)
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <table className="print-report-table">
-                    <thead>
-                        <tr>
-                            <th style={{ width: '24px', textAlign: 'center' }}>#</th>
-                            <th style={{ width: '58px' }}>Order ID</th>
-                            <th style={{ width: '90px' }}>Date & Time</th>
-                            <th style={{ width: '100px' }}>Customer</th>
-                            <th style={{ width: '80px' }}>Branch</th>
-                            <th>Items / Products</th>
-                            <th style={{ width: '90px' }}>Supplier</th>
-                            <th style={{ width: '65px' }}>Payment</th>
-                            <th style={{ width: '65px', textAlign: 'center' }}>Status</th>
-                            <th style={{ width: '75px', textAlign: 'right' }}>Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {printOrders.length === 0 ? (
+                    <table className="print-report-table">
+                        <thead>
                             <tr>
-                                <td colSpan="10" style={{ textAlign: 'center', padding: '20px', color: '#71717a' }}>
-                                    No orders match the current filter selection.
-                                </td>
+                                <th style={{ width: '24px', textAlign: 'center' }}>#</th>
+                                <th style={{ width: '58px' }}>Order ID</th>
+                                <th style={{ width: '90px' }}>Date & Time</th>
+                                <th style={{ width: '100px' }}>Customer</th>
+                                <th style={{ width: '80px' }}>Branch</th>
+                                <th>Items / Products</th>
+                                <th style={{ width: '90px' }}>Supplier</th>
+                                <th style={{ width: '65px' }}>Payment</th>
+                                <th style={{ width: '65px', textAlign: 'center' }}>Status</th>
+                                <th style={{ width: '75px', textAlign: 'right' }}>Amount</th>
                             </tr>
-                        ) : (
-                            printOrders.map((order, idx) => {
-                                const distinctSuppliers = Array.from(new Set(order.items.map(i => i.supplier?.name).filter(Boolean)));
-                                const supplierDisplay = distinctSuppliers.length > 0 ? distinctSuppliers.join(', ') : '—';
-                                const isUnpaid = order.status === 'PARTIAL' || order.status === 'UNPAID';
-                                const paidValue = order.items.filter(i => i.status === 'FULL').reduce((s, i) => s + parseFloat(i.finalPrice || 0), 0);
-                                const due = isUnpaid ? order.totalPrice - order.totalDownpayment - paidValue : 0;
+                        </thead>
+                        <tbody>
+                            {printOrders.length === 0 ? (
+                                <tr>
+                                    <td colSpan="10" style={{ textAlign: 'center', padding: '20px', color: '#71717a' }}>
+                                        No orders match the current filter selection.
+                                    </td>
+                                </tr>
+                            ) : (
+                                printOrders.map((order, idx) => {
+                                    const distinctSuppliers = Array.from(new Set(order.items.map(i => i.supplier?.name).filter(Boolean)));
+                                    const supplierDisplay = distinctSuppliers.length > 0 ? distinctSuppliers.join(', ') : '—';
+                                    const isUnpaid = order.status === 'PARTIAL' || order.status === 'UNPAID';
+                                    const paidValue = order.items.filter(i => i.status === 'FULL').reduce((s, i) => s + parseFloat(i.finalPrice || 0), 0);
+                                    const due = isUnpaid ? order.totalPrice - order.totalDownpayment - paidValue : 0;
 
-                                return (
-                                    <tr key={order.orderId}>
-                                        <td style={{ textAlign: 'center', color: '#71717a' }}>{idx + 1}</td>
-                                        <td style={{ fontFamily: 'monospace', fontWeight: 800 }}>#{order.displayId}</td>
-                                        <td>
-                                            <div>{formatDateTwoLines(order.date).date}</div>
-                                            <div style={{ fontSize: '9px', color: '#71717a' }}>{formatDateTwoLines(order.date).time}</div>
-                                        </td>
-                                        <td style={{ fontWeight: 600 }}>
-                                            {order.customerName || 'Walk-in'}
-                                            {order.transactionType === 'CONSIGNMENT' && (
-                                                <span style={{ fontSize: '8px', fontWeight: 800, marginLeft: '4px', padding: '1px 3px', background: '#e4e4e7', borderRadius: '3px' }}>
-                                                    CONSIGN
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td>{order.branchName || 'Main Store'}</td>
-                                        <td style={{ verticalAlign: 'top' }}>
-                                            <div style={{ fontSize: '8.5px', lineHeight: '1.25' }}>
-                                                {order.items.map((it, iIdx) => {
-                                                    const pName = it.variant?.product
-                                                        ? `${it.variant.product.brandName} ${it.variant.product.modelName}${it.variant?.color && it.variant?.color !== 'N/A' ? ` (${it.variant.color})` : ''}`
-                                                        : 'Item';
-                                                    return (
-                                                        <span key={iIdx}>
-                                                            {iIdx > 0 && <span style={{ color: '#a1a1aa', margin: '0 3px' }}>•</span>}
-                                                            <span style={{ fontWeight: 600, color: '#09090b' }}>{pName}</span>
-                                                            {it.variant?.sku && (
-                                                                <span style={{ color: '#71717a', fontSize: '8px', fontFamily: 'monospace', marginLeft: '2px' }}>
-                                                                    [{it.variant.sku}]
-                                                                </span>
-                                                            )}
-                                                            {order.items.length > 1 && (
-                                                                <span style={{ color: '#52525b', fontSize: '8px', fontFamily: 'monospace', marginLeft: '2px' }}>
-                                                                    (₱{Number(it.finalPrice || 0).toLocaleString('en-PH', { minimumFractionDigits: 0 })})
-                                                                </span>
-                                                            )}
-                                                        </span>
-                                                    );
-                                                })}
-                                            </div>
-                                        </td>
-                                        <td style={{ fontWeight: 600 }}>{supplierDisplay}</td>
-                                        <td>{order.paymentMethod || '—'}</td>
-                                        <td style={{ textAlign: 'center' }}>
-                                            {isUnpaid ? (
-                                                <div>
-                                                    <span style={{ fontWeight: 800, fontSize: '9px', textTransform: 'uppercase', color: '#b45309' }}>
-                                                        {order.status === 'UNPAID' ? 'Pending' : 'Partial'}
+                                    return (
+                                        <tr key={order.orderId}>
+                                            <td style={{ textAlign: 'center', color: '#71717a' }}>{idx + 1}</td>
+                                            <td style={{ fontFamily: 'monospace', fontWeight: 800 }}>#{order.displayId}</td>
+                                            <td>
+                                                <div>{formatDateTwoLines(order.date).date}</div>
+                                                <div style={{ fontSize: '9px', color: '#71717a' }}>{formatDateTwoLines(order.date).time}</div>
+                                            </td>
+                                            <td style={{ fontWeight: 600 }}>
+                                                {order.customerName || 'Walk-in'}
+                                                {order.transactionType === 'CONSIGNMENT' && (
+                                                    <span style={{ fontSize: '8px', fontWeight: 800, marginLeft: '4px', padding: '1px 3px', background: '#e4e4e7', borderRadius: '3px' }}>
+                                                        CONSIGN
                                                     </span>
-                                                    {due > 0 && (
-                                                        <div style={{ fontSize: '8px', color: '#71717a' }}>Due: {formatCurrency(due)}</div>
-                                                    )}
+                                                )}
+                                            </td>
+                                            <td>{order.branchName || 'Main Store'}</td>
+                                            <td style={{ verticalAlign: 'top' }}>
+                                                <div style={{ fontSize: '8.5px', lineHeight: '1.25' }}>
+                                                    {order.items.map((it, iIdx) => {
+                                                        const pName = it.variant?.product
+                                                            ? `${it.variant.product.brandName} ${it.variant.product.modelName}${it.variant?.color && it.variant?.color !== 'N/A' ? ` (${it.variant.color})` : ''}`
+                                                            : 'Item';
+                                                        return (
+                                                            <span key={iIdx}>
+                                                                {iIdx > 0 && <span style={{ color: '#a1a1aa', margin: '0 3px' }}>•</span>}
+                                                                <span style={{ fontWeight: 600, color: '#09090b' }}>{pName}</span>
+                                                                {it.variant?.sku && (
+                                                                    <span style={{ color: '#71717a', fontSize: '8px', fontFamily: 'monospace', marginLeft: '2px' }}>
+                                                                        [{it.variant.sku}]
+                                                                    </span>
+                                                                )}
+                                                                {order.items.length > 1 && (
+                                                                    <span style={{ color: '#52525b', fontSize: '8px', fontFamily: 'monospace', marginLeft: '2px' }}>
+                                                                        (₱{Number(it.finalPrice || 0).toLocaleString('en-PH', { minimumFractionDigits: 0 })})
+                                                                    </span>
+                                                                )}
+                                                            </span>
+                                                        );
+                                                    })}
                                                 </div>
-                                            ) : (
-                                                <span style={{ fontWeight: 800, fontSize: '9px', textTransform: 'uppercase', color: '#15803d' }}>
-                                                    Completed
-                                                </span>
-                                            )}
-                                        </td>
-                                        <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
-                                            {formatCurrency(order.totalPrice)}
-                                        </td>
-                                    </tr>
-                                );
-                            })
+                                            </td>
+                                            <td style={{ fontWeight: 600 }}>{supplierDisplay}</td>
+                                            <td>{order.paymentMethod || '—'}</td>
+                                            <td style={{ textAlign: 'center' }}>
+                                                {isUnpaid ? (
+                                                    <div>
+                                                        <span style={{ fontWeight: 800, fontSize: '9px', textTransform: 'uppercase', color: '#b45309' }}>
+                                                            {order.status === 'UNPAID' ? 'Pending' : 'Partial'}
+                                                        </span>
+                                                        {due > 0 && (
+                                                            <div style={{ fontSize: '8px', color: '#71717a' }}>Due: {formatCurrency(due)}</div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <span style={{ fontWeight: 800, fontSize: '9px', textTransform: 'uppercase', color: '#15803d' }}>
+                                                        Completed
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                                                {formatCurrency(order.totalPrice)}
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                        {printOrders.length > 0 && (
+                            <tfoot>
+                                <tr style={{ background: '#f4f4f5', fontWeight: 800, borderTop: '2px solid #000' }}>
+                                    <td colSpan="5" style={{ textAlign: 'right', padding: '6px', fontSize: '10px', textTransform: 'uppercase' }}>
+                                        Grand Total ({printTotals.orders} Orders · {printTotals.items} Items):
+                                    </td>
+                                    <td colSpan="4" style={{ textAlign: 'right', padding: '6px', fontSize: '10px', color: '#3f3f46' }}>
+                                        <span>Collected / Downpayment: {formatCurrency(printTotals.downpayment)}</span>
+                                        <span style={{ margin: '0 8px' }}>•</span>
+                                        <span>Balance Due: {formatCurrency(printTotals.balance)}</span>
+                                    </td>
+                                    <td style={{ textAlign: 'right', padding: '6px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 900 }}>
+                                        {formatCurrency(printTotals.revenue)}
+                                    </td>
+                                </tr>
+                            </tfoot>
                         )}
-                    </tbody>
-                    {printOrders.length > 0 && (
-                        <tfoot>
-                            <tr style={{ background: '#f4f4f5', fontWeight: 800, borderTop: '2px solid #000' }}>
-                                <td colSpan="5" style={{ textAlign: 'right', padding: '6px', fontSize: '10px', textTransform: 'uppercase' }}>
-                                    Grand Total ({printTotals.orders} Orders · {printTotals.items} Items):
-                                </td>
-                                <td colSpan="4" style={{ textAlign: 'right', padding: '6px', fontSize: '10px', color: '#3f3f46' }}>
-                                    <span>Collected / Downpayment: {formatCurrency(printTotals.downpayment)}</span>
-                                    <span style={{ margin: '0 8px' }}>•</span>
-                                    <span>Balance Due: {formatCurrency(printTotals.balance)}</span>
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '6px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 900 }}>
-                                    {formatCurrency(printTotals.revenue)}
-                                </td>
-                            </tr>
-                        </tfoot>
-                    )}
-                </table>
-            </div>
+                    </table>
+                </div>,
+                document.body
+            )}
         </div>
     );
 };

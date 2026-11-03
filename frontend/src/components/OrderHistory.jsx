@@ -1036,9 +1036,67 @@ const OrderHistory = () => {
     // Changes whenever the date filter changes — used to retrigger row animations
     const tableKey = customRange ? customRange.label : (activePreset || 'all');
 
+    const printOrders = useMemo(() => {
+        return timelineItems.filter(i => i.type === 'ORDER').map(i => i.data);
+    }, [timelineItems]);
+
+    const printTotals = useMemo(() => {
+        let revenue = 0;
+        let downpayment = 0;
+        let itemsCount = 0;
+        printOrders.forEach(o => {
+            revenue += parseFloat(o.totalPrice || 0);
+            downpayment += parseFloat(o.totalDownpayment || 0);
+            itemsCount += (o.items || []).length;
+        });
+        return {
+            orders: printOrders.length,
+            items: itemsCount,
+            revenue,
+            downpayment,
+            balance: revenue - downpayment
+        };
+    }, [printOrders]);
+
+    const activeFiltersText = useMemo(() => {
+        const parts = [];
+        if (periodLabel) parts.push(`Period: ${periodLabel}`);
+        if (isHqMode) {
+            parts.push('Storage: Central HQ Direct');
+        } else if (selectedBranchId) {
+            const b = branchList.find(br => br.id === selectedBranchId);
+            if (b) parts.push(`Branch: ${b.name}`);
+        } else if (isBranch || isCashier) {
+            parts.push(`Branch: ${user?.branchName || 'Assigned Branch'}`);
+        } else {
+            parts.push('Branch: Consolidated (All)');
+        }
+
+        if (supplierFilter !== 'All') {
+            const sup = suppliers.find(s => String(s.id) === String(supplierFilter));
+            parts.push(`Supplier: ${sup ? sup.name : 'ID ' + supplierFilter}`);
+        } else {
+            parts.push('Supplier: All Suppliers');
+        }
+
+        if (paymentFilter !== 'All') {
+            parts.push(`Payment: ${paymentFilter}`);
+        }
+
+        if (filter !== STATUS_ALL) {
+            parts.push(`Status: ${filter === STATUS_FULL ? 'Completed' : 'Unpaid/Partial'}`);
+        }
+
+        if (isSearching) {
+            parts.push(`Search: "${searchQuery.trim()}"`);
+        }
+
+        return parts.join('   •   ');
+    }, [periodLabel, isHqMode, selectedBranchId, branchList, isBranch, isCashier, user, supplierFilter, suppliers, paymentFilter, filter, isSearching, searchQuery]);
+
     // ─────────────────────────────────────────────────────────────────────────
     return (
-        <div className="flex flex-col min-w-0 lg:h-full">
+        <div className="min-w-0 lg:h-full flex flex-col">
             <style>{`
                 @keyframes fadeSlideIn {
                     from { opacity: 0; transform: translateY(5px); }
@@ -1061,30 +1119,57 @@ const OrderHistory = () => {
                 .order-row-anim {
                     animation: fadeSlideIn 200ms ease both;
                 }
-                @media print {
-                    nav, aside, header, .no-print, button, input, select {
+                @media screen {
+                    .print-only {
                         display: none !important;
                     }
-                    body {
+                }
+                @media print {
+                    @page {
+                        size: landscape;
+                        margin: 8mm 8mm;
+                    }
+                    body, html {
                         background: #fff !important;
                         color: #000 !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
                     }
-                    div.flex-1.min-h-0.overflow-auto {
-                        overflow: visible !important;
-                        border: none !important;
-                        box-shadow: none !important;
+                    nav, aside, header, .no-print, button, input, select, .screen-only {
+                        display: none !important;
                     }
-                    table {
+                    .print-only {
+                        display: block !important;
                         width: 100% !important;
-                        min-width: 100% !important;
-                        font-size: 10px !important;
                     }
-                    th, td {
+                    table.print-report-table {
+                        width: 100% !important;
+                        border-collapse: collapse !important;
+                    }
+                    table.print-report-table th, table.print-report-table td {
+                        border: 1px solid #d4d4d8 !important;
                         padding: 4px 6px !important;
-                        border-bottom: 1px solid #e5e7eb !important;
+                        font-size: 10px !important;
+                        line-height: 1.25 !important;
+                        vertical-align: top !important;
+                    }
+                    table.print-report-table th {
+                        background-color: #f4f4f5 !important;
+                        color: #09090b !important;
+                        font-weight: 800 !important;
+                        font-size: 9px !important;
+                        text-transform: uppercase !important;
+                        letter-spacing: 0.05em !important;
+                    }
+                    .print-report-table tr {
+                        page-break-inside: avoid !important;
                     }
                 }
             `}</style>
+
+            <div className="screen-only flex flex-col min-w-0 lg:h-full">
 
             {/* Fix #11: Toast notification */}
             {toast && (
@@ -2223,6 +2308,145 @@ const OrderHistory = () => {
                     onCancel={() => setPendingAuthAction(null)}
                 />
             )}
+            </div>
+
+            {/* ===== PRINT-ONLY VIEW: Clean list of necessary info reflecting all active filters ===== */}
+            <div className="print-only">
+                <div style={{ borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                            <h1 style={{ fontSize: '18px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                                PB Market — Order History Report
+                            </h1>
+                            <div style={{ fontSize: '10px', color: '#3f3f46', fontWeight: 600, marginTop: '3px' }}>
+                                {activeFiltersText}
+                            </div>
+                        </div>
+                        <div style={{ textAlign: 'right', fontSize: '10px', color: '#71717a' }}>
+                            <div>Generated: {new Date().toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                            <div style={{ fontWeight: 800, color: '#09090b', marginTop: '2px' }}>
+                                Total: {printTotals.orders} Orders ({printTotals.items} Items)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <table className="print-report-table">
+                    <thead>
+                        <tr>
+                            <th style={{ width: '28px', textAlign: 'center' }}>#</th>
+                            <th style={{ width: '65px' }}>Order ID</th>
+                            <th style={{ width: '105px' }}>Date & Time</th>
+                            <th style={{ width: '115px' }}>Customer</th>
+                            <th style={{ width: '95px' }}>Branch</th>
+                            <th>Items / Products</th>
+                            <th style={{ width: '110px' }}>Supplier</th>
+                            <th style={{ width: '75px' }}>Payment</th>
+                            <th style={{ width: '75px', textAlign: 'center' }}>Status</th>
+                            <th style={{ width: '85px', textAlign: 'right' }}>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {printOrders.length === 0 ? (
+                            <tr>
+                                <td colSpan="10" style={{ textAlign: 'center', padding: '20px', color: '#71717a' }}>
+                                    No orders match the current filter selection.
+                                </td>
+                            </tr>
+                        ) : (
+                            printOrders.map((order, idx) => {
+                                const distinctSuppliers = Array.from(new Set(order.items.map(i => i.supplier?.name).filter(Boolean)));
+                                const supplierDisplay = distinctSuppliers.length > 0 ? distinctSuppliers.join(', ') : '—';
+                                const isUnpaid = order.status === 'PARTIAL' || order.status === 'UNPAID';
+                                const paidValue = order.items.filter(i => i.status === 'FULL').reduce((s, i) => s + parseFloat(i.finalPrice || 0), 0);
+                                const due = isUnpaid ? order.totalPrice - order.totalDownpayment - paidValue : 0;
+
+                                return (
+                                    <tr key={order.orderId}>
+                                        <td style={{ textAlign: 'center', color: '#71717a' }}>{idx + 1}</td>
+                                        <td style={{ fontFamily: 'monospace', fontWeight: 800 }}>#{order.displayId}</td>
+                                        <td>
+                                            <div>{formatDateTwoLines(order.date).date}</div>
+                                            <div style={{ fontSize: '9px', color: '#71717a' }}>{formatDateTwoLines(order.date).time}</div>
+                                        </td>
+                                        <td style={{ fontWeight: 600 }}>
+                                            {order.customerName || 'Walk-in'}
+                                            {order.transactionType === 'CONSIGNMENT' && (
+                                                <span style={{ fontSize: '8px', fontWeight: 800, marginLeft: '4px', padding: '1px 3px', background: '#e4e4e7', borderRadius: '3px' }}>
+                                                    CONSIGN
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td>{order.branchName || 'Main Store'}</td>
+                                        <td>
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                                {order.items.map((it, iIdx) => {
+                                                    const pName = it.variant?.product
+                                                        ? `${it.variant.product.brandName} ${it.variant.product.modelName}${it.variant?.color && it.variant?.color !== 'N/A' ? ` (${it.variant.color})` : ''}`
+                                                        : 'Item';
+                                                    return (
+                                                        <div key={iIdx} style={{ fontSize: '10px', lineHeight: 1.2 }}>
+                                                            <span>• {pName}</span>
+                                                            {it.variant?.sku && (
+                                                                <span style={{ color: '#71717a', fontSize: '9px', marginLeft: '4px', fontFamily: 'monospace' }}>
+                                                                    [{it.variant.sku}]
+                                                                </span>
+                                                            )}
+                                                            {order.items.length > 1 && (
+                                                                <span style={{ color: '#52525b', fontSize: '9px', marginLeft: '4px' }}>
+                                                                    ({formatCurrency(it.finalPrice)})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </td>
+                                        <td style={{ fontWeight: 600 }}>{supplierDisplay}</td>
+                                        <td>{order.paymentMethod || '—'}</td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            {isUnpaid ? (
+                                                <div>
+                                                    <span style={{ fontWeight: 800, fontSize: '9px', textTransform: 'uppercase', color: '#b45309' }}>
+                                                        {order.status === 'UNPAID' ? 'Pending' : 'Partial'}
+                                                    </span>
+                                                    {due > 0 && (
+                                                        <div style={{ fontSize: '8px', color: '#71717a' }}>Due: {formatCurrency(due)}</div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <span style={{ fontWeight: 800, fontSize: '9px', textTransform: 'uppercase', color: '#15803d' }}>
+                                                    Completed
+                                                </span>
+                                            )}
+                                        </td>
+                                        <td style={{ textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                                            {formatCurrency(order.totalPrice)}
+                                        </td>
+                                    </tr>
+                                );
+                            })
+                        )}
+                    </tbody>
+                    {printOrders.length > 0 && (
+                        <tfoot>
+                            <tr style={{ background: '#f4f4f5', fontWeight: 800, borderTop: '2px solid #000' }}>
+                                <td colSpan="5" style={{ textAlign: 'right', padding: '6px', fontSize: '10px', textTransform: 'uppercase' }}>
+                                    Grand Total ({printTotals.orders} Orders · {printTotals.items} Items):
+                                </td>
+                                <td colSpan="4" style={{ textAlign: 'right', padding: '6px', fontSize: '10px', color: '#3f3f46' }}>
+                                    <span>Collected / Downpayment: {formatCurrency(printTotals.downpayment)}</span>
+                                    <span style={{ margin: '0 8px' }}>•</span>
+                                    <span>Balance Due: {formatCurrency(printTotals.balance)}</span>
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '6px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 900 }}>
+                                    {formatCurrency(printTotals.revenue)}
+                                </td>
+                            </tr>
+                        </tfoot>
+                    )}
+                </table>
+            </div>
         </div>
     );
 };

@@ -1757,35 +1757,26 @@ const OrderHistory = () => {
                                             </td>
                                             {/* Supplier column */}
                                             <td className="px-3 py-2 text-zinc-700">
-                                                {isAdmin ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setEditingSupplier({ type: 'GROUP', group });
-                                                        }}
-                                                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 hover:border-stone-300 text-xs font-semibold text-zinc-800 transition-colors group cursor-pointer max-w-[155px]"
-                                                        title="Click to select/change supplier"
-                                                    >
-                                                        <Truck size={12} className="text-zinc-500 shrink-0" />
-                                                        <span className="truncate">
-                                                            {(() => {
-                                                                const names = Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean)));
-                                                                if (names.length === 0) return <span className="text-zinc-400 font-normal">Choose Supplier</span>;
-                                                                if (names.length === 1) return names[0];
-                                                                return `${names.length} Suppliers`;
-                                                            })()}
-                                                        </span>
-                                                        <Pen size={10} className="text-zinc-400 group-hover:text-zinc-600 ml-auto shrink-0" />
-                                                    </button>
-                                                ) : (
-                                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-700">
-                                                        <Truck size={12} className="text-zinc-400 shrink-0" />
-                                                        <span className="truncate">
-                                                            {Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean))).join(', ') || '—'}
-                                                        </span>
-                                                    </div>
-                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEditingSupplier({ type: 'GROUP', group });
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 hover:border-stone-300 text-xs font-semibold text-zinc-800 transition-colors group cursor-pointer max-w-[160px] shadow-xs"
+                                                    title="Click to select/change supplier"
+                                                >
+                                                    <Truck size={12} className="text-zinc-500 shrink-0" />
+                                                    <span className="truncate">
+                                                        {(() => {
+                                                            const names = Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean)));
+                                                            if (names.length === 0) return <span className="text-zinc-400 font-normal">Choose Supplier</span>;
+                                                            if (names.length === 1) return names[0];
+                                                            return `${names.length} Suppliers`;
+                                                        })()}
+                                                    </span>
+                                                    <Pen size={10} className="text-zinc-400 group-hover:text-zinc-600 ml-auto shrink-0" />
+                                                </button>
                                             </td>
                                             <td className="px-3 py-2">
                                                 <div className="flex flex-col gap-0.5">
@@ -1994,25 +1985,21 @@ const OrderHistory = () => {
                                                                                     </div>
                                                                                 </td>
                                                                                 <td className="py-2 w-36">
-                                                                                    {isAdmin ? (
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={(e) => {
-                                                                                                e.stopPropagation();
-                                                                                                setEditingSupplier({ type: 'ITEM', item, group });
-                                                                                            }}
-                                                                                            className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-stone-200 bg-white hover:bg-stone-50 hover:border-stone-300 text-[11px] font-semibold text-zinc-800 transition-colors group cursor-pointer max-w-[140px]"
-                                                                                            title="Click to select/change supplier for this item"
-                                                                                        >
-                                                                                            <Truck size={11} className="text-zinc-500 shrink-0" />
-                                                                                            <span className="truncate">
-                                                                                                {item.supplier?.name || <span className="text-zinc-400 font-normal">Choose</span>}
-                                                                                            </span>
-                                                                                            <Pen size={9} className="text-zinc-400 group-hover:text-zinc-600 ml-auto shrink-0" />
-                                                                                        </button>
-                                                                                    ) : (
-                                                                                        <span className="text-[11px] font-medium text-zinc-600">{item.supplier?.name || '—'}</span>
-                                                                                    )}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            setEditingSupplier({ type: 'ITEM', item, group });
+                                                                                        }}
+                                                                                        className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-stone-200 bg-white hover:bg-stone-50 hover:border-stone-300 text-[11px] font-semibold text-zinc-800 transition-colors group cursor-pointer max-w-[140px] shadow-xs"
+                                                                                        title="Click to select/change supplier for this item"
+                                                                                    >
+                                                                                        <Truck size={11} className="text-zinc-500 shrink-0" />
+                                                                                        <span className="truncate">
+                                                                                            {item.supplier?.name || <span className="text-zinc-400 font-normal">Choose</span>}
+                                                                                        </span>
+                                                                                        <Pen size={9} className="text-zinc-400 group-hover:text-zinc-600 ml-auto shrink-0" />
+                                                                                    </button>
                                                                                 </td>
                                                                                 <td className="py-2 font-mono text-xs text-center w-20">
                                                                                     {item.status === 'FULL' ? (

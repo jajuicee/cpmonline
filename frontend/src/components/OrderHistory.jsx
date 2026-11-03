@@ -357,17 +357,59 @@ const EditPaymentModal = ({ group, methods, onSave, onClose }) => {
 
 // ── Edit Supplier Modal ──────────────────────────────────────────────────────
 const EditSupplierModal = ({ target, suppliers, onSelect, onClose }) => {
-    const currentSupplierId = target?.type === 'ITEM'
-        ? target.item?.supplier?.id
-        : target?.group?.items?.[0]?.supplier?.id;
+    const items = useMemo(() => {
+        if (!target) return [];
+        if (target.group?.items?.length) return target.group.items;
+        if (target.item) return [target.item];
+        return [];
+    }, [target]);
 
+    const [activeItemId, setActiveItemId] = useState(() => {
+        if (target?.type === 'ITEM' && target.item?.id) return target.item.id;
+        return items[0]?.id || null;
+    });
+
+    const [applyToAll, setApplyToAll] = useState(false);
     const [query, setQuery] = useState('');
+
+    const activeItem = useMemo(() => {
+        return items.find(it => it.id === activeItemId) || items[0] || target?.item || null;
+    }, [items, activeItemId, target]);
+
+    const currentSupplierId = useMemo(() => {
+        if (applyToAll) {
+            const firstSup = items[0]?.supplier?.id;
+            const allSame = items.every(it => it.supplier?.id === firstSup);
+            return allSame ? firstSup : null;
+        }
+        return activeItem?.supplier?.id || null;
+    }, [applyToAll, items, activeItem]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
         if (!q) return suppliers;
         return suppliers.filter(s => (s.name || '').toLowerCase().includes(q));
     }, [suppliers, query]);
+
+    const handleSupplierClick = (supplier) => {
+        if (applyToAll) {
+            onSelect(
+                { type: 'GROUP', group: target.group, item: activeItem },
+                supplier,
+                true
+            );
+        } else {
+            onSelect(
+                { type: 'ITEM', item: activeItem, group: target.group },
+                supplier,
+                false
+            );
+        }
+    };
+
+    const activeItemLabel = activeItem?.variant?.product
+        ? `${activeItem.variant.product.brandName} ${activeItem.variant.product.modelName}${activeItem.variant?.color && activeItem.variant?.color !== 'N/A' ? ` (${activeItem.variant.color})` : ''}`
+        : (activeItem?.variant?.sku || 'Item');
 
     return (
         <div
@@ -376,20 +418,20 @@ const EditSupplierModal = ({ target, suppliers, onSelect, onClose }) => {
             style={{ animation: 'fadeSlideIn 150ms ease' }}
         >
             <div
-                className="bg-white rounded-2xl shadow-2xl p-5 w-80 max-h-[85vh] flex flex-col border border-stone-200"
+                className="bg-white rounded-2xl shadow-2xl p-5 w-96 max-w-[95vw] max-h-[88vh] flex flex-col border border-stone-200"
                 onClick={e => e.stopPropagation()}
             >
+                {/* Header */}
                 <div className="flex items-center justify-between pb-3 mb-3 border-b border-stone-100">
                     <div className="flex items-center gap-2">
-                        <Truck size={17} className="text-zinc-600" />
+                        <Truck size={17} className="text-zinc-600 shrink-0" />
                         <div>
                             <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-800">
-                                Select Supplier
+                                Set Supplier by Product
                             </h3>
                             <p className="text-[11px] text-zinc-400 font-medium">
-                                {target?.type === 'ITEM'
-                                    ? `Item SKU: ${target.item?.variant?.sku || target.item?.id}`
-                                    : `Order #${target?.group?.displayId}${target?.group?.items?.length > 1 ? ` (${target.group.items.length} items)` : ''}`}
+                                {target?.group ? `Order #${target.group.displayId}` : 'Transaction Item'}
+                                {items.length > 1 ? ` • ${items.length} items in sale` : ''}
                             </p>
                         </div>
                     </div>
@@ -399,6 +441,80 @@ const EditSupplierModal = ({ target, suppliers, onSelect, onClose }) => {
                     >
                         <X size={15} />
                     </button>
+                </div>
+
+                {/* Multi-item product selector */}
+                {items.length > 1 && (
+                    <div className="mb-3">
+                        <div className="flex items-center justify-between mb-1.5 px-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                                1. Select Product:
+                            </span>
+                            <span className="text-[10px] text-zinc-400">
+                                Click product to change its supplier
+                            </span>
+                        </div>
+                        <div className="flex flex-col gap-1 max-h-36 overflow-y-auto border border-stone-200 rounded-xl p-1 bg-stone-50/70">
+                            {items.map(it => {
+                                const isSelected = it.id === activeItemId;
+                                const pName = it.variant?.product
+                                    ? `${it.variant.product.brandName} ${it.variant.product.modelName}${it.variant?.color && it.variant?.color !== 'N/A' ? ` (${it.variant.color})` : ''}`
+                                    : 'Item';
+                                return (
+                                    <button
+                                        key={it.id}
+                                        type="button"
+                                        onClick={() => {
+                                            setActiveItemId(it.id);
+                                            setApplyToAll(false);
+                                        }}
+                                        className={`text-left px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center justify-between gap-2 ${
+                                            isSelected && !applyToAll
+                                                ? 'bg-white font-bold text-zinc-950 border border-zinc-900 shadow-xs ring-1 ring-zinc-900/10'
+                                                : 'bg-white/60 font-medium text-zinc-600 border border-stone-100 hover:bg-white hover:text-zinc-900'
+                                        }`}
+                                    >
+                                        <div className="truncate min-w-0 flex-1">
+                                            <div className="truncate text-[11px] leading-tight">{pName}</div>
+                                            {it.variant?.sku && (
+                                                <div className="text-[10px] text-zinc-400 font-mono font-normal">
+                                                    SKU: {it.variant.sku}
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold inline-block ${
+                                                it.supplier?.name
+                                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                                    : 'bg-stone-100 text-zinc-400'
+                                            }`}>
+                                                {it.supplier?.name || '— None'}
+                                            </span>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {/* Optional apply to all checkbox */}
+                        <label className="flex items-center gap-2 mt-2 px-1 text-[11px] font-medium text-zinc-600 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={applyToAll}
+                                onChange={e => setApplyToAll(e.target.checked)}
+                                className="w-3.5 h-3.5 rounded border-stone-300 text-zinc-900 focus:ring-zinc-900"
+                            />
+                            <span>Apply selected supplier to all {items.length} items in this sale</span>
+                        </label>
+                    </div>
+                )}
+
+                {/* Target label banner */}
+                <div className="bg-stone-100/80 rounded-lg px-2.5 py-1.5 mb-2.5 flex items-center justify-between text-[11px]">
+                    <span className="text-zinc-500 font-medium">Assigning to:</span>
+                    <span className="font-bold text-zinc-800 truncate max-w-[200px]" title={applyToAll ? 'All items in sale' : activeItemLabel}>
+                        {applyToAll ? `All ${items.length} items in sale` : activeItemLabel}
+                    </span>
                 </div>
 
                 {/* Search supplier */}
@@ -418,7 +534,7 @@ const EditSupplierModal = ({ target, suppliers, onSelect, onClose }) => {
                 <div className="flex-1 overflow-y-auto min-h-0 flex flex-col gap-1 pr-1">
                     {/* Option to clear / unassign */}
                     <button
-                        onClick={() => onSelect(null)}
+                        onClick={() => handleSupplierClick(null)}
                         className={`text-left px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between transition-colors ${
                             !currentSupplierId ? 'bg-zinc-950 text-white' : 'bg-stone-50 text-zinc-500 hover:bg-stone-100'
                         }`}
@@ -432,7 +548,7 @@ const EditSupplierModal = ({ target, suppliers, onSelect, onClose }) => {
                         return (
                             <button
                                 key={s.id}
-                                onClick={() => onSelect(s)}
+                                onClick={() => handleSupplierClick(s)}
                                 className={`text-left px-3 py-2 rounded-lg text-xs font-semibold flex items-center justify-between transition-colors ${
                                     isSelected ? 'bg-zinc-950 text-white' : 'bg-stone-50 text-zinc-700 hover:bg-stone-100'
                                 }`}
@@ -720,12 +836,12 @@ const OrderHistory = () => {
         setTimeout(() => setToast(null), 3500);
     };
 
-    const handleSelectSupplier = async (target, selectedSupplier) => {
+    const handleSelectSupplier = async (target, selectedSupplier, isAll = false) => {
         setEditingSupplier(null);
         const supplierId = selectedSupplier ? selectedSupplier.id : null;
         const supplierObj = selectedSupplier || null;
 
-        if (target.type === 'GROUP') {
+        if (isAll && target?.group) {
             const group = target.group;
             // Optimistic update for all transactions in this group
             setTransactions(prev =>
@@ -736,26 +852,30 @@ const OrderHistory = () => {
             );
             try {
                 await axios.patch(`/api/transactions/group/${group.orderId}/supplier`, { supplierId });
-                showToast(`Supplier set to ${selectedSupplier ? selectedSupplier.name : 'None'} for Order #${group.displayId}.`, 'success');
+                showToast(`Supplier set to ${selectedSupplier ? selectedSupplier.name : 'None'} for all items in Order #${group.displayId}.`, 'success');
                 fetchTransactions();
             } catch (err) {
                 console.error('Failed to update group supplier:', err);
                 showToast('Failed to update supplier for order.', 'error');
                 fetchTransactions();
             }
-        } else if (target.type === 'ITEM') {
-            const item = target.item;
+        } else {
+            const item = target?.item || (target?.group?.items?.length === 1 ? target.group.items[0] : null);
+            if (!item) return;
             // Optimistic update for single item
             setTransactions(prev =>
                 prev.map(t => (t.id === item.id ? { ...t, supplier: supplierObj } : t))
             );
             try {
                 await axios.patch(`/api/transactions/${item.id}/supplier`, { supplierId });
-                showToast(`Supplier set to ${selectedSupplier ? selectedSupplier.name : 'None'}.`, 'success');
+                const pName = item.variant?.product
+                    ? `${item.variant.product.brandName} ${item.variant.product.modelName}`
+                    : (item.variant?.sku || 'product');
+                showToast(`Supplier set to ${selectedSupplier ? selectedSupplier.name : 'None'} for ${pName}.`, 'success');
                 fetchTransactions();
             } catch (err) {
                 console.error('Failed to update item supplier:', err);
-                showToast('Failed to update supplier for item.', 'error');
+                showToast('Failed to update supplier for product.', 'error');
                 fetchTransactions();
             }
         }
@@ -1137,33 +1257,62 @@ const OrderHistory = () => {
                 }
                 @media print {
                     @page {
-                        size: A4;
+                        size: A4 portrait;
                         margin: 8mm 6mm;
                     }
-                    body, html {
+                    html, body {
                         background: #fff !important;
                         color: #000 !important;
                         margin: 0 !important;
                         padding: 0 !important;
                         width: 100% !important;
+                        height: auto !important;
+                        min-height: auto !important;
+                        max-height: none !important;
+                        overflow: visible !important;
                         -webkit-print-color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
-                    nav, aside, header, .no-print, button, input, select, .screen-only {
+                    /* Ensure all ancestor containers allow multi-page printing */
+                    #root, #root > div, .App, main, .min-w-0, .lg\:h-full {
+                        overflow: visible !important;
+                        height: auto !important;
+                        min-height: auto !important;
+                        max-height: none !important;
+                        position: static !important;
+                    }
+                    nav, aside, header, .no-print, button, input, select, .screen-only, [role="navigation"] {
                         display: none !important;
                     }
                     .print-only {
                         display: block !important;
                         width: 100% !important;
+                        height: auto !important;
+                        position: static !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        overflow: visible !important;
                     }
                     table.print-report-table {
                         width: 100% !important;
                         border-collapse: collapse !important;
+                        page-break-inside: auto !important;
+                        break-inside: auto !important;
+                    }
+                    table.print-report-table thead {
+                        display: table-header-group !important;
+                    }
+                    table.print-report-table tfoot {
+                        display: table-footer-group !important;
+                    }
+                    table.print-report-table tr {
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
                     }
                     table.print-report-table th, table.print-report-table td {
                         border: 1px solid #d4d4d8 !important;
-                        padding: 4px 6px !important;
-                        font-size: 10px !important;
+                        padding: 3px 5px !important;
+                        font-size: 8.5px !important;
                         line-height: 1.25 !important;
                         vertical-align: top !important;
                     }
@@ -1171,12 +1320,9 @@ const OrderHistory = () => {
                         background-color: #f4f4f5 !important;
                         color: #09090b !important;
                         font-weight: 800 !important;
-                        font-size: 9px !important;
+                        font-size: 8px !important;
                         text-transform: uppercase !important;
-                        letter-spacing: 0.05em !important;
-                    }
-                    .print-report-table tr {
-                        page-break-inside: avoid !important;
+                        letter-spacing: 0.04em !important;
                     }
                 }
             `}</style>
@@ -2271,7 +2417,7 @@ const OrderHistory = () => {
                 <EditSupplierModal
                     target={editingSupplier}
                     suppliers={suppliers}
-                    onSelect={(selectedSupplier) => handleSelectSupplier(editingSupplier, selectedSupplier)}
+                    onSelect={(targetToUpdate, selectedSupplier, isAll) => handleSelectSupplier(targetToUpdate, selectedSupplier, isAll)}
                     onClose={() => setEditingSupplier(null)}
                 />
             )}
@@ -2391,26 +2537,27 @@ const OrderHistory = () => {
                                             )}
                                         </td>
                                         <td>{order.branchName || 'Main Store'}</td>
-                                        <td>
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                        <td style={{ verticalAlign: 'top' }}>
+                                            <div style={{ fontSize: '8.5px', lineHeight: '1.25' }}>
                                                 {order.items.map((it, iIdx) => {
                                                     const pName = it.variant?.product
                                                         ? `${it.variant.product.brandName} ${it.variant.product.modelName}${it.variant?.color && it.variant?.color !== 'N/A' ? ` (${it.variant.color})` : ''}`
                                                         : 'Item';
                                                     return (
-                                                        <div key={iIdx} style={{ fontSize: '10px', lineHeight: 1.2 }}>
-                                                            <span>• {pName}</span>
+                                                        <span key={iIdx}>
+                                                            {iIdx > 0 && <span style={{ color: '#a1a1aa', margin: '0 3px' }}>•</span>}
+                                                            <span style={{ fontWeight: 600, color: '#09090b' }}>{pName}</span>
                                                             {it.variant?.sku && (
-                                                                <span style={{ color: '#71717a', fontSize: '9px', marginLeft: '4px', fontFamily: 'monospace' }}>
+                                                                <span style={{ color: '#71717a', fontSize: '8px', fontFamily: 'monospace', marginLeft: '2px' }}>
                                                                     [{it.variant.sku}]
                                                                 </span>
                                                             )}
                                                             {order.items.length > 1 && (
-                                                                <span style={{ color: '#52525b', fontSize: '9px', marginLeft: '4px' }}>
-                                                                    ({formatCurrency(it.finalPrice)})
+                                                                <span style={{ color: '#52525b', fontSize: '8px', fontFamily: 'monospace', marginLeft: '2px' }}>
+                                                                    (₱{Number(it.finalPrice || 0).toLocaleString('en-PH', { minimumFractionDigits: 0 })})
                                                                 </span>
                                                             )}
-                                                        </div>
+                                                        </span>
                                                     );
                                                 })}
                                             </div>

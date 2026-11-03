@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import pb.market.entity.Supplier;
+import pb.market.repository.SupplierRepository;
 
 import java.math.BigDecimal;
 import java.util.Collections;
@@ -40,6 +42,7 @@ public class TransactionController {
     private final ConsigneeRepository consigneeRepository;
     private final PaymentLogRepository paymentLogRepository;
     private final pb.market.repository.BranchRepository branchRepository;
+    private final SupplierRepository supplierRepository;
 
     // ── Create a new transaction + deduct 1 from stock ───────────────────────
     @Transactional
@@ -892,6 +895,35 @@ public class TransactionController {
     // ── Broadcast helper — called after order cancel to push stock refresh ────
     private void broadcastAfterCancel() {
         stockWebSocketHandler.broadcastStockUpdate();
+    }
+
+    // ── Update the supplier on a single transaction ───────────────────────────
+    @Transactional
+    @PatchMapping("/{id}/supplier")
+    public ResponseEntity<?> updateTransactionSupplier(
+            @PathVariable("id") Long id,
+            @RequestBody Map<String, Object> body) {
+        Transaction tx = transactionRepository.findById(id).orElse(null);
+        if (tx == null) return ResponseEntity.notFound().build();
+
+        Object supId = body.get("supplierId");
+        if (supId == null || supId.toString().isBlank() || "null".equalsIgnoreCase(supId.toString())) {
+            tx.setSupplier(null);
+        } else {
+            try {
+                Long sid = Long.parseLong(supId.toString());
+                Supplier supplier = supplierRepository.findById(sid).orElse(null);
+                tx.setSupplier(supplier);
+            } catch (NumberFormatException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid supplierId format."));
+            }
+        }
+        transactionRepository.save(tx);
+        return ResponseEntity.ok(Map.of(
+            "success", true,
+            "supplierId", tx.getSupplier() != null ? tx.getSupplier().getId() : null,
+            "supplierName", tx.getSupplier() != null ? tx.getSupplier().getName() : null
+        ));
     }
 
     // ── Helper: create a payment log entry ────────────────────────────────────

@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import * as XLSX from 'xlsx';
 import {
     History, CheckCircle2, Clock, CreditCard,
     AlertCircle, Loader2, RefreshCw, ChevronDown, Package,
     Calendar, X, ChevronLeft, ChevronRight, Search, MessageSquare, XCircle, Pen,
-    Store, MapPin, Building2
+    Store, MapPin, Building2, Printer, Download, Truck, FileSpreadsheet
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import PasswordModal from './PasswordModal';
@@ -387,6 +388,9 @@ const OrderHistory = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const isSearching = searchQuery.trim().length > 0;
 
+    const [suppliers, setSuppliers] = useState([]);
+    const [supplierFilter, setSupplierFilter] = useState('All');
+
     const [activePreset, setActivePreset] = useState('TODAY');
     const [customRange, setCustomRange] = useState(null);
     const [showCalendar, setShowCalendar] = useState(false);
@@ -399,6 +403,12 @@ const OrderHistory = () => {
                 .catch(err => console.error('Failed to load branches:', err));
         }
     }, [isAdmin]);
+
+    useEffect(() => {
+        axios.get('/api/suppliers')
+            .then(res => setSuppliers(Array.isArray(res.data) ? res.data : []))
+            .catch(err => console.error('Failed to load suppliers:', err));
+    }, []);
 
     useEffect(() => {
         const handler = (e) => {
@@ -598,6 +608,89 @@ const OrderHistory = () => {
         setTimeout(() => setToast(null), 3500);
     };
 
+    const handleUpdateSupplier = async (txId, supplierId) => {
+        try {
+            await axios.patch(`/api/transactions/${txId}/supplier`, {
+                supplierId: supplierId || null,
+            });
+            setTransactions(prev =>
+                prev.map(t =>
+                    t.id === txId
+                        ? { ...t, supplier: supplierId ? suppliers.find(s => String(s.id) === String(supplierId)) || null : null }
+                        : t
+                )
+            );
+        } catch (err) {
+            console.error('Failed to update supplier:', err);
+            showToast('Could not update supplier.', 'error');
+        }
+    };
+
+    const exportCSV = () => {
+        const visibleGroups = timelineItems.filter(i => i.type === 'ORDER').map(i => i.data);
+        const rows = [];
+        visibleGroups.forEach(g => {
+            g.items.forEach(t => {
+                rows.push([
+                    g.displayId,
+                    g.customerName || 'Walk-in',
+                    t.variant?.sku || '',
+                    t.variant?.product ? `${t.variant.product.brandName} ${t.variant.product.modelName}` : '',
+                    t.variant?.color || '',
+                    g.branchName || 'Main Store',
+                    t.supplier?.name || '',
+                    t.transactionType || '',
+                    g.paymentMethod || '',
+                    t.finalPrice || '',
+                    g.status || '',
+                    g.date || '',
+                ]);
+            });
+        });
+        const headers = ['Order ID', 'Customer', 'SKU', 'Product', 'Color', 'Branch', 'Supplier', 'Type', 'Payment', 'Amount', 'Status', 'Date'];
+        const csv = [headers, ...rows]
+            .map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
+            .join('\n');
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `order-history-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const exportXLSX = () => {
+        const visibleGroups = timelineItems.filter(i => i.type === 'ORDER').map(i => i.data);
+        const data = [];
+        visibleGroups.forEach(g => {
+            g.items.forEach(t => {
+                data.push({
+                    'Order ID': `#${g.displayId}`,
+                    'Customer': g.customerName || 'Walk-in',
+                    'SKU': t.variant?.sku || '',
+                    'Product': t.variant?.product ? `${t.variant.product.brandName} ${t.variant.product.modelName}` : '',
+                    'Color': t.variant?.color || '',
+                    'Branch': g.branchName || 'Main Store',
+                    'Supplier': t.supplier?.name || '',
+                    'Type': t.transactionType || '',
+                    'Payment': g.paymentMethod || '',
+                    'Amount': t.finalPrice != null ? Number(t.finalPrice) : 0,
+                    'Status': g.status || '',
+                    'Date': g.date ? formatDate(g.date) : ''
+                });
+            });
+        });
+        const worksheet = XLSX.utils.json_to_sheet(data);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Order History');
+        XLSX.writeFile(workbook, `order-history-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+
+    const handlePrint = () => {
+        window.print();
+    };
+
     const handleCancelOrder = async (group) => {
         setPendingAuthAction({ type: 'DELETE', payload: group });
     };
@@ -759,6 +852,13 @@ const OrderHistory = () => {
             });
         }
 
+        if (supplierFilter !== 'All') {
+            items = items.filter(item => {
+                if (item.type !== 'ORDER') return true;
+                return item.data.items.some(t => String(t.supplier?.id) === String(supplierFilter));
+            });
+        }
+
         const baseOrders = items.filter(item => item.type === 'ORDER');
         const countsResult = {
             all: baseOrders.length,
@@ -780,7 +880,7 @@ const OrderHistory = () => {
             timelineItems: items,
             counts: countsResult
         };
-    }, [filter, transactions, dateWindow, searchQuery, isSearching, paymentFilter, paymentLogs]);
+    }, [filter, transactions, dateWindow, searchQuery, isSearching, paymentFilter, paymentLogs, supplierFilter]);
 
     // Unique payment methods in data — mirrors Analytics PaymentFilter options
     const paymentMethods = useMemo(() => {
@@ -825,6 +925,29 @@ const OrderHistory = () => {
                 /* Applied once via className — never re-applied by React inline styles */
                 .order-row-anim {
                     animation: fadeSlideIn 200ms ease both;
+                }
+                @media print {
+                    nav, aside, header, .no-print, button, input, select {
+                        display: none !important;
+                    }
+                    body {
+                        background: #fff !important;
+                        color: #000 !important;
+                    }
+                    div.flex-1.min-h-0.overflow-auto {
+                        overflow: visible !important;
+                        border: none !important;
+                        box-shadow: none !important;
+                    }
+                    table {
+                        width: 100% !important;
+                        min-width: 100% !important;
+                        font-size: 10px !important;
+                    }
+                    th, td {
+                        padding: 4px 6px !important;
+                        border-bottom: 1px solid #e5e7eb !important;
+                    }
                 }
             `}</style>
 
@@ -1002,6 +1125,33 @@ const OrderHistory = () => {
                 {/* PAYMENT FILTER */}
                 <PaymentFilter transactions={transactions} value={paymentFilter} onChange={setPaymentFilter} />
 
+                {/* SUPPLIER FILTER */}
+                {suppliers.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-white border border-stone-300 px-2.5 py-1 rounded-lg shadow-sm text-xs">
+                        <Truck size={12} className="text-zinc-500" />
+                        <span className="font-bold text-zinc-500 uppercase tracking-wider text-[10px]">Supplier:</span>
+                        <select
+                            value={supplierFilter}
+                            onChange={e => setSupplierFilter(e.target.value)}
+                            className="bg-transparent font-black text-xs text-zinc-800 focus:outline-none cursor-pointer max-w-[140px]"
+                        >
+                            <option value="All">All Suppliers</option>
+                            {suppliers.map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </select>
+                        {supplierFilter !== 'All' && (
+                            <button
+                                onClick={() => setSupplierFilter('All')}
+                                className="text-zinc-400 hover:text-red-500 transition-colors"
+                                title="Clear supplier filter"
+                            >
+                                <X size={11} />
+                            </button>
+                        )}
+                    </div>
+                )}
+
                 {/* BRANCH FILTER */}
                 {isAdmin && (
                     <div className="flex items-center gap-1.5 bg-white border border-stone-300 px-2.5 py-1 rounded-lg shadow-sm text-xs">
@@ -1105,6 +1255,45 @@ const OrderHistory = () => {
                 >
                     <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
                 </button>
+
+                {/* PRINT */}
+                <button
+                    onClick={handlePrint}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white text-zinc-500 shadow-sm text-xs font-bold no-print"
+                    title="Print order history"
+                    style={{ transition: 'background-color 150ms ease, color 150ms ease' }}
+                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f5f5f4'; e.currentTarget.style.color = '#09090b'; }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#ffffff'; e.currentTarget.style.color = '#71717a'; }}
+                >
+                    <Printer size={13} />
+                    <span>Print</span>
+                </button>
+
+                {/* EXPORT CSV */}
+                <button
+                    onClick={exportCSV}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white text-zinc-500 shadow-sm text-xs font-bold no-print"
+                    title="Export to CSV"
+                    style={{ transition: 'background-color 150ms ease, color 150ms ease' }}
+                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#f5f5f4'; e.currentTarget.style.color = '#09090b'; }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#ffffff'; e.currentTarget.style.color = '#71717a'; }}
+                >
+                    <Download size={13} />
+                    <span>CSV</span>
+                </button>
+
+                {/* EXPORT XLSX */}
+                <button
+                    onClick={exportXLSX}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-stone-300 bg-white text-emerald-700 shadow-sm text-xs font-bold no-print"
+                    title="Export to Excel (.xlsx)"
+                    style={{ transition: 'background-color 150ms ease, color 150ms ease' }}
+                    onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#ecfdf5'; }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                >
+                    <FileSpreadsheet size={13} className="text-emerald-600" />
+                    <span>Excel</span>
+                </button>
             </div>
 
             {/* ERROR BANNER */}
@@ -1126,12 +1315,13 @@ const OrderHistory = () => {
                             <th className="px-3 py-2.5">Order ID</th>
                             <th className="px-3 py-2.5">Customer</th>
                             <th className="px-3 py-2.5">Products</th>
+                            <th className="px-3 py-2.5">Supplier</th>
                             <th className="px-3 py-2.5">Payment</th>
                             <th className="px-3 py-2.5">Status</th>
                             <th className="px-3 py-2.5 text-right">Downpayment</th>
                             <th className="px-3 py-2.5 text-right">Total Balance</th>
                             <th className="px-3 py-2.5">Date</th>
-                            <th className="px-3 py-2.5 text-center">Action</th>
+                            <th className="px-3 py-2.5 text-center no-print">Action</th>
                         </tr>
                     </thead>
 
@@ -1139,7 +1329,7 @@ const OrderHistory = () => {
                         {loading ? (
                             Array.from({ length: 8 }).map((_, i) => (
                                 <tr key={i} className="animate-pulse">
-                                    {Array.from({ length: 10 }).map((_, j) => (
+                                    {Array.from({ length: 11 }).map((_, j) => (
                                         <td key={j} className="px-3 py-2">
                                             <div className="h-3.5 bg-stone-200 rounded w-3/4" />
                                         </td>
@@ -1149,7 +1339,7 @@ const OrderHistory = () => {
                         ) : timelineItems.length === 0 ? (
                             <tr>
                                 <td
-                                    colSpan="10"
+                                    colSpan="11"
                                     className="px-5 py-16 text-center text-zinc-400"
                                     style={{ animation: 'fadeSlideIn 250ms ease' }}
                                 >
@@ -1219,7 +1409,7 @@ const OrderHistory = () => {
                                                 {group.customerName}
                                             </td>
                                             {/* description */}
-                                            <td className="px-3 py-2" colSpan={2}>
+                                            <td className="px-3 py-2" colSpan={3}>
                                                 <span
                                                     className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 rounded"
                                                     style={{ backgroundColor: '#fde68a', color: '#78350f' }}
@@ -1430,6 +1620,45 @@ const OrderHistory = () => {
                                                     </div>
                                                 )}
                                             </td>
+                                            {/* Supplier column */}
+                                            <td className="px-3 py-2 text-zinc-700">
+                                                {group.items.length === 1 ? (
+                                                    isAdmin ? (
+                                                        <select
+                                                            value={group.items[0]?.supplier?.id || ''}
+                                                            onClick={e => e.stopPropagation()}
+                                                            onChange={e => handleUpdateSupplier(group.items[0].id, e.target.value)}
+                                                            className="text-xs font-semibold text-zinc-800 bg-stone-50 border border-stone-200 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-zinc-400 max-w-[130px] truncate cursor-pointer hover:border-stone-300"
+                                                        >
+                                                            <option value="">— No Supplier —</option>
+                                                            {suppliers.map(s => (
+                                                                <option key={s.id} value={s.id}>{s.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    ) : (
+                                                        <span className="text-xs font-semibold text-zinc-700">
+                                                            {group.items[0]?.supplier?.name || '—'}
+                                                        </span>
+                                                    )
+                                                ) : (() => {
+                                                    const distinctSuppliers = Array.from(new Set(group.items.map(i => i.supplier?.name).filter(Boolean)));
+                                                    if (distinctSuppliers.length === 0) {
+                                                        return <span className="text-zinc-400 text-xs">—</span>;
+                                                    }
+                                                    if (distinctSuppliers.length === 1) {
+                                                        return <span className="text-xs font-semibold text-zinc-700">{distinctSuppliers[0]}</span>;
+                                                    }
+                                                    return (
+                                                        <span
+                                                            onClick={() => toggleExpand(group.orderId)}
+                                                            className="inline-flex items-center gap-1 text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded cursor-pointer hover:bg-blue-100"
+                                                            title="Multiple suppliers — click to view & edit per item"
+                                                        >
+                                                            <Truck size={10} /> {distinctSuppliers.length} Suppliers
+                                                        </span>
+                                                    );
+                                                })()}
+                                            </td>
                                             <td className="px-3 py-2">
                                                 <div className="flex flex-col gap-0.5">
                                                     <div className="flex items-center gap-1.5">
@@ -1585,7 +1814,7 @@ const OrderHistory = () => {
                                         {/* Expanded sub-rows and Payment Logs */}
                                         {isExpanded && (
                                             <tr>
-                                                <td colSpan="10" className="p-0">
+                                                <td colSpan="11" className="p-0">
                                                     <div
                                                         className="bg-stone-50 border-t border-stone-200"
                                                         style={{
@@ -1605,6 +1834,16 @@ const OrderHistory = () => {
                                                                 </div>
                                                             )}
                                                             <table className="w-full text-xs">
+                                                                <thead>
+                                                                    <tr className="text-[10px] uppercase tracking-wider text-zinc-400 font-bold border-b border-stone-200 pb-1">
+                                                                        <th className="py-1 text-left w-24">SKU</th>
+                                                                        <th className="py-1 text-left">Product</th>
+                                                                        <th className="py-1 text-left w-36">Supplier</th>
+                                                                        <th className="py-1 text-center w-20">Status</th>
+                                                                        <th className="py-1 text-right w-24">Amount</th>
+                                                                        <th className="py-1 text-right w-20 pl-4 no-print">Action</th>
+                                                                    </tr>
+                                                                </thead>
                                                                 <tbody>
                                                                     {group.items.map((item, idx) => {
                                                                         const isItemUnfinished = item.status === 'PARTIAL' || item.status === 'UNPAID';
@@ -1626,6 +1865,23 @@ const OrderHistory = () => {
                                                                                         </span>
                                                                                     </div>
                                                                                 </td>
+                                                                                <td className="py-2 w-36">
+                                                                                    {isAdmin ? (
+                                                                                        <select
+                                                                                            value={item.supplier?.id || ''}
+                                                                                            onClick={e => e.stopPropagation()}
+                                                                                            onChange={e => handleUpdateSupplier(item.id, e.target.value)}
+                                                                                            className="text-[11px] font-semibold text-zinc-700 bg-white border border-stone-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-zinc-400 max-w-[130px] truncate cursor-pointer hover:border-stone-300"
+                                                                                        >
+                                                                                            <option value="">— None —</option>
+                                                                                            {suppliers.map(s => (
+                                                                                                <option key={s.id} value={s.id}>{s.name}</option>
+                                                                                            ))}
+                                                                                        </select>
+                                                                                    ) : (
+                                                                                        <span className="text-[11px] font-medium text-zinc-600">{item.supplier?.name || '—'}</span>
+                                                                                    )}
+                                                                                </td>
                                                                                 <td className="py-2 font-mono text-xs text-center w-20">
                                                                                     {item.status === 'FULL' ? (
                                                                                         <span className="text-green-600 font-bold bg-green-50 px-1.5 py-0.5 rounded">PAID</span>
@@ -1634,7 +1890,7 @@ const OrderHistory = () => {
                                                                                     )}
                                                                                 </td>
                                                                                 <td className="py-2 text-right font-mono text-zinc-600 w-24">{formatCurrency(item.finalPrice)}</td>
-                                                                                <td className="py-2 text-right w-20 pl-4">
+                                                                                <td className="py-2 text-right w-20 pl-4 no-print">
                                                                                     {isItemUnfinished && (
                                                                                         <button
                                                                                             onClick={() => handleCompleteItem(item)}
@@ -1730,6 +1986,7 @@ const OrderHistory = () => {
                                                             )}
                                                         </div>
                                                     </td>
+                                                    <td className="px-3 py-2 text-zinc-400 font-mono text-xs">—</td>
                                                     <td className="px-3 py-2">
                                                         <span className="inline-flex items-center gap-1 font-bold text-xs text-zinc-700 bg-stone-100 px-2 py-0.5 rounded border border-stone-200">
                                                             <CreditCard size={12} className="text-zinc-500" /> {log.paymentMethod || 'Unknown'}

@@ -1126,14 +1126,15 @@ const OrderHistory = () => {
                 }
                 @media print {
                     @page {
-                        size: landscape;
-                        margin: 8mm 8mm;
+                        size: A4;
+                        margin: 8mm 6mm;
                     }
                     body, html {
                         background: #fff !important;
                         color: #000 !important;
                         margin: 0 !important;
                         padding: 0 !important;
+                        width: 100% !important;
                         -webkit-print-color-adjust: exact !important;
                         print-color-adjust: exact !important;
                     }
@@ -2334,16 +2335,16 @@ const OrderHistory = () => {
                 <table className="print-report-table">
                     <thead>
                         <tr>
-                            <th style={{ width: '28px', textAlign: 'center' }}>#</th>
-                            <th style={{ width: '65px' }}>Order ID</th>
-                            <th style={{ width: '105px' }}>Date & Time</th>
-                            <th style={{ width: '115px' }}>Customer</th>
-                            <th style={{ width: '95px' }}>Branch</th>
+                            <th style={{ width: '24px', textAlign: 'center' }}>#</th>
+                            <th style={{ width: '58px' }}>Order ID</th>
+                            <th style={{ width: '90px' }}>Date & Time</th>
+                            <th style={{ width: '100px' }}>Customer</th>
+                            <th style={{ width: '80px' }}>Branch</th>
                             <th>Items / Products</th>
-                            <th style={{ width: '110px' }}>Supplier</th>
-                            <th style={{ width: '75px' }}>Payment</th>
-                            <th style={{ width: '75px', textAlign: 'center' }}>Status</th>
-                            <th style={{ width: '85px', textAlign: 'right' }}>Amount</th>
+                            <th style={{ width: '90px' }}>Supplier</th>
+                            <th style={{ width: '65px' }}>Payment</th>
+                            <th style={{ width: '65px', textAlign: 'center' }}>Status</th>
+                            <th style={{ width: '75px', textAlign: 'right' }}>Amount</th>
                         </tr>
                     </thead>
                     <tbody>

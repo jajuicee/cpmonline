@@ -160,6 +160,7 @@ const Dashboard = () => {
                 title: 'Branch Network & Wholesale',
                 items: [
                     { name: 'Branch Stores',        path: '/branches',                icon: Store },
+                    { name: 'Stock Requests',       path: '/stock-requests',          icon: Send },
                     { name: 'Stock Allocations',    path: '/branches?tab=allocations',icon: Boxes },
                     { name: 'Batch Profit & P&L',   path: '/analytics?tab=batch-profit', icon: DollarSign },
                     { name: 'Branch Sales',         path: '/branch-sales',            icon: BarChart2 },

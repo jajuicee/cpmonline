@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import Dashboard from './components/Dashboard';
 import TabletLayout from './components/TabletLayout';
 import Login from './components/Login';
@@ -11,8 +12,10 @@ const ProtectedRoute = ({ children }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-[#0d0f12]">
+      <div className="min-h-screen w-full flex flex-col items-center justify-center bg-[#0d0f12] gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+        <p style={{ color: '#71717a', fontSize: '13px', fontWeight: 600, margin: 0 }}>Connecting to server…</p>
+        <p style={{ color: '#3f3f46', fontSize: '11px', margin: 0 }}>This may take up to 60 s on first load.</p>
       </div>
     );
   }
@@ -63,11 +66,13 @@ function AppContent() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
 

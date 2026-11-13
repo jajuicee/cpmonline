@@ -20,12 +20,12 @@ public interface StockRequestRepository extends JpaRepository<StockRequest, Long
 
     long countByStatus(String status);
 
-    @Query("SELECT r FROM StockRequest r LEFT JOIN FETCH r.items i LEFT JOIN FETCH i.variant v LEFT JOIN FETCH v.product WHERE r.id = :id")
+    @Query("SELECT DISTINCT r FROM StockRequest r LEFT JOIN FETCH r.branch b LEFT JOIN FETCH r.items i LEFT JOIN FETCH i.variant v LEFT JOIN FETCH v.product WHERE r.id = :id")
     Optional<StockRequest> findByIdWithDetails(@Param("id") Long id);
 
-    @Query("SELECT r FROM StockRequest r LEFT JOIN FETCH r.items i LEFT JOIN FETCH i.variant v LEFT JOIN FETCH v.product WHERE r.branch.id = :branchId ORDER BY r.createdAt DESC")
+    @Query("SELECT DISTINCT r FROM StockRequest r LEFT JOIN FETCH r.branch b LEFT JOIN FETCH r.items i LEFT JOIN FETCH i.variant v LEFT JOIN FETCH v.product WHERE r.branch.id = :branchId ORDER BY r.createdAt DESC")
     List<StockRequest> findByBranchIdWithDetails(@Param("branchId") Long branchId);
 
-    @Query("SELECT r FROM StockRequest r LEFT JOIN FETCH r.items i LEFT JOIN FETCH i.variant v LEFT JOIN FETCH v.product ORDER BY r.createdAt DESC")
+    @Query("SELECT DISTINCT r FROM StockRequest r LEFT JOIN FETCH r.branch b LEFT JOIN FETCH r.items i LEFT JOIN FETCH i.variant v LEFT JOIN FETCH v.product ORDER BY r.createdAt DESC")
     List<StockRequest> findAllWithDetails();
 }

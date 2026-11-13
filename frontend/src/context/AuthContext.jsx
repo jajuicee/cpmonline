@@ -84,7 +84,8 @@ export const AuthProvider = ({ children }) => {
                 return;
             }
             try {
-                const res = await axios.get('/api/auth/me');
+                // 20-second timeout so cold-start Render backend doesn't hang forever
+                const res = await axios.get('/api/auth/me', { timeout: 20000 });
                 if (res.data) {
                     const updatedUser = {
                         username: res.data.username,
@@ -96,8 +97,16 @@ export const AuthProvider = ({ children }) => {
                     localStorage.setItem('cpm_user', JSON.stringify(updatedUser));
                 }
             } catch (err) {
-                console.warn('Session expired or invalid token:', err);
-                logout();
+                // Network error or timeout: backend is cold-starting. Keep the cached user
+                // so the app stays usable, rather than force-logging them out.
+                if (!err.response) {
+                    console.warn('Backend unreachable during auth check (cold start?). Keeping cached session.', err.message);
+                    // Don't call logout() — the cached user+token will still work once the backend warms up.
+                } else {
+                    // Got an HTTP error (401 = invalid token, 403 = forbidden, etc.) → real logout
+                    console.warn('Session expired or invalid token:', err);
+                    logout();
+                }
             } finally {
                 setLoading(false);
             }

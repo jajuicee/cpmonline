@@ -20,6 +20,7 @@ export function useStockSync(onStockUpdate) {
     const wsRef = useRef(null);
     const reconnectTimer = useRef(null);
     const isMounted = useRef(true);
+    const connectRef = useRef(null);
 
     const connect = useCallback(() => {
         if (!isMounted.current) return;
@@ -42,7 +43,7 @@ export function useStockSync(onStockUpdate) {
                 if (msg.type === 'STOCK_UPDATE' && onStockUpdate) {
                     onStockUpdate();
                 }
-            } catch (e) {
+            } catch {
                 // Ignore malformed messages
             }
         };
@@ -50,8 +51,12 @@ export function useStockSync(onStockUpdate) {
         ws.onclose = () => {
             if (!isMounted.current) return;
             setWsConnected(false);
-            // Schedule reconnect
-            reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+            // Schedule reconnect safely via ref to avoid TDZ / self-reference issues
+            reconnectTimer.current = setTimeout(() => {
+                if (isMounted.current && connectRef.current) {
+                    connectRef.current();
+                }
+            }, RECONNECT_DELAY_MS);
         };
 
         ws.onerror = () => {
@@ -59,6 +64,8 @@ export function useStockSync(onStockUpdate) {
             ws.close();
         };
     }, [onStockUpdate]);
+
+    connectRef.current = connect;
 
     useEffect(() => {
         isMounted.current = true;

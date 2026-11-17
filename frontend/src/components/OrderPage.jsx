@@ -1363,9 +1363,19 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                             >
                                                 <Minus size={11} />
                                             </button>
-                                            <span className="w-8 text-center text-xs font-black text-stone-900">
-                                                {item.qty}
-                                            </span>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max={item.variant.stockQuantity ?? 1}
+                                                value={item.qty}
+                                                onChange={(e) => {
+                                                    const val = parseInt(e.target.value, 10);
+                                                    const max = item.variant.stockQuantity ?? 1;
+                                                    updateCartItem(item.variant.id, 'qty', isNaN(val) ? 1 : Math.max(1, Math.min(val, max)));
+                                                }}
+                                                onFocus={(e) => e.target.select()}
+                                                className="w-10 h-6 text-center text-xs font-black text-stone-900 bg-transparent focus:bg-stone-100 focus:outline-none rounded px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            />
                                             <button
                                                 type="button"
                                                 onClick={() => handleQtyStep(item.variant.id, 1)}

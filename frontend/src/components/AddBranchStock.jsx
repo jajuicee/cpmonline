@@ -371,9 +371,17 @@ const AddBranchStock = ({ products = [], refetchProducts }) => {
                                                     >
                                                         <Minus size={13} />
                                                     </button>
-                                                    <span className="w-8 text-center text-xs font-black text-emerald-800">
-                                                        {inBatchQty}
-                                                    </span>
+                                                    <input
+                                                        type="number"
+                                                        min="1"
+                                                        value={inBatchQty}
+                                                        onChange={(e) => {
+                                                            const val = parseInt(e.target.value, 10);
+                                                            handleUpdateQuantity(v.variantId, isNaN(val) || val < 1 ? 1 : val);
+                                                        }}
+                                                        onFocus={(e) => e.target.select()}
+                                                        className="w-10 h-7 text-center text-xs font-black text-emerald-800 bg-transparent focus:bg-emerald-50 focus:outline-none rounded px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                                    />
                                                     <button
                                                         type="button"
                                                         onClick={() => handleAddToBatch(v)}
@@ -504,8 +512,12 @@ const AddBranchStock = ({ products = [], refetchProducts }) => {
                                                     type="number"
                                                     min="1"
                                                     value={item.quantity}
-                                                    onChange={(e) => handleUpdateQuantity(item.variantId, parseInt(e.target.value) || 1)}
-                                                    className="w-14 h-8 text-center text-sm font-black bg-stone-50 border border-stone-200 rounded-lg focus:outline-none focus:border-stone-900"
+                                                    onChange={(e) => {
+                                                        const val = parseInt(e.target.value, 10);
+                                                        handleUpdateQuantity(item.variantId, isNaN(val) || val < 1 ? 1 : val);
+                                                    }}
+                                                    onFocus={(e) => e.target.select()}
+                                                    className="w-14 h-8 text-center text-sm font-black bg-stone-50 border border-stone-200 rounded-lg focus:outline-none focus:border-stone-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                                 />
                                                 <button
                                                     type="button"

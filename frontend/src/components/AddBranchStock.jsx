@@ -372,10 +372,11 @@ const AddBranchStock = ({ products = [], refetchProducts }) => {
                                                         <Minus size={13} />
                                                     </button>
                                                     <input
+                                                        key={inBatchQty}
                                                         type="number"
-                                                        min="1"
-                                                        value={inBatchQty}
-                                                        onChange={(e) => {
+                                                        min="0"
+                                                        defaultValue={inBatchQty}
+                                                        onBlur={(e) => {
                                                             const val = parseInt(e.target.value, 10);
                                                             handleUpdateQuantity(v.variantId, isNaN(val) || val < 1 ? 1 : val);
                                                         }}
@@ -509,10 +510,11 @@ const AddBranchStock = ({ products = [], refetchProducts }) => {
                                                     <Minus size={14} />
                                                 </button>
                                                 <input
+                                                    key={item.quantity}
                                                     type="number"
-                                                    min="1"
-                                                    value={item.quantity}
-                                                    onChange={(e) => {
+                                                    min="0"
+                                                    defaultValue={item.quantity}
+                                                    onBlur={(e) => {
                                                         const val = parseInt(e.target.value, 10);
                                                         handleUpdateQuantity(item.variantId, isNaN(val) || val < 1 ? 1 : val);
                                                     }}

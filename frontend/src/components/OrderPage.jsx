@@ -82,10 +82,15 @@ const printThermalReceipt = (data) => {
         items = [],
         totalUnits = 0,
         cartTotal = 0,
+        creditCardFee = 0,
+        grandTotal = 0,
         amountPaid = 0,
         amountUnpaid = 0,
-        orderMode = 'REGULAR'
+        orderMode = 'REGULAR',
+        orderNote = '',
+        notes = ''
     } = data;
+    const noteText = orderNote || notes || '';
 
     const receiptDate = date instanceof Date ? date : new Date(date);
     const dateStr = receiptDate.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
@@ -228,13 +233,19 @@ const printThermalReceipt = (data) => {
             <span style="color: #555;">Subtotal:</span>
             <span>${fmtMoney(cartTotal)}</span>
         </div>
+        ${creditCardFee > 0 ? `
+        <div class="flex-between" style="color: #b45309;">
+            <span>Card Fee (10%):</span>
+            <span>+${fmtMoney(creditCardFee)}</span>
+        </div>
+        ` : ''}
     </div>
 
     <div class="divider-double"></div>
 
     <div class="flex-between" style="font-size: 13px; font-weight: 900;">
         <span>TOTAL:</span>
-        <span style="font-size: 14px;">${fmtMoney(cartTotal)}</span>
+        <span style="font-size: 14px;">${fmtMoney(grandTotal > 0 ? grandTotal : cartTotal)}</span>
     </div>
 
     ${hasUnpaid ? `
@@ -251,6 +262,14 @@ const printThermalReceipt = (data) => {
     ` : ''}
 
     <div class="divider"></div>
+
+    ${noteText ? `
+    <div style="font-size: 9px; color: #444; margin-bottom: 5px; line-height: 1.4;">
+        <div style="font-weight: bold; color: #222; margin-bottom: 2px;">Note:</div>
+        <div>${noteText}</div>
+    </div>
+    <div class="divider"></div>
+    ` : ''}
 
     <div class="text-center" style="font-size: 9px; color: #555; margin-top: 6px; line-height: 1.3;">
         <strong style="color: #222;">Thank you for your purchase!</strong><br>
@@ -353,6 +372,9 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
             paymentMethod: formData.paymentMethod,
             orderMode,
             orderNote: formData.orderNote,
+            notes: formData.orderNote,
+            creditCardFee,
+            grandTotal,
             items: cart.map(item => ({
                 displayName: item.variant?.displayName || item.displayName,
                 sku: item.variant?.sku || item.sku,
@@ -681,6 +703,11 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
     }, 0), [cart]);
     const amountUnpaid = cartTotal - amountPaid;
 
+    // Credit card 10% banking fee
+    const isCreditCard = formData.paymentMethod === 'Credit Card';
+    const creditCardFee = isCreditCard ? Math.round(cartTotal * 0.10 * 100) / 100 : 0;
+    const grandTotal = cartTotal + creditCardFee;
+
     const resetForm = () => {
         setCart([]);
         setFormData(EMPTY_FORM);
@@ -787,6 +814,8 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                     orderMode,
                     orderNote: formData.orderNote,
                     notes: formData.orderNote,
+                    creditCardFee,
+                    grandTotal,
                     items: cart.map(item => ({
                         id: item.variant.id,
                         displayName: item.variant.displayName,
@@ -1803,8 +1832,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         Grand Total
                                     </span>
                                     <span className="text-2xl font-black text-stone-900 font-mono leading-none">
-                                        {fmt(cartTotal)}
+                                        {fmt(grandTotal)}
                                     </span>
+                                    {isCreditCard && creditCardFee > 0 && (
+                                        <span className="text-[10px] font-bold text-amber-700 block mt-0.5">
+                                            incl. {fmt(creditCardFee)} card fee (10%)
+                                        </span>
+                                    )}
                                 </div>
                                 {amountUnpaid > 0 && (
                                     <span className="text-[10px] font-black px-2 py-1 rounded bg-amber-100 text-amber-800">
@@ -1823,7 +1857,7 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                 }
                                 className="w-full py-3.5 px-4 rounded-xl text-xs font-black uppercase tracking-wider bg-stone-900 hover:bg-stone-800 disabled:bg-stone-300 disabled:cursor-not-allowed text-white shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                             >
-                                <span>Review & Checkout ({fmt(cartTotal)})</span>
+                                <span>Review &amp; Checkout ({fmt(grandTotal)})</span>
                                 <ArrowRight size={15} />
                             </button>
                         </div>
@@ -1952,8 +1986,13 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         Total Payable
                                     </span>
                                     <span className="text-2xl font-black text-emerald-700 font-mono">
-                                        {fmt(cartTotal)}
+                                        {fmt(grandTotal)}
                                     </span>
+                                    {isCreditCard && creditCardFee > 0 && (
+                                        <span className="text-[10px] font-bold text-amber-700 block mt-0.5">
+                                            Subtotal {fmt(cartTotal)} + Card Fee {fmt(creditCardFee)} (10%)
+                                        </span>
+                                    )}
                                 </div>
                                 {amountUnpaid > 0 && (
                                     <div className="text-right">
@@ -2291,9 +2330,19 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         <span>Total Units:</span>
                                         <span>{completedReceipt.totalUnits}</span>
                                     </div>
+                                    <div className="flex justify-between text-stone-500">
+                                        <span>Subtotal:</span>
+                                        <span>{fmt(completedReceipt.cartTotal)}</span>
+                                    </div>
+                                    {completedReceipt.creditCardFee > 0 && (
+                                        <div className="flex justify-between text-amber-700 font-bold">
+                                            <span>Card Fee (10%):</span>
+                                            <span>+{fmt(completedReceipt.creditCardFee)}</span>
+                                        </div>
+                                    )}
                                     <div className="flex justify-between text-sm font-black text-stone-900 pt-1 border-t border-stone-200">
                                         <span>TOTAL:</span>
-                                        <span className="text-emerald-700 font-black">{fmt(completedReceipt.cartTotal)}</span>
+                                        <span className="text-emerald-700 font-black">{fmt(completedReceipt.grandTotal > 0 ? completedReceipt.grandTotal : completedReceipt.cartTotal)}</span>
                                     </div>
                                     <div className="flex justify-between font-bold text-stone-700">
                                         <span>Amount Paid:</span>
@@ -2306,6 +2355,16 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         </div>
                                     )}
                                 </div>
+
+                                {/* Notes */}
+                                {(completedReceipt.orderNote || completedReceipt.notes) && (
+                                    <div className="pt-3 border-t border-dashed border-stone-300">
+                                        <div className="text-[10px] font-black uppercase tracking-wider text-stone-400 mb-1">Note</div>
+                                        <div className="text-xs text-stone-700 leading-relaxed whitespace-pre-wrap">
+                                            {completedReceipt.orderNote || completedReceipt.notes}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Footer Thank You */}
                                 <div className="text-center pt-4 border-t border-dashed border-stone-300 text-[10px] text-stone-400 font-sans leading-relaxed">
@@ -2428,6 +2487,12 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         <span className="text-zinc-500">Subtotal</span>
                         <span>₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                     </div>
+                    {isCreditCard && creditCardFee > 0 && (
+                        <div className="flex justify-between font-bold text-amber-700">
+                            <span>Card Fee (10%)</span>
+                            <span>+₱{creditCardFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                    )}
                 </div>
 
                 <div className="ticket-double border-t border-double border-zinc-700 my-2" />
@@ -2435,7 +2500,10 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 <div className="flex justify-between items-baseline">
                     <span className="ticket-total-label text-[12px] font-black uppercase">Total</span>
                     <span className="ticket-total text-[15px] font-black">
-                        ₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        ₱{(isModalReceipt
+                            ? (completedReceipt.grandTotal || completedReceipt.cartTotal)
+                            : grandTotal
+                        ).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                     </span>
                 </div>
 
@@ -2453,6 +2521,17 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                 )}
 
                 <div className="ticket-divider border-t border-dashed border-zinc-400 my-3" />
+
+                {/* Notes */}
+                {(isModalReceipt ? (completedReceipt.orderNote || completedReceipt.notes) : formData.orderNote) && (
+                    <>
+                        <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider mb-0.5">Note</div>
+                        <div className="text-[9px] text-zinc-700 leading-snug whitespace-pre-wrap mb-2">
+                            {isModalReceipt ? (completedReceipt.orderNote || completedReceipt.notes) : formData.orderNote}
+                        </div>
+                        <div className="ticket-divider border-t border-dashed border-zinc-400 my-2" />
+                    </>
+                )}
 
                 <div className="text-center text-[10px] text-zinc-600 leading-snug">
                     <div className="font-bold text-zinc-800">Thank you for your purchase!</div>

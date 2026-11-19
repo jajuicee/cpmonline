@@ -233,12 +233,6 @@ const printThermalReceipt = (data) => {
             <span style="color: #555;">Subtotal:</span>
             <span>${fmtMoney(cartTotal)}</span>
         </div>
-        ${creditCardFee > 0 ? `
-        <div class="flex-between" style="color: #b45309;">
-            <span>Card Fee (10%):</span>
-            <span>+${fmtMoney(creditCardFee)}</span>
-        </div>
-        ` : ''}
     </div>
 
     <div class="divider-double"></div>
@@ -2334,12 +2328,6 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                                         <span>Subtotal:</span>
                                         <span>{fmt(completedReceipt.cartTotal)}</span>
                                     </div>
-                                    {completedReceipt.creditCardFee > 0 && (
-                                        <div className="flex justify-between text-amber-700 font-bold">
-                                            <span>Card Fee (10%):</span>
-                                            <span>+{fmt(completedReceipt.creditCardFee)}</span>
-                                        </div>
-                                    )}
                                     <div className="flex justify-between text-sm font-black text-stone-900 pt-1 border-t border-stone-200">
                                         <span>TOTAL:</span>
                                         <span className="text-emerald-700 font-black">{fmt(completedReceipt.grandTotal > 0 ? completedReceipt.grandTotal : completedReceipt.cartTotal)}</span>
@@ -2487,12 +2475,6 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
                         <span className="text-zinc-500">Subtotal</span>
                         <span>₱{activeTotalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
                     </div>
-                    {isCreditCard && creditCardFee > 0 && (
-                        <div className="flex justify-between font-bold text-amber-700">
-                            <span>Card Fee (10%)</span>
-                            <span>+₱{creditCardFee.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</span>
-                        </div>
-                    )}
                 </div>
 
                 <div className="ticket-double border-t border-double border-zinc-700 my-2" />

@@ -740,7 +740,9 @@ const OrderPage = ({ products = [], loading = false, refetchProducts }) => {
 
         cart.forEach(item => {
             const qty = parseInt(item.qty) || 1;
-            const pricePerItem = parseFloat(item.finalPrice) || 0;
+            const basePrice = parseFloat(item.finalPrice) || 0;
+            // Bundle 10% card fee into the recorded price for Credit Card transactions
+            const pricePerItem = isCreditCard ? Math.round(basePrice * 1.10 * 100) / 100 : basePrice;
 
             for(let i = 0; i < qty; i++) {
                 let amountToPayForItem = 0;
